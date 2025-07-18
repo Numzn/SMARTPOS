@@ -5,9 +5,13 @@ const dotenv = require('dotenv');
 // Import routes
 const productRoutes = require('./routes/products');
 const categoryRoutes = require('./routes/categories');
+const inventoryRoutes = require('./routes/inventory'); // Now uses routes/inventory/index.js
 const saleRoutes = require('./routes/sales');
 const userRoutes = require('./routes/users');
 const zraRoutes = require('./routes/zra');
+const branchRoutes = require('./routes/branches');
+const itemRoutes = require('./routes/items'); // Add items route for VSDC Section 6.1
+const stockAdjustmentRoutes = require('./routes/stock-adjustments'); // ZRA stock management compliance
 
 dotenv.config();
 
@@ -20,9 +24,13 @@ app.use(express.json());
 // Routes
 app.use('/api/products', productRoutes);
 app.use('/api/categories', categoryRoutes);
+app.use('/api/inventory', inventoryRoutes);
 app.use('/api/sales', saleRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/zra', zraRoutes);
+app.use('/api/branches', branchRoutes);
+app.use('/api/items', itemRoutes); // VSDC Item Management endpoints (Section 6.1)
+app.use('/api/stock-adjustments', stockAdjustmentRoutes); // ZRA stock management compliance
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

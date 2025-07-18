@@ -5,11 +5,23 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "migrate": "npx prisma migrate dev",
-    "studio": "npx prisma studio",
-    "generate": "npx prisma generate",
-    "seed": "node prisma/seed.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node test-connection.js",
+    "test-sale": "node create-test-sale.js",
+    "mock-vsdc": "node mock-vsdc-server.js",
+    "check-db": "node check-database.js",
+    "setup-db": "npx prisma migrate dev && npx prisma db seed",
+    "compliance": "node docs/compliance-checker.js",
+    "compliance-roadmap": "node docs/compliance-checker.js --roadmap",
+    "build:init": "node -e \"require('./docs/api-reference-manager').createReferenceIndex()\"",
+    "build:validate": "node docs/build-validator.js",
+    "build:progress": "node -e \"require('./docs/api-reference-manager').showProgress()\"",
+    "build:tasks": "node -e \"require('./docs/api-reference-manager').getNextTasks()\"",
+    "build:history": "node -e \"require('./docs/api-reference-manager').showBuildHistory()\"",
+    "status": "npm run build:progress",
+    "validate": "npm run build:validate",
+    "tasks": "npm run build:tasks",
+    "vsdc:update": "node -e \"const args=process.argv.slice(2); require('./docs/api-reference-manager').updateImplementationStatus(args[0], args[1])\"",
+    "check": "npm run validate && npm run status && npm run tasks"
   },
   "keywords": [],
   "author": "",
@@ -19,14 +31,19 @@
     "@prisma/client": "^6.11.1",
     "@supabase/supabase-js": "^2.50.3",
     "axios": "^1.10.0",
+    "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
     "dotenv": "^17.1.0",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
+    "pg": "^8.16.3",
     "prisma": "^6.11.1"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.js"
   }
 }

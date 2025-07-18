@@ -1,9 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
+const { authenticateToken, requirePermission, requireAnyPermission } = require('../middleware/auth');
 
-// Get all sales
-router.get('/', async (req, res) => {
+// Get all sales (requires sales:read permission)
+router.get('/', authenticateToken, requirePermission('sales:read'), async (req, res) => {
   try {
     const sales = await prisma.sale.findMany({
       include: {
@@ -38,7 +39,8 @@ router.get('/', async (req, res) => {
 });
 
 // Get sale by ID
-router.get('/:id', async (req, res) => {
+// Get sale by ID (requires sales:read permission)
+router.get('/:id', authenticateToken, requirePermission('sales:read'), async (req, res) => {
   try {
     const sale = await prisma.sale.findUnique({
       where: { id: req.params.id },
@@ -70,7 +72,8 @@ router.get('/:id', async (req, res) => {
 });
 
 // Create new sale
-router.post('/', async (req, res) => {
+// Create new sale (requires sales:write permission)
+router.post('/', authenticateToken, requirePermission('sales:write'), async (req, res) => {
   try {
     const { userId, items, paymentMethod, tax, discount } = req.body;
     // items format: [{ productId, quantity, price }]
@@ -96,19 +99,43 @@ router.post('/', async (req, res) => {
         }
       });
       
-      // Create sale items
+      // Create sale items with VSDC compliance
       const saleItems = await Promise.all(
-        items.map(item => 
-          tx.saleItem.create({
+        items.map(async item => {
+          // Get product details for tax calculations
+          const product = await tx.product.findUnique({
+            where: { id: item.productId }
+          });
+          
+          const quantity = parseInt(item.quantity);
+          const unitPrice = parseFloat(item.price);
+          const itemTotal = quantity * unitPrice;
+          
+          // Calculate VSDC required fields
+          const taxRate = 0.16; // 16% VAT - should be configurable per product
+          const splyAmt = itemTotal; // Supply amount before tax
+          const taxblAmt = splyAmt; // Taxable amount (assuming all taxable)
+          const taxAmt = taxblAmt * taxRate; // Tax amount
+          const totAmt = splyAmt + taxAmt; // Total including tax
+          
+          return tx.saleItem.create({
             data: {
               saleId: newSale.id,
               productId: item.productId,
-              quantity: parseInt(item.quantity),
-              price: parseFloat(item.price),
-              total: parseFloat(item.quantity * item.price)
+              quantity: quantity,
+              price: unitPrice,
+              total: itemTotal,
+              // VSDC Required fields
+              pkg: 1, // Package quantity (default 1)
+              qty: quantity, // ZRA quantity field
+              prc: unitPrice, // ZRA unit price
+              splyAmt: splyAmt, // Supply amount
+              taxblAmt: taxblAmt, // Taxable amount
+              taxAmt: taxAmt, // Tax amount
+              totAmt: totAmt // Total amount per item
             }
-          })
-        )
+          });
+        })
       );
       
       // Update product stock
@@ -155,7 +182,8 @@ router.post('/', async (req, res) => {
 });
 
 // Get sales summary/analytics
-router.get('/analytics/summary', async (req, res) => {
+// Get analytics summary (requires reports:read permission)
+router.get('/analytics/summary', authenticateToken, requirePermission('reports:read'), async (req, res) => {
   try {
     const today = new Date();
     const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());

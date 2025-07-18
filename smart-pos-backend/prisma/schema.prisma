@@ -9,22 +9,25 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  password  String
-  role      Role     @default(CASHIER)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String    @id @default(cuid())
+  email       String    @unique
+  name        String?
+  password    String
+  role        Role      @default(CASHIER)
+  isActive    Boolean   @default(true)
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
   
   // Relations
-  sales     Sale[]
+  sales            Sale[]
+  stockAdjustments StockAdjustment[]
+  stockMovements   StockMovement[]
   
   @@map("users")
 }
@@ -43,33 +46,59 @@ model Category {
 }
 
 model Product {
-  id          String   @id @default(cuid())
-  name        String
-  description String?
-  price       Decimal  @db.Decimal(10, 2)
-  cost        Decimal? @db.Decimal(10, 2)
-  sku         String?  @unique
-  barcode     String?  @unique
-  stock       Int      @default(0)
-  minStock    Int      @default(0)
-  isActive    Boolean  @default(true)
-  categoryId  String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                    String   @id @default(cuid())
+  name                  String
+  description           String?
+  price                 Float
+  cost                  Float?
+  sku                   String?  @unique
+  barcode               String?  @unique
+  isActive              Boolean  @default(true)
+  categoryId            String
+  
+  // Business Information
+  brand                 String?
+  unit                  String?  @default("EA") // EA, KG, L, etc.
+  minPrice              Float?   // Minimum selling price
+  maxDiscount           Float?   @default(0) // Maximum discount %
+  
+  // ZRA/VSDC specific fields for 100% compliance
+  zraItemClassification String?  // ZRA item classification code  
+  zraClassificationCode String?  // Alternative field name for classification
+  zraPackageUnit        String?  // Package unit for ZRA (e.g., "EA", "KG")
+  zraQuantityUnit       String?  // Quantity unit for ZRA  
+  taxType               String?  // Tax type (A=Standard, B=Zero, C=Exempt, etc.)
+  taxRate               Float    @default(16.0) // VAT rate
+  vatCategoryCode       String?  @default("STANDARD") // STANDARD, EXEMPT, ZERO_RATED
+  exciseTaxCode         String?  // Excise tax code if applicable
+  
+  // Expiry tracking fields
+  hasExpiry             Boolean  @default(false)
+  shelfLifeDays         Int?     // Shelf life in days
+  
+  // Inventory management
+  minStockLevel         Int      @default(0)
+  
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
   
   // Relations
-  category    Category   @relation(fields: [categoryId], references: [id])
-  saleItems   SaleItem[]
+  category              Category     @relation(fields: [categoryId], references: [id])
+  inventory             Inventory[]
+  saleItems             SaleItem[]
+  stockAdjustments      StockAdjustment[]
+  stockMovements        StockMovement[]
+  InventoryItem         InventoryBatch[] @relation("ProductBatches") // Use InventoryBatch for consistency
   
   @@map("products")
 }
 
 model Sale {
   id          String     @id @default(cuid())
-  total       Decimal    @db.Decimal(10, 2)
-  tax         Decimal?   @db.Decimal(10, 2)
-  discount    Decimal?   @db.Decimal(10, 2)
-  subtotal    Decimal    @db.Decimal(10, 2)
+  total       Float
+  tax         Float?
+  discount    Float?
+  subtotal    Float
   status      SaleStatus @default(COMPLETED)
   paymentMethod PaymentMethod
   userId      String
@@ -92,16 +121,189 @@ model Sale {
 model SaleItem {
   id        String  @id @default(cuid())
   quantity  Int
-  price     Decimal @db.Decimal(10, 2)
-  total     Decimal @db.Decimal(10, 2)
+  price     Float
+  total     Float
   saleId    String
   productId String
+  
+  // VSDC Required fields for 100% compliance
+  pkg       Int?     // Package Quantity - ZRA requirement
+  qty       Int      // Quantity (same as quantity but ZRA specific)
+  prc       Float    // Unit Price - ZRA format
+  splyAmt   Float    // Supply Amount
+  taxblAmt  Float    // Taxable Amount
+  taxAmt    Float    // Tax Amount
+  totAmt    Float    // Total Amount per item
   
   // Relations
   sale      Sale    @relation(fields: [saleId], references: [id])
   product   Product @relation(fields: [productId], references: [id])
   
   @@map("sale_items")
+}
+
+// ZRA Invoice tracking model for full compliance
+model Invoice {
+  id                String    @id @default(cuid())
+  invoiceNumber     String    @unique
+  customerName      String
+  customerTpin      String?
+  totalAmount       Float
+  totalTaxAmount    Float
+  salesDate         DateTime
+  
+  // ZRA VSDC Response Fields
+  zraInvcSdcId      String?   // ZRA Invoice SDC ID
+  zraRcptNo         String?   // ZRA Receipt Number
+  zraQrCode         String?   // ZRA QR Code
+  zraSdcId          String?   // ZRA SDC ID
+  zraMrcNo          String?   // ZRA MRC Number
+  zraSubmittedAt    DateTime? // When submitted to ZRA
+  
+  // Status tracking
+  submissionStatus  InvoiceStatus @default(PENDING)
+  retryCount        Int       @default(0)
+  lastError         String?
+  
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  
+  @@map("invoices")
+}
+
+// Stock Adjustment model for ZRA compliance
+model StockAdjustment {
+  id          String            @id @default(cuid())
+  productId   String
+  adjustmentType StockAdjustmentType
+  quantity    Int
+  reason      String
+  ocrnDt      DateTime          // Occurrence Date - ZRA requirement
+  userId      String
+  
+  // Relations
+  product     Product @relation(fields: [productId], references: [id])
+  user        User    @relation(fields: [userId], references: [id])
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@map("stock_adjustments")
+}
+
+// Inventory model for tracking stock levels per product per location
+model Inventory {
+  id                String    @id @default(cuid())
+  productId         String
+  branchId          String    @default("main") // Support for multiple locations
+  
+  // Stock Information
+  currentStock      Int       @default(0)
+  minimumStock      Int       @default(0)
+  maximumStock      Int       @default(1000)
+  reorderPoint      Int       @default(10)
+  reorderQuantity   Int       @default(50)
+  
+  // Cost Information
+  averageCost       Float     @default(0)
+  lastCost          Float     @default(0)
+  totalValue        Float     @default(0) // currentStock * averageCost
+  
+  // Tracking Information
+  lastStockedDate   DateTime?
+  lastSoldDate      DateTime?
+  lastCountDate     DateTime? // Last physical count
+  
+  // Alerts
+  lowStockAlert     Boolean   @default(false)
+  excessStockAlert  Boolean   @default(false)
+  
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  
+  // Relations
+  product           Product   @relation(fields: [productId], references: [id])
+  batches           InventoryBatch[]
+  
+  // Ensure one inventory record per product per branch
+  @@unique([productId, branchId])
+  @@map("inventory")
+}
+
+// New model for batch-level tracking with expiry dates
+model InventoryBatch {
+  id                String    @id @default(cuid())
+  inventoryId       String?
+  productId         String    // Direct product relation for easier queries
+  batchNumber       String?
+  quantity          Int
+  unitCost          Float
+  totalCost         Float
+  costPrice         Float    // Alias for unitCost for consistency with frontend
+  sellingPrice      Float    // Current selling price for this batch
+  supplier          String?  // Supplier name/info
+  
+  // Expiry tracking
+  receivedDate      DateTime  @default(now())
+  expiryDate        DateTime?
+  daysUntilExpiry   Int?      // Calculated field
+  
+  // Supplier information
+  supplierInfo      String?
+  supplierBatch     String?
+  
+  // Status tracking
+  status            BatchStatus @default(ACTIVE)
+  
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  
+  // Relations
+  inventory         Inventory? @relation(fields: [inventoryId], references: [id])
+  product           Product    @relation("ProductBatches", fields: [productId], references: [id])
+  movements         StockMovement[]
+  
+  @@map("inventory_batches")
+}
+
+// Stock Movement model for tracking all inventory changes
+model StockMovement {
+  id                String              @id @default(cuid())
+  productId         String
+  branchId          String              @default("main")
+  batchId           String?             // Link to specific batch
+  
+  // Movement Details
+  movementType      StockMovementType
+  quantity          Int                 // Positive for inbound, negative for outbound
+  previousStock     Int
+  newStock          Int
+  unitCost          Float?
+  totalCost         Float?
+  
+  // Reference Information
+  referenceType     String?             // SALE, PURCHASE, ADJUSTMENT, TRANSFER
+  referenceId       String?             // ID of the related transaction
+  reason            String?
+  notes             String?
+  
+  // Batch/Lot Information (for advanced inventory)
+  batchNumber       String?
+  expiryDate        DateTime?
+  supplierInfo      String?
+  
+  // User Information
+  userId            String
+  
+  createdAt         DateTime            @default(now())
+  
+  // Relations
+  // Relations
+  product           Product             @relation(fields: [productId], references: [id])
+  user              User                @relation(fields: [userId], references: [id])
+  batch             InventoryBatch?     @relation(fields: [batchId], references: [id])
+  
+  @@map("stock_movements")
 }
 
 enum Role {
@@ -122,4 +324,42 @@ enum PaymentMethod {
   CARD
   DIGITAL_WALLET
   BANK_TRANSFER
+}
+
+enum BatchStatus {
+  ACTIVE
+  EXPIRED
+  DAMAGED
+  SOLD_OUT
+  RECALLED
+}
+
+enum InvoiceStatus {
+  PENDING
+  SUBMITTED
+  ACCEPTED
+  REJECTED
+  FAILED
+}
+
+enum StockAdjustmentType {
+  INCREASE
+  DECREASE
+  RECOUNT
+  DAMAGED
+  EXPIRED
+}
+
+enum StockMovementType {
+  PURCHASE_IN       // Stock received from supplier
+  SALE_OUT          // Stock sold to customer
+  ADJUSTMENT_IN     // Manual increase (found stock, correction)
+  ADJUSTMENT_OUT    // Manual decrease (damage, theft, correction)
+  TRANSFER_IN       // Stock received from another branch
+  TRANSFER_OUT      // Stock sent to another branch
+  RETURN_IN         // Customer returns
+  RETURN_OUT        // Returns to supplier
+  RECOUNT           // Physical stock count adjustment
+  PRODUCTION_IN     // Manufactured/assembled items
+  PRODUCTION_OUT    // Raw materials used in production
 }

@@ -1,0 +1,59 @@
+{
+    "folders": [
+        {
+            "name": "🎯 Workspace Root",
+            "path": "."
+        },
+        {
+            "name": "🚀 Frontend (React)",
+            "path": "./smart-pos-frontend"
+        },
+        {
+            "name": "⚡ Backend (Node.js)",
+            "path": "./smart-pos-backend"
+        }
+    ],
+    "settings": {
+        "terminal.integrated.defaultProfile.windows": "PowerShell",
+        "explorer.fileNesting.enabled": true,
+        "explorer.fileNesting.patterns": {
+            "package.json": "package-lock.json,yarn.lock,pnpm-lock.yaml",
+            "*.js": "${capture}.js.map,${capture}.min.js,${capture}.d.ts",
+            "*.jsx": "${capture}.js",
+            "*.ts": "${capture}.js,${capture}.d.ts,${capture}.js.map",
+            "*.tsx": "${capture}.ts,${capture}.js"
+        },
+        "files.associations": {
+            "*.prisma": "prisma"
+        },
+        "emmet.includeLanguages": {
+            "javascript": "javascriptreact"
+        },
+        "search.exclude": {
+            "**/node_modules": true,
+            "**/dist": true,
+            "**/build": true,
+            "**/.next": true,
+            "**/coverage": true,
+            "**/.prisma": true
+        },
+        "files.exclude": {
+            "**/node_modules": true,
+            "**/.git": true,
+            "**/.DS_Store": true,
+            "**/dist": true,
+            "**/build": true
+        }
+    },
+    "extensions": {
+        "recommendations": [
+            "esbenp.prettier-vscode",
+            "bradlc.vscode-tailwindcss",
+            "prisma.prisma",
+            "ms-vscode.vscode-json",
+            "christian-kohler.path-intellisense",
+            "formulahendry.auto-rename-tag",
+            "ms-vscode.vscode-typescript-next"
+        ]
+    }
+}

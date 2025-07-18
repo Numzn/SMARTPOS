@@ -1,0 +1,42 @@
+{
+  "name": "smart-pos-workspace",
+  "version": "1.0.0",
+  "description": "Smart POS System - Full Stack Development Workspace",
+  "main": "dev-helper.js",
+  "scripts": {
+    "status": "node dev-helper.js status",
+    "frontend": "node dev-helper.js frontend run dev",
+    "backend": "node dev-helper.js backend run dev",
+    "start": "node dev-helper.js start",
+    "install-all": "node dev-helper.js install",
+    "migrate": "node dev-helper.js migrate",
+    "test": "node dev-helper.js test",
+    "build": "node dev-helper.js frontend run build",
+    "frontend:build": "node dev-helper.js frontend run build",
+    "frontend:install": "cd smart-pos-frontend && npm install",
+    "backend:install": "cd smart-pos-backend && npm install",
+    "backend:generate": "cd smart-pos-backend && npx prisma generate",
+    "backend:reset": "cd smart-pos-backend && npx prisma migrate reset",
+    "help": "node dev-helper.js"
+  },
+  "keywords": [
+    "pos",
+    "point-of-sale",
+    "react",
+    "node",
+    "express",
+    "prisma",
+    "sqlite",
+    "zra-compliance"
+  ],
+  "author": "Smart POS Development Team",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
+  "workspaces": [
+    "smart-pos-frontend",
+    "smart-pos-backend"
+  ]
+}

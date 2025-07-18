@@ -1,9 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
+const { authenticateToken, requirePermission, optionalAuth } = require('../middleware/auth');
 
-// Get all categories
-router.get('/', async (req, res) => {
+// Get all categories (public with optional auth)
+router.get('/', optionalAuth, async (req, res) => {
   try {
     const categories = await prisma.category.findMany({
       include: {
@@ -12,7 +13,7 @@ router.get('/', async (req, res) => {
             id: true,
             name: true,
             price: true,
-            stock: true,
+            // stock: true, // Removed because 'stock' is not a valid field in the Product model
             isActive: true
           }
         }
@@ -29,7 +30,8 @@ router.get('/', async (req, res) => {
 });
 
 // Get category by ID
-router.get('/:id', async (req, res) => {
+// Get category by ID (public with optional auth)
+router.get('/:id', optionalAuth, async (req, res) => {
   try {
     const category = await prisma.category.findUnique({
       where: { id: req.params.id },
@@ -50,7 +52,8 @@ router.get('/:id', async (req, res) => {
 });
 
 // Create new category
-router.post('/', async (req, res) => {
+// Create new category (requires categories:write permission)
+router.post('/', authenticateToken, requirePermission('categories:write'), async (req, res) => {
   try {
     const { name, description } = req.body;
     
@@ -69,7 +72,8 @@ router.post('/', async (req, res) => {
 });
 
 // Update category
-router.put('/:id', async (req, res) => {
+// Update category (requires categories:write permission)
+router.put('/:id', authenticateToken, requirePermission('categories:write'), async (req, res) => {
   try {
     const { name, description } = req.body;
     
@@ -89,7 +93,8 @@ router.put('/:id', async (req, res) => {
 });
 
 // Delete category
-router.delete('/:id', async (req, res) => {
+// Delete category (requires categories:delete permission)
+router.delete('/:id', authenticateToken, requirePermission('categories:delete'), async (req, res) => {
   try {
     // Check if category has products
     const productsCount = await prisma.product.count({

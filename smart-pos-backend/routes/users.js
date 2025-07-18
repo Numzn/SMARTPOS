@@ -3,27 +3,10 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const prisma = require('../lib/prisma');
+const { authenticateToken, requireRole, requirePermission, sessionManager, PERMISSIONS } = require('../middleware/auth');
 
-// Middleware to verify JWT token
-const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-  
-  if (!token) {
-    return res.status(401).json({ error: 'Access token required' });
-  }
-  
-  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-    if (err) {
-      return res.status(403).json({ error: 'Invalid token' });
-    }
-    req.user = user;
-    next();
-  });
-};
-
-// Get all users (protected route)
-router.get('/', authenticateToken, async (req, res) => {
+// Get all users (protected route - Admin only)
+router.get('/', authenticateToken, requireRole('ADMIN'), async (req, res) => {
   try {
     const users = await prisma.user.findMany({
       select: {
@@ -67,8 +50,8 @@ router.get('/profile', authenticateToken, async (req, res) => {
   }
 });
 
-// Register new user
-router.post('/register', async (req, res) => {
+// Register new user (Admin only)
+router.post('/register', authenticateToken, requireRole('ADMIN'), async (req, res) => {
   try {
     const { email, name, password, role = 'CASHIER' } = req.body;
     
@@ -116,14 +99,20 @@ router.post('/register', async (req, res) => {
   }
 });
 
-// Login user
+// Enhanced login with session management
 router.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, rememberMe = false } = req.body;
+    
+    console.log('🔐 Login attempt:', { email, hasPassword: !!password });
     
     // Validate input
     if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required' });
+      console.log('❌ Missing credentials');
+      return res.status(400).json({ 
+        error: 'Email and password are required',
+        code: 'MISSING_CREDENTIALS'
+      });
     }
     
     // Find user
@@ -131,37 +120,82 @@ router.post('/login', async (req, res) => {
       where: { email }
     });
     
+    console.log('👤 User found:', !!user);
+    
     if (!user) {
-      return res.status(400).json({ error: 'Invalid email or password' });
+      console.log('❌ User not found for email:', email);
+      return res.status(400).json({ 
+        error: 'Invalid email or password',
+        code: 'INVALID_CREDENTIALS'
+      });
+    }
+    
+    // Check if user is active
+    if (!user.isActive) {
+      console.log('❌ User account deactivated');
+      return res.status(403).json({ 
+        error: 'Account is deactivated',
+        code: 'ACCOUNT_DEACTIVATED'
+      });
     }
     
     // Check password
     const isMatch = await bcrypt.compare(password, user.password);
+    console.log('🔑 Password match:', isMatch);
     
     if (!isMatch) {
-      return res.status(400).json({ error: 'Invalid email or password' });
+      console.log('❌ Password mismatch');
+      return res.status(400).json({ 
+        error: 'Invalid email or password',
+        code: 'INVALID_CREDENTIALS'
+      });
     }
     
-    // Generate JWT token
+    // Generate JWT token with extended expiry for remember me
+    const expiresIn = rememberMe ? '7d' : '24h';
     const token = jwt.sign(
-      { userId: user.id, email: user.email, role: user.role },
+      { 
+        userId: user.id, 
+        email: user.email, 
+        role: user.role,
+        permissions: PERMISSIONS[user.role] || []
+      },
       process.env.JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn }
     );
+    
+    // Create session
+    const sessionId = sessionManager.createSession(
+      user.id, 
+      token, 
+      rememberMe ? 7 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000
+    );
+    
+    // Update last login
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { lastLoginAt: new Date() }
+    });
     
     res.json({
       message: 'Login successful',
       token,
+      sessionId,
+      expiresIn,
       user: {
         id: user.id,
         email: user.email,
         name: user.name,
-        role: user.role
+        role: user.role,
+        permissions: PERMISSIONS[user.role] || []
       }
     });
   } catch (error) {
     console.error('Error during login:', error);
-    res.status(500).json({ error: 'Failed to login' });
+    res.status(500).json({ 
+      error: 'Failed to login',
+      code: 'LOGIN_ERROR'
+    });
   }
 });
 
@@ -231,6 +265,132 @@ router.put('/change-password', authenticateToken, async (req, res) => {
     console.error('Error changing password:', error);
     res.status(500).json({ error: 'Failed to change password' });
   }
+});
+
+// Enhanced logout with session management
+router.post('/logout', authenticateToken, async (req, res) => {
+  try {
+    const sessionId = req.headers['x-session-id'];
+    
+    if (sessionId) {
+      sessionManager.removeSession(sessionId);
+    }
+    
+    res.json({
+      message: 'Logout successful',
+      code: 'LOGOUT_SUCCESS'
+    });
+  } catch (error) {
+    console.error('Error during logout:', error);
+    res.status(500).json({ 
+      error: 'Failed to logout',
+      code: 'LOGOUT_ERROR'
+    });
+  }
+});
+
+// Get active sessions (own sessions or admin can see all)
+router.get('/sessions', authenticateToken, async (req, res) => {
+  try {
+    let sessions;
+    
+    if (req.user.role === 'ADMIN') {
+      // Admin can see all sessions
+      sessions = Array.from(sessionManager.activeSessions.entries()).map(([sessionId, session]) => ({
+        sessionId,
+        userId: session.userId,
+        createdAt: session.createdAt,
+        expiresAt: session.expiresAt,
+        lastActivity: session.lastActivity
+      }));
+    } else {
+      // Users can only see their own sessions
+      sessions = sessionManager.getUserSessions(req.user.userId);
+    }
+    
+    res.json({ sessions });
+  } catch (error) {
+    console.error('Error fetching sessions:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch sessions',
+      code: 'SESSIONS_FETCH_ERROR'
+    });
+  }
+});
+
+// Terminate specific session (own session or admin can terminate any)
+router.delete('/sessions/:sessionId', authenticateToken, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const session = sessionManager.activeSessions.get(sessionId);
+    
+    if (!session) {
+      return res.status(404).json({ 
+        error: 'Session not found',
+        code: 'SESSION_NOT_FOUND'
+      });
+    }
+    
+    // Check permissions
+    if (req.user.role !== 'ADMIN' && session.userId !== req.user.userId) {
+      return res.status(403).json({ 
+        error: 'Cannot terminate another user\'s session',
+        code: 'INSUFFICIENT_PERMISSION'
+      });
+    }
+    
+    sessionManager.removeSession(sessionId);
+    
+    res.json({
+      message: 'Session terminated successfully',
+      code: 'SESSION_TERMINATED'
+    });
+  } catch (error) {
+    console.error('Error terminating session:', error);
+    res.status(500).json({ 
+      error: 'Failed to terminate session',
+      code: 'SESSION_TERMINATE_ERROR'
+    });
+  }
+});
+
+// Validate current session
+router.get('/validate-session', authenticateToken, (req, res) => {
+  try {
+    const sessionId = req.headers['x-session-id'];
+    
+    if (sessionId && sessionManager.validateSession(sessionId)) {
+      res.json({
+        valid: true,
+        user: {
+          id: req.user.userId,
+          email: req.user.email,
+          role: req.user.role,
+          permissions: req.user.permissions
+        }
+      });
+    } else {
+      res.status(401).json({
+        valid: false,
+        error: 'Session expired or invalid',
+        code: 'SESSION_INVALID'
+      });
+    }
+  } catch (error) {
+    console.error('Error validating session:', error);
+    res.status(500).json({ 
+      error: 'Failed to validate session',
+      code: 'SESSION_VALIDATION_ERROR'
+    });
+  }
+});
+
+// Check user permissions
+router.get('/permissions', authenticateToken, (req, res) => {
+  res.json({
+    role: req.user.role,
+    permissions: req.user.permissions || []
+  });
 });
 
 module.exports = router;

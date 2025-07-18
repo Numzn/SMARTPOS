@@ -1,12 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const zraInvoiceService = require('../services/zraInvoice');
+const { authenticateToken, requirePermission, requireAnyPermission } = require('../middleware/auth');
 
 /**
- * Send sale to ZRA VSDC for Smart Invoice generation
+ * Send sale to ZRA VSDC for Smart Invoice generation (requires zra:submit permission)
  * POST /api/zra/send-invoice/:saleId
  */
-router.post('/send-invoice/:saleId', async (req, res) => {
+router.post('/send-invoice/:saleId', authenticateToken, requirePermission('zra:submit'), async (req, res) => {
   try {
     const { saleId } = req.params;
 
@@ -47,7 +48,8 @@ router.post('/send-invoice/:saleId', async (req, res) => {
  * Get ZRA receipt status for a sale
  * GET /api/zra/receipt-status/:saleId
  */
-router.get('/receipt-status/:saleId', async (req, res) => {
+// Get ZRA receipt status (requires zra:submit or reports:read permission)
+router.get('/receipt-status/:saleId', authenticateToken, requireAnyPermission('zra:submit', 'reports:read'), async (req, res) => {
   try {
     const { saleId } = req.params;
 
@@ -69,7 +71,8 @@ router.get('/receipt-status/:saleId', async (req, res) => {
  * Get all sales pending ZRA processing
  * GET /api/zra/pending-sales
  */
-router.get('/pending-sales', async (req, res) => {
+// Get pending sales for ZRA submission (requires zra:submit permission)
+router.get('/pending-sales', authenticateToken, requirePermission('zra:submit'), async (req, res) => {
   try {
     const pendingSales = await zraInvoiceService.getPendingZRASales();
 
@@ -92,7 +95,8 @@ router.get('/pending-sales', async (req, res) => {
  * Bulk send multiple sales to ZRA
  * POST /api/zra/bulk-send
  */
-router.post('/bulk-send', async (req, res) => {
+// Bulk send multiple sales to ZRA (requires zra:submit permission)
+router.post('/bulk-send', authenticateToken, requirePermission('zra:submit'), async (req, res) => {
   try {
     const { saleIds } = req.body;
 
@@ -146,7 +150,8 @@ router.post('/bulk-send', async (req, res) => {
  * Process all pending sales automatically
  * POST /api/zra/process-pending
  */
-router.post('/process-pending', async (req, res) => {
+// Process all pending ZRA submissions (requires zra:submit permission)
+router.post('/process-pending', authenticateToken, requirePermission('zra:submit'), async (req, res) => {
   try {
     const pendingSales = await zraInvoiceService.getPendingZRASales();
 

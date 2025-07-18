@@ -1,0 +1,63 @@
+{
+  "timestamp": "2025-07-13T18:28:40.274Z",
+  "overallCompliance": 100,
+  "passedChecks": 35,
+  "totalChecks": 35,
+  "sections": {
+    "authentication": {
+      "tpin field": true,
+      "bhfId field": true,
+      "userId field": true,
+      "userPwd field": true,
+      "resultDt handling": true,
+      "Session management": true,
+      "Session persistence": true
+    },
+    "invoiceSubmission": {
+      "Invoice tpin field": true,
+      "Invoice bhfId field": true,
+      "Invoice invcNo field": true,
+      "Customer custTpin field": true,
+      "Customer custNm field": true,
+      "Sales type salesTyCd": true,
+      "Receipt type rcptTyCd": true,
+      "Payment type pmtTyCd": true,
+      "Retry mechanism": true,
+      "Bulk processing": true
+    },
+    "itemManagement": {
+      "Item save endpoint": true,
+      "Item sync endpoint": true,
+      "Item classification": true,
+      "Package units": true,
+      "Tax types": true,
+      "Sync route exposed": true,
+      "Bulk save capability": true
+    },
+    "databaseSchema": {
+      "User isActive field": true,
+      "User lastLoginAt field": true,
+      "Product ZRA classification": true,
+      "Product tax type": true,
+      "Invoice model": true,
+      "ZRA response fields": true,
+      "Invoice status enum": true
+    },
+    "security": {
+      "JWT middleware": true,
+      "Role-based access": true,
+      "Permission-based access": true,
+      "Session management": true,
+      "Multiple permission check": true
+    }
+  },
+  "filesChecked": [
+    "services/vsdcService.js",
+    "services/zraInvoice.js",
+    "services/itemManagement.js",
+    "routes/items.js",
+    "middleware/auth.js",
+    "prisma/schema.prisma"
+  ],
+  "allFilesExist": true
+}

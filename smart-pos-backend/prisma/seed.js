@@ -66,9 +66,11 @@ async function main() {
         cost: 1.50,
         sku: 'COKE500',
         barcode: '123456789012',
-        stock: 100,
-        minStock: 10,
-        categoryId: categories[0].id
+        minStockLevel: 10,
+        categoryId: categories[0].id,
+        taxRate: 16,
+        vatCategoryCode: 'STANDARD',
+        zraClassificationCode: 'BVRG001'
       }
     }),
     prisma.product.create({
@@ -79,9 +81,11 @@ async function main() {
         cost: 2.00,
         sku: 'LAYS001',
         barcode: '123456789013',
-        stock: 50,
-        minStock: 5,
-        categoryId: categories[1].id
+        minStockLevel: 5,
+        categoryId: categories[1].id,
+        taxRate: 16,
+        vatCategoryCode: 'STANDARD',
+        zraClassificationCode: 'SNCK001'
       }
     }),
     prisma.product.create({
@@ -92,9 +96,13 @@ async function main() {
         cost: 3.00,
         sku: 'MILK1L',
         barcode: '123456789014',
-        stock: 30,
-        minStock: 5,
-        categoryId: categories[2].id
+        minStockLevel: 8,
+        categoryId: categories[2].id,
+        hasExpiry: true,
+        shelfLifeDays: 7,
+        taxRate: 16,
+        vatCategoryCode: 'STANDARD',
+        zraClassificationCode: 'DARY001'
       }
     })
   ]);

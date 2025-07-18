@@ -1,0 +1,222 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "🎯 Show Project Status",
+            "type": "shell",
+            "command": "node",
+            "args": ["dev-helper.js", "status"],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "🚀 Start Frontend Dev Server",
+            "type": "shell",
+            "command": "node",
+            "args": ["dev-helper.js", "frontend", "run", "dev"],
+            "group": "build",
+            "isBackground": true,
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "⚡ Start Backend Dev Server",
+            "type": "shell",
+            "command": "node",
+            "args": ["dev-helper.js", "backend", "run", "dev"],
+            "group": "build",
+            "isBackground": true,
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "🏗️ Install All Dependencies",
+            "type": "shell",
+            "command": "node",
+            "args": ["dev-helper.js", "install"],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "🗄️ Run Database Migration",
+            "type": "shell",
+            "command": "node",
+            "args": ["dev-helper.js", "migrate"],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "🧪 Run All Tests",
+            "type": "shell",
+            "command": "node",
+            "args": ["dev-helper.js", "test"],
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "🎬 Start Both Servers",
+            "type": "shell",
+            "command": "node",
+            "args": ["dev-helper.js", "start"],
+            "group": "build",
+            "isBackground": true,
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "📦 Frontend: Install Package",
+            "type": "shell",
+            "command": "node",
+            "args": ["dev-helper.js", "frontend", "install", "${input:packageName}"],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "📦 Backend: Install Package",
+            "type": "shell",
+            "command": "node",
+            "args": ["dev-helper.js", "backend", "install", "${input:packageName}"],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "🔧 Frontend: Build",
+            "type": "shell",
+            "command": "node",
+            "args": ["dev-helper.js", "frontend", "run", "build"],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "🔧 Backend: Check Database",
+            "type": "shell",
+            "command": "node",
+            "args": ["dev-helper.js", "backend", "run", "check-db"],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "🏷️ Backend: Generate Prisma Client",
+            "type": "shell",
+            "command": "cd smart-pos-backend && npx prisma generate",
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "🏷️ Backend: Reset Database",
+            "type": "shell",
+            "command": "cd smart-pos-backend && npx prisma migrate reset",
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": []
+        }
+    ],
+    "inputs": [
+        {
+            "id": "packageName",
+            "description": "Package name to install",
+            "default": "",
+            "type": "promptString"
+        }
+    ]
+}

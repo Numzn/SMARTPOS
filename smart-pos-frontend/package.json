@@ -11,7 +11,10 @@
   },
   "dependencies": {
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "react-router-dom": "^6.8.0",
+    "axios": "^1.6.0",
+    "js-cookie": "^3.0.5"
   },
   "devDependencies": {
     "@eslint/js": "^9.30.1",
