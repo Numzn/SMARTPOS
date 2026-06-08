@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Environment & secrets (never commit)
+.env
+.env.local
+.env.*.local
+!.env.example
+!.env.docker.example
+
+# Build output
+dist/
+build/
+coverage/
+
+# Logs & temp
+logs/
+tmp/
+*.log
+npm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/tasks.json
+
+# Local databases (Postgres runs in Docker for prod)
+smart-pos-backend/prisma/dev.db
+smart-pos-backend/prisma/*.db
+smart-pos-backend/prisma/*.db-journal
+
+# Prisma generated (regenerated on install)
+smart-pos-backend/node_modules/.prisma/
+
+# Qodo / local tooling
+.qodo/

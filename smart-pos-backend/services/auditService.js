@@ -1,4 +1,4 @@
-const { PrismaClient } = require('@prisma/client')
+const prisma = require('../lib/prisma')
 const crypto = require('crypto')
 
 /**
@@ -10,7 +10,7 @@ const crypto = require('crypto')
 
 class AuditService {
   constructor() {
-    this.prisma = new PrismaClient()
+    this.prisma = prisma
     
     // Audit event types as per ZRA requirements
     this.eventTypes = {

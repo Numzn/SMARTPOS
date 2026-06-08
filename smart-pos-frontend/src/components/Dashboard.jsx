@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import api from '../services/api'
 
 const Dashboard = () => {
   const [stats, setStats] = useState({
@@ -11,47 +12,114 @@ const Dashboard = () => {
     paymentMethods: {}
   })
   const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState(null)
   const [selectedTimeframe, setSelectedTimeframe] = useState('today')
 
-  // Mock data - replace with API call to your backend
+  // Fetch real data from backend
   useEffect(() => {
     const fetchStats = async () => {
       setIsLoading(true)
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      setError(null)
       
-      // This would be a call to your backend API
-      // fetch(`/api/sales/${selectedTimeframe}-stats`)
-      setStats({
-        todaySales: 2847.50,
-        transactionCount: 47,
-        averageTicket: 60.59,
-        lastSale: new Date().toLocaleTimeString(),
-        hourlyStats: [
-          { hour: '9 AM', sales: 245.50, transactions: 8 },
-          { hour: '10 AM', sales: 312.75, transactions: 12 },
-          { hour: '11 AM', sales: 489.25, transactions: 15 },
-          { hour: '12 PM', sales: 678.90, transactions: 21 },
-          { hour: '1 PM', sales: 456.30, transactions: 18 },
-          { hour: '2 PM', sales: 665.80, transactions: 19 }
-        ],
-        topProducts: [
-          { name: 'Coca Cola 500ml', sales: 45, revenue: 382.50 },
-          { name: 'Bread Loaf', sales: 23, revenue: 276.00 },
-          { name: 'Milk 1L', sales: 18, revenue: 279.00 }
-        ],
-        paymentMethods: {
-          cash: 45.2,
-          card: 32.1,
-          mobile: 18.7,
-          bank: 4.0
-        }
-      })
-      setIsLoading(false)
+      try {
+        // Fetch sales data from backend
+        const salesResponse = await api.get('/api/sales')
+        const sales = salesResponse.data || []
+        
+        // Calculate today's sales
+        const today = new Date().toDateString()
+        const todaySales = sales.filter(sale => 
+          new Date(sale.createdAt).toDateString() === today
+        )
+        
+        // Calculate stats
+        const todayTotal = todaySales.reduce((sum, sale) => sum + sale.total, 0)
+        const avgTicket = todaySales.length > 0 ? todayTotal / todaySales.length : 0
+        const lastSale = todaySales.length > 0 ? new Date(todaySales[0].createdAt).toLocaleTimeString() : null
+        
+        // Generate hourly stats (mock for now, can be enhanced with backend)
+        const hourlyStats = generateHourlyStats(todaySales)
+        
+        // Generate top products (mock for now, can be enhanced with backend)
+        const topProducts = generateTopProducts(sales)
+        
+        // Generate payment methods (mock for now, can be enhanced with backend)
+        const paymentMethods = generatePaymentMethods(sales)
+        
+        setStats({
+          todaySales: todayTotal,
+          transactionCount: todaySales.length,
+          averageTicket: avgTicket,
+          lastSale,
+          hourlyStats,
+          topProducts,
+          paymentMethods
+        })
+        
+      } catch (err) {
+        console.error('Failed to fetch dashboard data:', err)
+        setError('Failed to load dashboard data')
+        
+        // Fallback to mock data if API fails
+        setStats({
+          todaySales: 2847.50,
+          transactionCount: 47,
+          averageTicket: 60.59,
+          lastSale: new Date().toLocaleTimeString(),
+          hourlyStats: [
+            { hour: '9 AM', sales: 245.50, transactions: 8 },
+            { hour: '10 AM', sales: 312.75, transactions: 12 },
+            { hour: '11 AM', sales: 489.25, transactions: 15 },
+            { hour: '12 PM', sales: 678.90, transactions: 21 },
+            { hour: '1 PM', sales: 456.30, transactions: 18 },
+            { hour: '2 PM', sales: 665.80, transactions: 19 }
+          ],
+          topProducts: [
+            { name: 'Coca Cola 500ml', sales: 45, revenue: 382.50 },
+            { name: 'Bread Loaf', sales: 23, revenue: 276.00 },
+            { name: 'Milk 1L', sales: 18, revenue: 279.00 }
+          ],
+          paymentMethods: {
+            cash: 45.2,
+            card: 32.1,
+            mobile: 18.7,
+            bank: 4.0
+          }
+        })
+      } finally {
+        setIsLoading(false)
+      }
     }
 
     fetchStats()
   }, [selectedTimeframe])
+
+  // Helper functions to generate stats
+  const generateHourlyStats = () => {
+    const hours = ['9 AM', '10 AM', '11 AM', '12 PM', '1 PM', '2 PM', '3 PM', '4 PM', '5 PM']
+    return hours.map(hour => ({
+      hour,
+      sales: Math.random() * 800 + 200,
+      transactions: Math.floor(Math.random() * 25) + 5
+    }))
+  }
+
+  const generateTopProducts = () => {
+    return [
+      { name: 'Coca Cola 500ml', sales: 45, revenue: 382.50 },
+      { name: 'Bread Loaf', sales: 23, revenue: 276.00 },
+      { name: 'Milk 1L', sales: 18, revenue: 279.00 }
+    ]
+  }
+
+  const generatePaymentMethods = () => {
+    return {
+      cash: 45.2,
+      card: 32.1,
+      mobile: 18.7,
+      bank: 4.0
+    }
+  }
 
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-ZM', {
@@ -92,6 +160,17 @@ const Dashboard = () => {
               <div className="h-3 bg-gray-300 rounded w-2/3"></div>
             </div>
           ))}
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="p-4 glass border-b border-white/20">
+        <div className="text-center text-red-600">
+          <p className="text-lg font-semibold">⚠️ {error}</p>
+          <p className="text-sm text-gray-600">Showing fallback data</p>
         </div>
       </div>
     )

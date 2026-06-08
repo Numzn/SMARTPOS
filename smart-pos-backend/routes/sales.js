@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
-const { authenticateToken, requirePermission, requireAnyPermission } = require('../middleware/auth');
+const { deductStockForSale, DEFAULT_BRANCH } = require('../lib/inventoryStock');
+const { authenticateToken, requirePermission } = require('../middleware/auth');
 
 // Get all sales (requires sales:read permission)
 router.get('/', authenticateToken, requirePermission('sales:read'), async (req, res) => {
@@ -75,18 +76,18 @@ router.get('/:id', authenticateToken, requirePermission('sales:read'), async (re
 // Create new sale (requires sales:write permission)
 router.post('/', authenticateToken, requirePermission('sales:write'), async (req, res) => {
   try {
-    const { userId, items, paymentMethod, tax, discount } = req.body;
-    // items format: [{ productId, quantity, price }]
-    
-    // Calculate totals
-    const subtotal = items.reduce((sum, item) => sum + (item.quantity * item.price), 0);
+    const { userId, items, paymentMethod, tax, discount, branchId = DEFAULT_BRANCH } = req.body;
+
+    if (!userId || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'userId and items array are required' });
+    }
+
+    const subtotal = items.reduce((sum, item) => sum + item.quantity * item.price, 0);
     const taxAmount = tax || 0;
     const discountAmount = discount || 0;
     const total = subtotal + taxAmount - discountAmount;
-    
-    // Create sale with transaction
+
     const sale = await prisma.$transaction(async (tx) => {
-      // Create the sale
       const newSale = await tx.sale.create({
         data: {
           userId,
@@ -95,63 +96,56 @@ router.post('/', authenticateToken, requirePermission('sales:write'), async (req
           tax: parseFloat(taxAmount),
           discount: parseFloat(discountAmount),
           paymentMethod: paymentMethod || 'CASH',
-          status: 'COMPLETED'
-        }
+          status: 'COMPLETED',
+        },
       });
-      
-      // Create sale items with VSDC compliance
-      const saleItems = await Promise.all(
-        items.map(async item => {
-          // Get product details for tax calculations
+
+      await Promise.all(
+        items.map(async (item) => {
           const product = await tx.product.findUnique({
-            where: { id: item.productId }
+            where: { id: item.productId },
           });
-          
-          const quantity = parseInt(item.quantity);
+
+          if (!product) {
+            throw new Error(`Product not found: ${item.productId}`);
+          }
+
+          const quantity = parseInt(item.quantity, 10);
           const unitPrice = parseFloat(item.price);
           const itemTotal = quantity * unitPrice;
-          
-          // Calculate VSDC required fields
-          const taxRate = 0.16; // 16% VAT - should be configurable per product
-          const splyAmt = itemTotal; // Supply amount before tax
-          const taxblAmt = splyAmt; // Taxable amount (assuming all taxable)
-          const taxAmt = taxblAmt * taxRate; // Tax amount
-          const totAmt = splyAmt + taxAmt; // Total including tax
-          
-          return tx.saleItem.create({
+          const taxRate = (product.taxRate ?? 16) / 100;
+          const splyAmt = itemTotal;
+          const taxblAmt = splyAmt;
+          const taxAmt = taxblAmt * taxRate;
+          const totAmt = splyAmt + taxAmt;
+
+          await tx.saleItem.create({
             data: {
               saleId: newSale.id,
               productId: item.productId,
-              quantity: quantity,
+              quantity,
               price: unitPrice,
               total: itemTotal,
-              // VSDC Required fields
-              pkg: 1, // Package quantity (default 1)
-              qty: quantity, // ZRA quantity field
-              prc: unitPrice, // ZRA unit price
-              splyAmt: splyAmt, // Supply amount
-              taxblAmt: taxblAmt, // Taxable amount
-              taxAmt: taxAmt, // Tax amount
-              totAmt: totAmt // Total amount per item
-            }
+              pkg: 1,
+              qty: quantity,
+              prc: unitPrice,
+              splyAmt,
+              taxblAmt,
+              taxAmt,
+              totAmt,
+            },
+          });
+
+          await deductStockForSale(tx, {
+            productId: item.productId,
+            quantity,
+            branchId,
+            userId,
+            saleId: newSale.id,
           });
         })
       );
-      
-      // Update product stock
-      await Promise.all(
-        items.map(item =>
-          tx.product.update({
-            where: { id: item.productId },
-            data: {
-              stock: {
-                decrement: parseInt(item.quantity)
-              }
-            }
-          })
-        )
-      );
-      
+
       return newSale;
     });
     

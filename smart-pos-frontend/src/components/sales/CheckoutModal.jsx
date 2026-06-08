@@ -3,7 +3,7 @@ import { useSales } from '../../contexts/SalesContext';
 
 const CheckoutModal = ({ onClose }) => {
   const { cart, getCartTotal, processCheckout, paymentMethod, setPaymentMethod } = useSales();
-  const { subtotal, discountAmount, taxAmount, total } = getCartTotal();
+  const { subtotal, taxAmount, total } = getCartTotal();
   const [isProcessing, setIsProcessing] = useState(false);
   const [customerInfo, setCustomerInfo] = useState({
     name: '',

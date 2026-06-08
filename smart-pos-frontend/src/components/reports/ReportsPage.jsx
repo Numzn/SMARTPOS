@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 
 const ReportsPage = () => {
-  const [reports, setReports] = useState({
+  const [reports] = useState({
     todaySales: {
       amount: 1567.50,
       transactions: 23,

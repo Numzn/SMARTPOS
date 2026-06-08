@@ -12,7 +12,7 @@ const path = require('path')
 
 class VSDCService {
   constructor() {
-    this.baseURL = process.env.VSDC_URL || 'http://localhost:8080' // Default to mock for development
+    this.baseURL = process.env.VSDC_URL || 'http://localhost:8090' // Default to mock-vsdc-server (npm run mock-vsdc)
     this.username = process.env.VSDC_USERNAME
     this.password = process.env.VSDC_PASSWORD
     this.tpin = process.env.BUSINESS_TPIN

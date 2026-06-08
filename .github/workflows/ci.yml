@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: smartpos
+          POSTGRES_PASSWORD: ci_test_password
+          POSTGRES_DB: smartpos
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U smartpos -d smartpos"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        working-directory: smart-pos-backend
+        run: npx prisma generate
+
+      - name: Apply migrations
+        working-directory: smart-pos-backend
+        env:
+          DATABASE_URL: postgresql://smartpos:ci_test_password@localhost:5432/smartpos
+        run: npx prisma migrate deploy
+
+      - name: Validate backend build scripts
+        working-directory: smart-pos-backend
+        env:
+          DATABASE_URL: postgresql://smartpos:ci_test_password@localhost:5432/smartpos
+          JWT_SECRET: ci-test-secret
+        run: npm run build:validate
+
+      - name: Build frontend
+        working-directory: smart-pos-frontend
+        env:
+          VITE_API_URL: /api
+        run: npm run build
+
+      - name: Docker build (backend)
+        run: docker build -t smartpos-backend:ci ./smart-pos-backend
+
+      - name: Docker build (frontend)
+        run: docker build -t smartpos-frontend:ci --build-arg VITE_API_URL=/api ./smart-pos-frontend

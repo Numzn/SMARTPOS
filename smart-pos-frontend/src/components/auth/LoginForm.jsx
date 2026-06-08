@@ -1,28 +1,36 @@
-import React, { useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import api from '../../services/api';
+import { API_ROOT } from '../../lib/apiClient';
+import { Server, AlertCircle, Loader2 } from 'lucide-react';
+
+const API_DISPLAY = API_ROOT.replace(/^https?:\/\//, '');
 
 const LoginForm = () => {
   const { login, isAuthenticated, loading } = useAuth();
+  const navigate = useNavigate();
   const [formData, setFormData] = useState({
-    email: '',
-    password: ''
+    email: 'admin@smartpos.com',
+    password: '',
   });
-  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [apiStatus, setApiStatus] = useState('checking');
 
-  // Redirect if already authenticated
+  useEffect(() => {
+    api
+      .get('/api/health')
+      .then(() => setApiStatus('online'))
+      .catch(() => setApiStatus('offline'));
+  }, []);
+
   if (isAuthenticated) {
     return <Navigate to="/dashboard" replace />;
   }
 
   const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value
-    });
-    // Clear error when user starts typing
+    setFormData({ ...formData, [e.target.name]: e.target.value });
     if (error) setError('');
   };
 
@@ -32,64 +40,87 @@ const LoginForm = () => {
     setError('');
 
     const result = await login(formData.email, formData.password);
-    
-    if (!result.success) {
+    if (result.success) {
+      navigate('/dashboard', { replace: true });
+    } else {
       setError(result.error);
     }
-    
     setIsSubmitting(false);
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+      <div className="min-h-screen flex items-center justify-center bg-surface">
+        <Loader2 className="w-6 h-6 animate-spin text-gray-500" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        {/* Header */}
-        <div className="text-center">
-          <div className="mx-auto h-12 w-12 bg-indigo-600 rounded-full flex items-center justify-center">
-            <svg className="h-6 w-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-            </svg>
+    <div className="min-h-screen flex bg-surface">
+      <div className="hidden lg:flex lg:w-[42%] bg-surface-sidebar text-gray-400 flex-col justify-between p-8">
+        <div>
+          <div className="text-white text-lg font-semibold tracking-tight">Smart POS</div>
+          <div className="text-[10px] uppercase tracking-widest mt-1 text-gray-500">
+            Point of Sale · Zambia
           </div>
-          <h2 className="mt-6 text-3xl font-extrabold text-gray-900">
-            Smart POS System
-          </h2>
-          <p className="mt-2 text-sm text-gray-600">
-            Sign in to your account
-          </p>
         </div>
+        <div className="space-y-4 text-sm">
+          <p className="text-gray-500 leading-relaxed">
+            Embedded retail terminal. Inventory, sales, and ZRA smart invoice compliance in one
+            system.
+          </p>
+          <div className="font-mono text-xs text-gray-600 border border-white/10 rounded p-3 bg-black/20">
+            <div>API · {API_DISPLAY}</div>
+            <div className="mt-1 flex items-center gap-2">
+              <span
+                className={`status-dot ${
+                  apiStatus === 'online' ? 'bg-emerald-500' : apiStatus === 'offline' ? 'bg-red-500' : 'bg-amber-500'
+                }`}
+              />
+              {apiStatus === 'online' && 'Service online'}
+              {apiStatus === 'offline' && 'Service offline'}
+              {apiStatus === 'checking' && 'Checking…'}
+            </div>
+          </div>
+        </div>
+        <p className="text-[10px] text-gray-600">ZRA VSDC compliant · v2.0</p>
+      </div>
 
-        {/* Login Form */}
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          <div className="bg-white rounded-lg shadow-md p-8 space-y-6">
-            {/* Error Message */}
-            {error && (
-              <div className="bg-red-50 border border-red-200 rounded-md p-4 flex items-center">
-                <svg className="h-5 w-5 text-red-400 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <span className="text-sm text-red-700">{error}</span>
+      <div className="flex-1 flex items-center justify-center p-6">
+        <div className="w-full max-w-sm">
+          <div className="lg:hidden mb-6">
+            <h1 className="text-lg font-semibold text-gray-900">Smart POS</h1>
+            <p className="text-xs text-gray-500">Sign in to continue</p>
+          </div>
+
+          {apiStatus === 'offline' && (
+            <div className="mb-4 flex gap-2 p-3 border border-amber-300 bg-amber-50 text-amber-900 text-xs rounded">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <div>
+                <strong>Backend offline.</strong> Run{' '}
+                <code className="font-mono bg-amber-100/80 px-1">npm run dev</code> in{' '}
+                <code className="font-mono bg-amber-100/80 px-1">smart-pos-backend</code>.
               </div>
-            )}
+            </div>
+          )}
 
-            {/* Email Field */}
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
-                Email Address
-              </label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                  </svg>
+          <form onSubmit={handleSubmit} className="panel">
+            <div className="panel-header">
+              <h2 className="text-sm font-semibold text-gray-900">Operator login</h2>
+            </div>
+            <div className="panel-body space-y-4">
+              {error && (
+                <div className="flex gap-2 p-2 border border-red-200 bg-red-50 text-red-800 text-xs rounded">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{error}</span>
                 </div>
+              )}
+
+              <div>
+                <label htmlFor="email" className="label-sys">
+                  Email
+                </label>
                 <input
                   id="email"
                   name="email"
@@ -98,77 +129,42 @@ const LoginForm = () => {
                   required
                   value={formData.email}
                   onChange={handleChange}
-                  className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
-                  placeholder="Enter your email"
+                  className="input-sys"
                 />
               </div>
-            </div>
 
-            {/* Password Field */}
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
-                Password
-              </label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                  </svg>
-                </div>
+              <div>
+                <label htmlFor="password" className="label-sys">
+                  Password
+                </label>
                 <input
                   id="password"
                   name="password"
-                  type={showPassword ? 'text' : 'password'}
+                  type="password"
                   autoComplete="current-password"
                   required
                   value={formData.password}
                   onChange={handleChange}
-                  className="block w-full pl-10 pr-10 py-3 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
-                  placeholder="Enter your password"
+                  className="input-sys"
                 />
-                <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="text-gray-400 hover:text-gray-500 focus:outline-none"
-                  >
-                    {showPassword ? (
-                      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L3 3m6.878 6.878L21 21" />
-                      </svg>
-                    ) : (
-                      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.543 7-1.275 4.057-5.065 7-9.543 7-4.477 0-8.268-2.943-9.542-7z" />
-                      </svg>
-                    )}
-                  </button>
-                </div>
               </div>
+
+              <button type="submit" disabled={isSubmitting || apiStatus === 'offline'} className="btn-primary w-full py-2">
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Authenticating…
+                  </>
+                ) : (
+                  'Sign in'
+                )}
+              </button>
             </div>
+          </form>
 
-            {/* Submit Button */}
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition duration-150 ease-in-out"
-            >
-              {isSubmitting ? (
-                <div className="flex items-center">
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                  Signing in...
-                </div>
-              ) : (
-                'Sign in'
-              )}
-            </button>
-          </div>
-        </form>
-
-        {/* Footer */}
-        <div className="text-center">
-          <p className="text-xs text-gray-500">
-            Smart POS System v2.0 - ZRA VSDC Compliant
+          <p className="mt-4 text-center text-[11px] text-gray-500 flex items-center justify-center gap-1">
+            <Server className="w-3 h-3" />
+            Default: admin@smartpos.com / admin123
           </p>
         </div>
       </div>

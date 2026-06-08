@@ -29,7 +29,7 @@
 
 ### **Phase 4: Transaction Processing** - ✅ **50% Complete**
 - ✅ **Sales Processing** (`routes/sales.js`)
-- ✅ **Invoice Generation** (`services/invoiceService.js`)
+- ✅ **Invoice Generation** (`services/zraInvoice.js`)
 - ❌ Purchase Management (pending)
 - ❌ Credit/Debit Notes (pending)
 

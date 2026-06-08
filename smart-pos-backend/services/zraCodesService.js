@@ -1,5 +1,5 @@
 const vsdcService = require('./vsdcService')
-const { PrismaClient } = require('@prisma/client')
+const prisma = require('../lib/prisma')
 
 /**
  * ZRA Codes Service - Implementation based on VSDC API Specification v1.0.8
@@ -10,7 +10,7 @@ const { PrismaClient } = require('@prisma/client')
 
 class ZRACodesService {
   constructor() {
-    this.prisma = new PrismaClient()
+    this.prisma = prisma
     this.lastSyncDate = null
     
     // ZRA Code types as per VSDC specification

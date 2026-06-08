@@ -1,0 +1,108 @@
+# Smart POS full-stack — self-hosted, no Supabase, no external SaaS.
+# Usage:
+#   docker compose up -d --build       (start everything)
+#   docker compose logs -f backend     (tail backend)
+#   docker compose down                (stop)
+#   docker compose down -v             (stop and delete the Postgres volume)
+#
+# After first boot:
+#   Frontend  -> http://localhost:8080
+#   Backend   -> http://localhost:4000/api/health
+#   Mock VSDC -> http://localhost:8090/health
+#   Postgres  -> localhost:5432 (smartpos / ${POSTGRES_PASSWORD:-smartpos_dev_change_me})
+#
+# Seed credentials (created on first boot only):
+#   admin@smartpos.com / admin123
+#   cashier@smartpos.com / cashier123
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: smart-pos-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-smartpos}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-smartpos_dev_change_me}
+      POSTGRES_DB: ${POSTGRES_DB:-smartpos}
+    volumes:
+      - smart_pos_pg_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-smartpos} -d ${POSTGRES_DB:-smartpos}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mock-vsdc:
+    build:
+      context: ./smart-pos-backend
+      dockerfile: Dockerfile
+    container_name: smart-pos-mock-vsdc
+    restart: unless-stopped
+    command: ["node", "mock-vsdc-server.js"]
+    environment:
+      MOCK_VSDC_PORT: 8090
+    # Mock VSDC doesn't need the database; skip the entrypoint's migrate/seed.
+    entrypoint: ["/sbin/tini", "--"]
+    ports:
+      - "${MOCK_VSDC_PORT:-8090}:8090"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: ./smart-pos-backend
+      dockerfile: Dockerfile
+    container_name: smart-pos-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mock-vsdc:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-smartpos}:${POSTGRES_PASSWORD:-smartpos_dev_change_me}@postgres:5432/${POSTGRES_DB:-smartpos}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      VSDC_URL: ${VSDC_URL:-http://mock-vsdc:8090}
+      VSDC_USERNAME: ${VSDC_USERNAME:-dev-user}
+      VSDC_PASSWORD: ${VSDC_PASSWORD:-dev-password}
+      BUSINESS_TPIN: ${BUSINESS_TPIN:-1000000000}
+      BRANCH_ID: ${BRANCH_ID:-000}
+      SEED_ON_BOOT: ${SEED_ON_BOOT:-true}
+    ports:
+      - "${BACKEND_PORT:-4000}:4000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4000/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+
+  frontend:
+    build:
+      context: ./smart-pos-frontend
+      dockerfile: Dockerfile
+      args:
+        # Frontend talks to /api on the same origin — nginx proxies to backend:4000.
+        VITE_API_URL: /api
+    container_name: smart-pos-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  smart_pos_pg_data:

@@ -56,30 +56,10 @@ async function testConnection() {
   } catch (error) {
     console.log('❌ Connection failed:', error.message);
     console.log('\nTroubleshooting steps:');
-    console.log('1. Check your internet connection');
-    console.log('2. Verify Supabase project is running');
-    console.log('3. Check DATABASE_URL in .env file');
-    console.log('4. Try using DIRECT_URL instead');
-    
-    // Test with direct URL
-    console.log('\nTrying direct connection...');
-    if (process.env.DIRECT_URL && process.env.DIRECT_URL !== process.env.DATABASE_URL) {
-      const directPrisma = new PrismaClient({
-        datasources: {
-          db: {
-            url: process.env.DIRECT_URL
-          }
-        }
-      });
-      
-      try {
-        await directPrisma.$connect();
-        console.log('✅ Direct connection successful');
-        await directPrisma.$disconnect();
-      } catch (directError) {
-        console.log('❌ Direct connection also failed:', directError.message);
-      }
-    }
+    console.log('1. Start Postgres: npm run db:up  (or your own server)');
+    console.log('2. Check DATABASE_URL in .env (postgresql://user:pass@host:5432/db)');
+    console.log('3. Apply schema: npx prisma db push');
+    console.log('4. See docs/DATABASE.md');
   } finally {
     await prisma.$disconnect();
   }
@@ -96,11 +76,10 @@ async function testManualConnection() {
     
     // Try pg directly
     const { Client } = require('pg');
+    const useSsl = process.env.DATABASE_SSL === 'true';
     const client = new Client({
       connectionString: process.env.DATABASE_URL,
-      ssl: {
-        rejectUnauthorized: false
-      }
+      ...(useSsl ? { ssl: { rejectUnauthorized: false } } : {}),
     });
     
     await client.connect();
@@ -134,7 +113,6 @@ async function main() {
   
   console.log('Environment check:');
   console.log('DATABASE_URL set:', !!process.env.DATABASE_URL);
-  console.log('DIRECT_URL set:', !!process.env.DIRECT_URL);
   console.log('');
   
   await testConnection();

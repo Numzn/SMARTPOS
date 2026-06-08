@@ -5,11 +5,14 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
+    "dev:stack": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-dev.ps1",
     "test": "node test-connection.js",
     "test-sale": "node create-test-sale.js",
     "mock-vsdc": "node mock-vsdc-server.js",
     "check-db": "node check-database.js",
-    "setup-db": "npx prisma migrate dev && npx prisma db seed",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "setup-db": "npx prisma db push && npx prisma db seed",
     "compliance": "node docs/compliance-checker.js",
     "compliance-roadmap": "node docs/compliance-checker.js --roadmap",
     "build:init": "node -e \"require('./docs/api-reference-manager').createReferenceIndex()\"",
@@ -21,7 +24,10 @@
     "validate": "npm run build:validate",
     "tasks": "npm run build:tasks",
     "vsdc:update": "node -e \"const args=process.argv.slice(2); require('./docs/api-reference-manager').updateImplementationStatus(args[0], args[1])\"",
-    "check": "npm run validate && npm run status && npm run tasks"
+    "check": "npm run validate && npm run status && npm run tasks",
+    "validate:system": "node scripts/validate-system.js",
+    "validate:frontend": "node scripts/validate-frontend-backend.js",
+    "validate:full": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-and-validate.ps1"
   },
   "keywords": [],
   "author": "",
@@ -29,9 +35,7 @@
   "description": "",
   "dependencies": {
     "@prisma/client": "^6.11.1",
-    "@supabase/supabase-js": "^2.50.3",
     "axios": "^1.10.0",
-    "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
     "dotenv": "^17.1.0",

@@ -34,6 +34,7 @@ router.get('/', optionalAuth, async (req, res) => {
       return {
         ...product,
         totalQuantity,
+        stock: totalQuantity, // legacy alias used by frontend cashier/sales UIs
         hasExpiredItems,
         hasNearExpiryItems,
         lowStockAlert: totalQuantity <= (product.minStockLevel || 0)
@@ -82,9 +83,10 @@ router.get('/:id', optionalAuth, async (req, res) => {
     const productWithInventory = {
       ...product,
       totalQuantity,
+      stock: totalQuantity,
       hasExpiredItems,
       hasNearExpiryItems,
-      lowStockAlert: totalQuantity <= (product.minStockLevel || 0)
+      lowStockAlert: totalQuantity <= (product.minStockLevel || 0),
     };
     
     res.json(productWithInventory);
@@ -190,12 +192,31 @@ router.post('/', authenticateToken, requirePermission('products:write'), async (
         }
       });
 
-      // Create initial inventory if specified
+      // 🔥 ALWAYS create inventory record for new products
+      const inventory = await tx.inventory.create({
+        data: {
+          productId: product.id,
+          branchId: 'main',
+          currentStock: initialQuantity ? parseInt(initialQuantity) : 0,
+          minimumStock: minStockLevel ? parseInt(minStockLevel) : 10,
+          maximumStock: 1000,
+          reorderPoint: minStockLevel ? parseInt(minStockLevel) : 10,
+          reorderQuantity: 100,
+          averageCost: cost ? parseFloat(cost) : parseFloat(price),
+          lastCost: cost ? parseFloat(cost) : parseFloat(price),
+          totalValue: (initialQuantity ? parseInt(initialQuantity) : 0) * (cost ? parseFloat(cost) : parseFloat(price)),
+          lowStockAlert: (initialQuantity ? parseInt(initialQuantity) : 0) <= (minStockLevel ? parseInt(minStockLevel) : 10),
+          excessStockAlert: false
+        }
+      });
+
+      // Create initial inventory batch if specified
       if (initialQuantity && parseInt(initialQuantity) > 0) {
         const batchQuantity = parseInt(initialQuantity);
         const batchUnitCost = cost ? parseFloat(cost) : parseFloat(price);
         await tx.inventoryBatch.create({
           data: {
+            inventoryId: inventory.id,
             productId: product.id,
             quantity: batchQuantity,
             unitCost: batchUnitCost,
@@ -211,7 +232,7 @@ router.post('/', authenticateToken, requirePermission('products:write'), async (
         });
       }
 
-      return product;
+      return { product, inventory };
     });
 
     res.status(201).json({

@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import api from '../services/api';
 
@@ -89,9 +90,9 @@ export const SalesProvider = ({ children }) => {
     };
   };
 
-  const processCheckout = async (paymentData) => {
+  const processCheckout = async () => {
     try {
-      const { subtotal, discountAmount, taxAmount, total } = getCartTotal();
+      const { discountAmount, taxAmount } = getCartTotal();
       
       const saleData = {
         items: cart.map(item => ({

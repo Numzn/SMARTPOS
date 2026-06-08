@@ -1,0 +1,25 @@
+# Self-hosted PostgreSQL for Smart POS (no Supabase).
+# Start: docker compose up -d
+# Stop:  docker compose down
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: smart-pos-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: smartpos
+      POSTGRES_PASSWORD: smartpos_dev_change_me
+      POSTGRES_DB: smartpos
+    volumes:
+      - smart_pos_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U smartpos -d smartpos"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  smart_pos_pg_data:

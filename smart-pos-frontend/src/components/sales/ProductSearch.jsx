@@ -1,6 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useSales } from '../../contexts/SalesContext';
-import axios from 'axios';
 
 const ProductSearch = () => {
   const { addToCart } = useSales();
@@ -10,20 +9,7 @@ const ProductSearch = () => {
   const [categories, setCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState('');
 
-  useEffect(() => {
-    fetchProducts();
-    fetchCategories();
-  }, []);
-
-  useEffect(() => {
-    const debounceTimer = setTimeout(() => {
-      fetchProducts();
-    }, 300);
-
-    return () => clearTimeout(debounceTimer);
-  }, [searchTerm, selectedCategory]);
-
-  const fetchProducts = async () => {
+  const fetchProducts = useCallback(async () => {
     setLoading(true);
     try {
       // Mock data for now - replace with actual API calls
@@ -66,15 +52,22 @@ const ProductSearch = () => {
         );
       }
 
+      if (selectedCategory) {
+        const selectedCategoryName = categories.find((c) => c.id === selectedCategory)?.name;
+        filtered = selectedCategoryName
+          ? filtered.filter((product) => product.category === selectedCategoryName)
+          : filtered;
+      }
+
       setProducts(filtered);
     } catch (error) {
       console.error('Error fetching products:', error);
     } finally {
       setLoading(false);
     }
-  };
+  }, [searchTerm, selectedCategory, categories]);
 
-  const fetchCategories = async () => {
+  const fetchCategories = useCallback(async () => {
     try {
       // Mock categories
       setCategories([
@@ -85,7 +78,19 @@ const ProductSearch = () => {
     } catch (error) {
       console.error('Error fetching categories:', error);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchCategories();
+  }, [fetchCategories]);
+
+  useEffect(() => {
+    const debounceTimer = setTimeout(() => {
+      fetchProducts();
+    }, 300);
+
+    return () => clearTimeout(debounceTimer);
+  }, [fetchProducts]);
 
   const handleAddToCart = (product) => {
     addToCart(product, 1);

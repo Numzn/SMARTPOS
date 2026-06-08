@@ -1,7 +1,7 @@
 const vsdcService = require('./vsdcService')
 const zraCodesService = require('./zraCodesService')
 const auditService = require('./auditService')
-const { PrismaClient } = require('@prisma/client')
+const prisma = require('../lib/prisma')
 
 /**
  * Item Classification Service - Implementation based on VSDC API Specification v1.0.8
@@ -12,7 +12,7 @@ const { PrismaClient } = require('@prisma/client')
 
 class ItemClassificationService {
   constructor() {
-    this.prisma = new PrismaClient()
+    this.prisma = prisma
     this.lastSyncDate = null
     
     // ZRA Item types as per VSDC specification

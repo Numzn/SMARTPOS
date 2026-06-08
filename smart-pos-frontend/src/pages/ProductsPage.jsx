@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import ProductModal from '../components/ProductModal';
 import ProductsTable from '../components/ProductsTable';
 import { productApi, categoryApi, inventoryApi } from '../services/productService';
@@ -28,9 +28,9 @@ const ProductsPage = () => {
 
   useEffect(() => {
     loadInitialData();
-  }, []);
+  }, [loadInitialData]);
 
-  const loadInitialData = async () => {
+  const loadInitialData = useCallback(async () => {
     try {
       await Promise.all([
         fetchProducts(),
@@ -42,7 +42,7 @@ const ProductsPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   const fetchProducts = async () => {
     try {

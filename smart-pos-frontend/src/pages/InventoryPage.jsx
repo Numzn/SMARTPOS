@@ -1,6 +1,6 @@
-
 import React, { useState, useEffect } from 'react';
 import { productApi } from '../services/productService';
+import { apiFetch } from '../lib/apiClient';
 
 const InventoryPage = () => {
   const [inventory, setInventory] = useState([]);
@@ -12,8 +12,9 @@ const InventoryPage = () => {
   const [showReceiveModal, setShowReceiveModal] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
   const [adjustmentData, setAdjustmentData] = useState({
+    adjustmentType: 'IN',
     quantity: '',
-    reason: ''
+    reason: '',
   });
   const [receiveData, setReceiveData] = useState({
     quantity: '',
@@ -44,7 +45,6 @@ const InventoryPage = () => {
     try {
       const data = await productApi.fetchProducts();
       setProducts(data);
-      console.log('[InventoryPage] Products loaded:', data);
     } catch (error) {
       console.error('[InventoryPage] Error fetching products:', error);
     }
@@ -52,18 +52,8 @@ const InventoryPage = () => {
 
   const fetchInventory = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch('http://localhost:4000/api/inventory?includeExpired=false', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setInventory(data.inventory || data);
-        console.log('[InventoryPage] Inventory loaded:', data.inventory || data);
-      }
+      const data = await apiFetch('/inventory?includeExpired=false');
+      setInventory(data.inventory || data);
     } catch (error) {
       console.error('[InventoryPage] Error fetching inventory:', error);
     } finally {
@@ -73,95 +63,53 @@ const InventoryPage = () => {
 
   const fetchExpiryAlerts = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch('http://localhost:4000/api/inventory/expiry-alerts?days=7', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setExpiryAlerts(data);
-      }
+      const data = await apiFetch('/inventory/expiry-alerts?days=7');
+      setExpiryAlerts(data);
     } catch (error) {
       console.error('Error fetching expiry alerts:', error);
     }
   };
 
-  const fetchProducts = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const response = await fetch('http://localhost:4000/api/products', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setProducts(data);
-      }
-    } catch (error) {
-      console.error('Error fetching products:', error);
-    }
-  };
-
   const handleStockAdjustment = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch('http://localhost:4000/api/inventory/adjust', {
+      await apiFetch('/inventory/adjust', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
         body: JSON.stringify({
           productId: selectedItem.productId,
-          quantity: parseInt(adjustmentData.quantity),
-          reason: adjustmentData.reason
-        })
+          adjustmentType: adjustmentData.adjustmentType,
+          quantity: parseInt(adjustmentData.quantity, 10),
+          reason: adjustmentData.reason,
+        }),
       });
-
-      if (response.ok) {
-        setShowAdjustModal(false);
-        setAdjustmentData({ quantity: '', reason: '' });
-        fetchInventory();
-      }
+      setShowAdjustModal(false);
+      setAdjustmentData({ adjustmentType: 'IN', quantity: '', reason: '' });
+      fetchInventory();
     } catch (error) {
       console.error('Error adjusting stock:', error);
+      alert(error.message || 'Stock adjustment failed');
     }
   };
 
   const handleReceiveStock = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch('http://localhost:4000/api/inventory/receive', {
+      await apiFetch('/inventory/receive', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
         body: JSON.stringify({
           productId: selectedItem.productId,
-          quantity: parseInt(receiveData.quantity),
+          quantity: parseInt(receiveData.quantity, 10),
           unitCost: parseFloat(receiveData.unitCost),
           supplierInfo: receiveData.supplierInfo,
           batchNumber: receiveData.batchNumber,
-          expiryDate: receiveData.expiryDate || null
-        })
+          expiryDate: receiveData.expiryDate || null,
+        }),
       });
-
-      if (response.ok) {
-        setShowReceiveModal(false);
-        setReceiveData({ quantity: '', unitCost: '', supplierInfo: '', batchNumber: '', expiryDate: '' });
-        fetchInventory();
-        fetchExpiryAlerts();
-      }
+      setShowReceiveModal(false);
+      setReceiveData({ quantity: '', unitCost: '', supplierInfo: '', batchNumber: '', expiryDate: '' });
+      fetchInventory();
+      fetchExpiryAlerts();
     } catch (error) {
       console.error('Error receiving stock:', error);
+      alert(error.message || 'Receive stock failed');
     }
   };
 
@@ -188,20 +136,12 @@ const InventoryPage = () => {
 
   const markBatchExpired = async (batchId) => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch('http://localhost:4000/api/inventory/mark-expired', {
+      await apiFetch('/inventory/mark-expired', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ batchId, reason: 'Expired' })
+        body: JSON.stringify({ batchId, reason: 'Expired' }),
       });
-
-      if (response.ok) {
-        fetchInventory();
-        fetchExpiryAlerts();
-      }
+      fetchInventory();
+      fetchExpiryAlerts();
     } catch (error) {
       console.error('Error marking batch as expired:', error);
     }
@@ -456,20 +396,30 @@ const InventoryPage = () => {
             <h3 className="text-lg font-semibold mb-4">Adjust Stock</h3>
             <div className="space-y-4">
               <div>
+                <label className="block text-sm font-medium mb-1">Direction</label>
+                <select
+                  value={adjustmentData.adjustmentType}
+                  onChange={(e) =>
+                    setAdjustmentData({ ...adjustmentData, adjustmentType: e.target.value })
+                  }
+                  className="input-sys w-full"
+                >
+                  <option value="IN">Increase stock</option>
+                  <option value="OUT">Decrease stock</option>
+                </select>
+              </div>
+              <div>
                 <label className="block text-sm font-medium mb-1">Quantity</label>
                 <input
                   type="number"
-                  placeholder="Enter adjustment quantity"
+                  min="1"
+                  placeholder="Units"
                   value={adjustmentData.quantity}
-                  onChange={(e) => setAdjustmentData({
-                    ...adjustmentData,
-                    quantity: e.target.value
-                  })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  onChange={(e) =>
+                    setAdjustmentData({ ...adjustmentData, quantity: e.target.value })
+                  }
+                  className="input-sys w-full"
                 />
-                <p className="text-xs text-gray-500 mt-1">
-                  Use positive numbers to increase, negative to decrease
-                </p>
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Reason</label>

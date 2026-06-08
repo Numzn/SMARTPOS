@@ -29,7 +29,7 @@ const checkCompliance = () => {
         { name: 'User Authentication', file: 'routes/users.js', status: '✅', priority: 'MEDIUM' },
         { name: 'Role-based Access', file: 'middleware/auth.js', status: '✅', priority: 'MEDIUM' },
         { name: 'Branch Management', file: 'routes/branches.js', status: '✅', priority: 'HIGH' },
-        { name: 'User Session Management', file: 'services/sessionService.js', status: '❌', priority: 'MEDIUM' }
+        { name: 'User Session Management', file: 'middleware/auth.js', status: '⏳', priority: 'MEDIUM' }
       ]
     },
     {
@@ -37,15 +37,15 @@ const checkCompliance = () => {
       items: [
         { name: 'Product Management', file: 'routes/products.js', status: '✅', priority: 'MEDIUM' },
         { name: 'Category Management', file: 'routes/categories.js', status: '✅', priority: 'LOW' },
-        { name: 'Stock Synchronization', file: 'services/stockSyncService.js', status: '❌', priority: 'HIGH' },
-        { name: 'ZRA Item Classification', file: 'services/itemClassificationService.js', status: '❌', priority: 'HIGH' }
+        { name: 'Stock Synchronization', file: 'services/stockSyncService.js', status: '⏳', priority: 'HIGH' },
+        { name: 'ZRA Item Classification', file: 'services/itemClassificationService.js', status: '⏳', priority: 'HIGH' }
       ]
     },
     {
       phase: 'Phase 4: Transaction Processing',
       items: [
         { name: 'Sales Processing', file: 'routes/sales.js', status: '✅', priority: 'HIGH' },
-        { name: 'Invoice Generation', file: 'services/invoiceService.js', status: '✅', priority: 'HIGH' },
+        { name: 'Invoice Generation', file: 'services/zraInvoice.js', status: '✅', priority: 'HIGH' },
         { name: 'Purchase Management', file: 'routes/purchases.js', status: '❌', priority: 'HIGH' },
         { name: 'Credit/Debit Notes', file: 'services/creditNoteService.js', status: '❌', priority: 'MEDIUM' }
       ]
@@ -62,7 +62,7 @@ const checkCompliance = () => {
     {
       phase: 'Phase 6: Reporting',
       items: [
-        { name: 'Basic Reports', file: 'routes/reports.js', status: '❌', priority: 'MEDIUM' },
+        { name: 'Basic Reports', file: 'routes/inventory/reports.js', status: '✅', priority: 'MEDIUM' },
         { name: 'Excel Export', file: 'services/excelExportService.js', status: '❌', priority: 'HIGH' },
         { name: 'PDF Generation', file: 'services/pdfService.js', status: '❌', priority: 'MEDIUM' },
         { name: 'ZRA Compliance Reports', file: 'services/zraReportService.js', status: '❌', priority: 'HIGH' }
@@ -74,6 +74,16 @@ const checkCompliance = () => {
   let completedItems = 0
   let inProgressItems = 0
   let highPriorityPending = 0
+  const getEffectiveStatus = (item) => {
+    const exists = fs.existsSync(path.join(__dirname, '..', item.file))
+    let status = item.status
+
+    // Keep report consistent with filesystem to avoid false positives/negatives.
+    if (status === '✅' && !exists) status = '❌'
+    if (status === '❌' && exists) status = '⏳'
+
+    return { exists, status }
+  }
 
   checks.forEach(phase => {
     console.log(`\n📋 ${phase.phase}`)
@@ -81,13 +91,13 @@ const checkCompliance = () => {
     
     phase.items.forEach(item => {
       totalItems++
-      const exists = fs.existsSync(path.join(__dirname, '..', item.file))
+      const { exists, status } = getEffectiveStatus(item)
       let implementationStatus = 'Missing'
       
-      if (item.status === '✅') {
+      if (status === '✅') {
         completedItems++
         implementationStatus = 'Implemented'
-      } else if (item.status === '⏳') {
+      } else if (status === '⏳') {
         inProgressItems++
         implementationStatus = 'In Progress'
       } else if (item.priority === 'HIGH') {
@@ -97,7 +107,7 @@ const checkCompliance = () => {
       const priorityColor = item.priority === 'HIGH' ? '🔴' : 
                            item.priority === 'MEDIUM' ? '🟡' : '🟢'
       
-      console.log(`${item.status} ${item.name}`)
+      console.log(`${status} ${item.name}`)
       console.log(`   File: ${item.file}`)
       console.log(`   Status: ${implementationStatus} ${exists ? '(File exists)' : '(File missing)'}`)
       console.log(`   Priority: ${priorityColor} ${item.priority}`)
@@ -136,7 +146,8 @@ const checkCompliance = () => {
     console.log('🔴 HIGH PRIORITY ITEMS:')
     checks.forEach(phase => {
       phase.items.forEach(item => {
-        if (item.status === '❌' && item.priority === 'HIGH') {
+        const { status } = getEffectiveStatus(item)
+        if (status === '❌' && item.priority === 'HIGH') {
           console.log(`   • Implement ${item.name} (${item.file})`)
         }
       })
@@ -148,7 +159,8 @@ const checkCompliance = () => {
     console.log('⏳ COMPLETE IN-PROGRESS ITEMS:')
     checks.forEach(phase => {
       phase.items.forEach(item => {
-        if (item.status === '⏳') {
+        const { status } = getEffectiveStatus(item)
+        if (status === '⏳') {
           console.log(`   • Finish ${item.name} (${item.file})`)
         }
       })

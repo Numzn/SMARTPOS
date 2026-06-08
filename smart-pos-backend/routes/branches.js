@@ -1,6 +1,6 @@
 const express = require('express')
 const router = express.Router()
-const { PrismaClient } = require('@prisma/client')
+const prisma = require('../lib/prisma')
 const vsdcService = require('../services/vsdcService')
 const auditService = require('../services/auditService')
 const { authenticateToken: auth } = require('../middleware/auth')
@@ -11,8 +11,6 @@ const { authenticateToken: auth } = require('../middleware/auth')
  * 
  * Handles business branch registration and management for ZRA compliance
  */
-
-const prisma = new PrismaClient()
 
 /**
  * Get all branches

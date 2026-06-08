@@ -17,6 +17,16 @@
     "backend:install": "cd smart-pos-backend && npm install",
     "backend:generate": "cd smart-pos-backend && npx prisma generate",
     "backend:reset": "cd smart-pos-backend && npx prisma migrate reset",
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose down",
+    "docker:reset": "docker compose down -v",
+    "docker:logs": "docker compose logs -f",
+    "docker:ps": "docker compose ps",
+    "docker:rebuild": "docker compose build --no-cache && docker compose up -d",
+    "docker:smoke": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/docker-smoke.ps1",
+    "docker:status": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/status.ps1",
+    "deploy:numzlab": "bash scripts/deploy-numzlab.sh",
+    "deploy:numzlab:update": "bash scripts/deploy-numzlab.sh --pull --no-seed",
     "help": "node dev-helper.js"
   },
   "keywords": [
@@ -26,7 +36,7 @@
     "node",
     "express",
     "prisma",
-    "sqlite",
+    "postgresql",
     "zra-compliance"
   ],
   "author": "Smart POS Development Team",
@@ -38,5 +48,9 @@
   "workspaces": [
     "smart-pos-frontend",
     "smart-pos-backend"
-  ]
+  ],
+  "dependencies": {
+    "framer-motion": "^12.23.6",
+    "lucide-react": "^0.525.0"
+  }
 }

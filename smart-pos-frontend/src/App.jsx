@@ -5,17 +5,18 @@ import { SalesProvider } from './contexts/SalesContext';
 import LoginForm from './components/auth/LoginForm';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 import MainLayout from './components/layout/MainLayout';
-import Dashboard from './components/Dashboard';
+import Dashboard from './components/dashboard/Dashboard';
 import ProductsPage from './pages/ProductsPage';
 import InventoryPage from './pages/InventoryPage';
 import ReportsPage from './components/reports/ReportsPage';
+import CashierPage from './pages/CashierPage';
 
 function App() {
   return (
     <AuthProvider>
       <SalesProvider>
         <Router future={{ v7_relativeSplatPath: true }}>
-          <div className="min-h-screen bg-gray-50">
+          <div className="min-h-screen bg-surface">
             <Routes>
               {/* Public Routes */}
               <Route path="/login" element={<LoginForm />} />
@@ -32,6 +33,7 @@ function App() {
                 <Route index element={<Navigate to="/dashboard" replace />} />
                 <Route path="dashboard" element={<Dashboard />} />
                 <Route path="sales" element={<Dashboard />} />
+                <Route path="cashier" element={<CashierPage />} />
                 <Route path="products" element={<ProductsPage />} />
                 <Route path="inventory" element={<InventoryPage />} />
                 <Route path="reports" element={<ReportsPage />} />

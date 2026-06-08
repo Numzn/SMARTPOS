@@ -1,6 +1,6 @@
 const vsdcService = require('./vsdcService')
 const auditService = require('./auditService')
-const { PrismaClient } = require('@prisma/client')
+const prisma = require('../lib/prisma')
 
 /**
  * ZRA Invoice Service - VSDC PDF Compliant Implementation
@@ -11,7 +11,7 @@ const { PrismaClient } = require('@prisma/client')
 
 class ZRAInvoiceService {
   constructor() {
-    this.prisma = new PrismaClient()
+    this.prisma = prisma
     
     // Sales Types as per VSDC specification
     this.salesTypes = {
@@ -310,86 +310,201 @@ class ZRAInvoiceService {
   }
 
   /**
-   * Generate invoice data from sale (enhanced with validation)
+   * Build VSDC invoice payload from a loaded Sale (with saleItems + product).
    */
-  async generateInvoiceDataFromSale(saleId) {
-    try {
-      console.log(`🛠️ Generating invoice data from sale: ${saleId}`)
-      
-      // Fetch sale details
-      const sale = await this.prisma.sale.findUnique({
-        where: { id: saleId },
-        include: {
-          customer: true,
-          items: true
-        }
-      })
-      
-      if (!sale) {
-        throw new Error(`Sale not found: ${saleId}`)
-      }
-      
-      // Basic validation
-      if (!sale.customer || !sale.customer.tpin) {
-        throw new Error(`Customer TPIN is required for invoice generation`)
-      }
-      
-      // Map sale to invoice data structure
-      const invoiceData = {
-        invoiceNumber: sale.id,
-        originalInvoiceNumber: sale.originalId || null,
-        customerTpin: sale.customer.tpin,
-        customerName: sale.customer.name,
-        customerBranchId: sale.customer.branchId || '00',
-        salesType: sale.salesType || this.salesTypes.NORMAL,
-        receiptType: sale.receiptType || this.receiptTypes.SALE,
-        paymentMethod: sale.paymentMethod || 'CASH',
-        salesStatus: sale.status || this.salesStatus.APPROVED,
-        confirmationDate: sale.confirmedAt,
-        salesDate: sale.date,
-        stockReleaseDate: sale.stockReleasedAt,
-        cancellationRequestDate: sale.cancellationRequestedAt,
-        cancellationDate: sale.cancelledAt,
-        refundDate: sale.refundedAt,
-        refundReasonCode: sale.refundReasonCode || null,
-        remark: sale.remark || '',
-        registeredBy: sale.registeredBy || 'SYSTEM',
-        registeredByName: sale.registeredByName || 'SYSTEM',
-        modifiedBy: sale.modifiedBy || 'SYSTEM',
-        modifiedByName: sale.modifiedByName || 'SYSTEM',
-        items: sale.items.map(item => ({
-          itemCode: item.productCode,
-          itemClassification: item.classification,
-          itemName: item.name,
-          barcode: item.barcode,
-          packageUnit: item.packageUnit,
-          packageQuantity: item.packageQuantity,
-          quantityUnit: item.quantityUnit,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          supplyAmount: item.supplyAmount,
-          discountRate: item.discountRate,
-          discountAmount: item.discountAmount,
-          insuranceCode: item.insuranceCode,
-          insuranceName: item.insuranceName,
-          insuranceRate: item.insuranceRate,
-          insuranceAmount: item.insuranceAmount,
-          taxType: item.taxType,
-          taxableAmount: item.taxableAmount,
-          taxAmount: item.taxAmount,
-          totalAmount: item.totalAmount
-        })),
-        totalTaxableAmount: sale.items.reduce((sum, item) => sum + parseFloat(item.taxableAmount || 0), 0),
-        totalTaxAmount: sale.items.reduce((sum, item) => sum + parseFloat(item.taxAmount || 0), 0),
-        totalAmount: sale.items.reduce((sum, item) => sum + parseFloat(item.totalAmount || 0), 0)
-      }
+  buildInvoiceDataFromSale(sale, options = {}) {
+    const customerName = options.customerName || 'Walk-in Customer';
+    const customerTpin = options.customerTpin || null;
 
-      console.log(`✅ Invoice data generated successfully: ${invoiceData.invoiceNumber}`)
-      return invoiceData
-    } catch (error) {
-      console.error('❌ Failed to generate invoice data:', error.message)
-      throw error
+    const items = sale.saleItems.map((line) => {
+      const product = line.product;
+      return {
+        itemCode: product.sku || product.id,
+        itemClassification:
+          product.zraItemClassification ||
+          product.zraClassificationCode ||
+          '00000000',
+        itemName: product.name,
+        barcode: product.barcode,
+        packageUnit: product.zraPackageUnit || product.unit || 'EA',
+        packageQuantity: line.pkg ?? 1,
+        quantityUnit: product.zraQuantityUnit || product.unit || 'EA',
+        quantity: line.qty,
+        unitPrice: line.prc,
+        supplyAmount: line.splyAmt,
+        discountRate: 0,
+        discountAmount: 0,
+        taxType: product.taxType || 'A',
+        taxableAmount: line.taxblAmt,
+        taxAmount: line.taxAmt,
+        totalAmount: line.totAmt,
+      };
+    });
+
+    return {
+      invoiceNumber: sale.id,
+      customerTpin,
+      customerName,
+      customerBranchId: '00',
+      salesType: this.salesTypes.NORMAL,
+      receiptType: this.receiptTypes.SALE,
+      paymentMethod: sale.paymentMethod,
+      salesStatus: this.salesStatus.APPROVED,
+      confirmationDate: sale.createdAt,
+      salesDate: sale.createdAt,
+      items,
+      totalTaxableAmount: items.reduce((s, i) => s + i.taxableAmount, 0),
+      totalTaxAmount: items.reduce((s, i) => s + i.taxAmount, 0),
+      totalAmount: sale.total,
+      registeredBy: sale.userId,
+      registeredByName: sale.user?.name || sale.user?.email || 'SYSTEM',
+    };
+  }
+
+  /**
+   * Load sale and build invoice data for VSDC submission.
+   */
+  async generateInvoiceDataFromSale(saleId, options = {}) {
+    const sale = await this.prisma.sale.findUnique({
+      where: { id: saleId },
+      include: {
+        saleItems: { include: { product: true } },
+        user: { select: { id: true, name: true, email: true } },
+      },
+    });
+
+    if (!sale) {
+      throw new Error(`Sale not found: ${saleId}`);
     }
+
+    if (!sale.saleItems.length) {
+      throw new Error('Sale has no line items');
+    }
+
+    return this.buildInvoiceDataFromSale(sale, options);
+  }
+
+  /**
+   * Submit a completed sale to ZRA VSDC and persist receipt fields on Sale.
+   */
+  async sendToVSDC(saleId, options = {}) {
+    const sale = await this.prisma.sale.findUnique({
+      where: { id: saleId },
+      include: {
+        saleItems: { include: { product: true } },
+        user: { select: { id: true, name: true, email: true } },
+      },
+    });
+
+    if (!sale) {
+      return { success: false, message: 'Sale not found', data: null };
+    }
+
+    if (sale.rcptNo) {
+      return {
+        success: true,
+        message: 'Sale already submitted to ZRA',
+        data: sale,
+        zraResponse: {
+          rcptNo: sale.rcptNo,
+          qrCode: sale.qrCode,
+          rcptSign: sale.rcptSign,
+        },
+      };
+    }
+
+    await vsdcService.initialize();
+
+    const invoiceData = this.buildInvoiceDataFromSale(sale, options);
+    const result = await this.submitInvoiceWithRetry(invoiceData);
+
+    if (!result.success) {
+      return {
+        success: false,
+        message: result.error || 'ZRA submission failed',
+        data: sale,
+        zraResponse: result,
+      };
+    }
+
+    const zra = result.zraResponse;
+    const updated = await this.prisma.sale.update({
+      where: { id: saleId },
+      data: {
+        rcptNo: zra.rcptNo,
+        rcptSign: zra.intrlData || zra.rcptSign,
+        qrCode: zra.qrCode,
+        vsdcTimestamp: new Date(),
+      },
+      include: {
+        saleItems: { include: { product: true } },
+        user: { select: { id: true, name: true, email: true } },
+      },
+    });
+
+    return {
+      success: true,
+      message: result.message || 'Smart Invoice generated successfully',
+      data: updated,
+      zraResponse: zra,
+    };
+  }
+
+  /**
+   * ZRA receipt status for a sale.
+   */
+  async getReceiptStatus(saleId) {
+    const sale = await this.prisma.sale.findUnique({
+      where: { id: saleId },
+      select: {
+        id: true,
+        rcptNo: true,
+        rcptSign: true,
+        qrCode: true,
+        vsdcTimestamp: true,
+        status: true,
+        total: true,
+        createdAt: true,
+      },
+    });
+
+    if (!sale) {
+      throw new Error(`Sale not found: ${saleId}`);
+    }
+
+    return {
+      saleId: sale.id,
+      submitted: Boolean(sale.rcptNo),
+      status: sale.rcptNo ? 'SUBMITTED' : 'PENDING',
+      rcptNo: sale.rcptNo,
+      rcptSign: sale.rcptSign,
+      qrCode: sale.qrCode,
+      vsdcTimestamp: sale.vsdcTimestamp,
+      saleStatus: sale.status,
+      total: sale.total,
+      createdAt: sale.createdAt,
+    };
+  }
+
+  /**
+   * Completed sales not yet sent to ZRA.
+   */
+  async getPendingZRASales() {
+    return this.prisma.sale.findMany({
+      where: {
+        rcptNo: null,
+        status: 'COMPLETED',
+      },
+      include: {
+        saleItems: {
+          include: {
+            product: { select: { id: true, name: true, sku: true } },
+          },
+        },
+        user: { select: { id: true, name: true, email: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
   }
 
   /**

@@ -53,9 +53,10 @@ app.use((req, res) => {
 });
 
 const PORT = process.env.PORT || 4000;
+const HOST = process.env.HOST || '0.0.0.0';
 
-app.listen(PORT, () => {
-  console.log(`✅ Smart POS Server running on http://localhost:${PORT}`);
+app.listen(PORT, HOST, () => {
+  console.log(`✅ Smart POS Server running on http://${HOST}:${PORT}`);
   console.log(`📊 API Health: http://localhost:${PORT}/api/health`);
   console.log(`🔗 API Endpoints:`);
   console.log(`   - Products: http://localhost:${PORT}/api/products`);
