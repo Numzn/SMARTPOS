@@ -1,6 +1,7 @@
 const vsdcService = require('./vsdcService')
 const auditService = require('./auditService')
 const prisma = require('../lib/prisma')
+const { getProductClassification } = require('../lib/productRegistration')
 
 /**
  * ZRA Invoice Service - VSDC PDF Compliant Implementation
@@ -318,12 +319,15 @@ class ZRAInvoiceService {
 
     const items = sale.saleItems.map((line) => {
       const product = line.product;
+      const itemClassification = getProductClassification(product);
+      if (!itemClassification) {
+        throw new Error(
+          `Product ${product.sku || product.name} is missing ZRA classification code`
+        );
+      }
       return {
         itemCode: product.sku || product.id,
-        itemClassification:
-          product.zraItemClassification ||
-          product.zraClassificationCode ||
-          '00000000',
+        itemClassification,
         itemName: product.name,
         barcode: product.barcode,
         packageUnit: product.zraPackageUnit || product.unit || 'EA',
@@ -385,9 +389,9 @@ class ZRAInvoiceService {
   }
 
   /**
-   * Submit a completed sale to ZRA VSDC and persist receipt fields on Sale.
+   * Submit sale to VSDC only — does not update sale status or stock (owned by saleFiscal).
    */
-  async sendToVSDC(saleId, options = {}) {
+  async submitFiscalForSale(saleId, options = {}) {
     const sale = await this.prisma.sale.findUnique({
       where: { id: saleId },
       include: {
@@ -404,49 +408,80 @@ class ZRAInvoiceService {
       return {
         success: true,
         message: 'Sale already submitted to ZRA',
-        data: sale,
         zraResponse: {
           rcptNo: sale.rcptNo,
           qrCode: sale.qrCode,
           rcptSign: sale.rcptSign,
         },
+        vsdcRequest: sale.vsdcRequest,
+        vsdcResponse: sale.vsdcResponse,
       };
     }
 
-    await vsdcService.initialize();
+    const ready = await vsdcService.isDeviceReady();
+    if (!ready) {
+      const init = await vsdcService.ensureDeviceInitialized();
+      if (!init.success) {
+        return {
+          success: false,
+          message: init.error || 'VSDC device not initialized',
+          code: 'VSDC_NOT_INITIALIZED',
+        };
+      }
+    }
 
     const invoiceData = this.buildInvoiceDataFromSale(sale, options);
+    const vsdcRequest = invoiceData;
+
+    await this.prisma.sale.update({
+      where: { id: saleId },
+      data: { vsdcRequest },
+    });
+
     const result = await this.submitInvoiceWithRetry(invoiceData);
+
+    const vsdcResponse = result.success
+      ? result.zraResponse
+      : { error: result.error, code: result.code, resultMsg: result.error };
 
     if (!result.success) {
       return {
         success: false,
         message: result.error || 'ZRA submission failed',
-        data: sale,
+        vsdcRequest,
+        vsdcResponse,
         zraResponse: result,
       };
     }
 
-    const zra = result.zraResponse;
-    const updated = await this.prisma.sale.update({
-      where: { id: saleId },
-      data: {
-        rcptNo: zra.rcptNo,
-        rcptSign: zra.intrlData || zra.rcptSign,
-        qrCode: zra.qrCode,
-        vsdcTimestamp: new Date(),
-      },
-      include: {
-        saleItems: { include: { product: true } },
-        user: { select: { id: true, name: true, email: true } },
-      },
-    });
-
     return {
       success: true,
       message: result.message || 'Smart Invoice generated successfully',
-      data: updated,
-      zraResponse: zra,
+      zraResponse: result.zraResponse,
+      vsdcRequest,
+      vsdcResponse,
+    };
+  }
+
+  /**
+   * Submit a completed sale to ZRA VSDC and persist receipt fields on Sale.
+   * @deprecated Prefer saleFiscal.finalizeSaleFiscally for fiscal-lock flow.
+   */
+  async sendToVSDC(saleId, options = {}) {
+    const saleFiscal = require('../lib/saleFiscal');
+    const outcome = await saleFiscal.finalizeSaleFiscally(saleId, options);
+    if (!outcome.success) {
+      return {
+        success: false,
+        message: outcome.fiscal?.error || 'ZRA submission failed',
+        data: outcome.sale,
+      };
+    }
+    return {
+      success: true,
+      message: 'Smart Invoice generated successfully',
+      data: outcome.sale,
+      zraResponse: outcome.fiscal,
     };
   }
 
@@ -493,7 +528,7 @@ class ZRAInvoiceService {
     return this.prisma.sale.findMany({
       where: {
         rcptNo: null,
-        status: 'COMPLETED',
+        status: { in: ['PENDING', 'FISCAL_FAILED', 'FISCAL_SUBMITTING'] },
       },
       include: {
         saleItems: {

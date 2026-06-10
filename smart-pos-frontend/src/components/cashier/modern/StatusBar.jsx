@@ -1,15 +1,15 @@
 import React from 'react';
 import { Wifi, Printer, ShoppingCart } from 'lucide-react';
+import { formatZmw } from '../../../utils/cartTotals';
 
 const StatusBar = ({
-  zraStatus = 'connected',
+  zraStatus = 'unknown',
   printerStatus = 'ready',
   networkStatus = 'connected',
   cartSummary = { itemCount: 0, total: 0 },
   onCheckout,
 }) => {
-  const formatCurrency = (amount) =>
-    new Intl.NumberFormat('en-ZM', { style: 'currency', currency: 'ZMW' }).format(amount);
+  const zraOk = zraStatus === 'connected' || zraStatus === 'ready';
 
   const pill = (label, value, ok) => (
     <div
@@ -25,7 +25,7 @@ const StatusBar = ({
   return (
     <footer className="h-11 flex-shrink-0 bg-surface-raised border-t border-surface-border px-4 flex items-center justify-between gap-4">
       <div className="flex items-center gap-2 flex-wrap">
-        {pill('ZRA', zraStatus, zraStatus === 'connected')}
+        {pill('ZRA', zraStatus, zraOk)}
         {pill('Printer', printerStatus, printerStatus === 'ready')}
         <div className="status-pill border-gray-200 bg-gray-50 text-gray-700">
           <Wifi className="w-3 h-3" />
@@ -36,9 +36,11 @@ const StatusBar = ({
       <div className="flex items-center gap-4 font-mono text-sm">
         <div className="flex items-center gap-2 text-gray-600">
           <ShoppingCart className="w-3.5 h-3.5" />
-          <span>{cartSummary.itemCount} ln</span>
+          <span>
+            {cartSummary.itemCount} item{cartSummary.itemCount !== 1 ? 's' : ''}
+          </span>
         </div>
-        <span className="font-semibold text-gray-900">{formatCurrency(cartSummary.total)}</span>
+        <span className="font-semibold text-gray-900">{formatZmw(cartSummary.total)}</span>
         <button
           type="button"
           onClick={onCheckout}

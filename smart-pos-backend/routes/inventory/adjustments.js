@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const prisma = require('../../lib/prisma');
 const { authenticateToken, requirePermission } = require('../../middleware/auth');
+const { deductBatchesFifo } = require('../../lib/inventoryStock');
+const stockSyncService = require('../../services/stockSyncService');
 
 // Canonical stock adjustment endpoint.
 // Accepts both operational (IN/OUT) and ZRA-style adjustment types and writes:
@@ -159,29 +161,11 @@ router.post('/adjust', authenticateToken, requirePermission('inventory:write'), 
           },
         });
       } else {
-        const activeBatches = await tx.inventoryBatch.findMany({
-          where: {
-            inventoryId: inventory.id,
-            status: 'ACTIVE',
-            quantity: { gt: 0 },
-          },
-          orderBy: { createdAt: 'asc' },
+        await deductBatchesFifo(tx, {
+          inventoryId: inventory.id,
+          productId,
+          quantity: adjustmentQty,
         });
-
-        let remainingToReduce = adjustmentQty;
-        for (const batch of activeBatches) {
-          if (remainingToReduce <= 0) break;
-          const reduceFromBatch = Math.min(batch.quantity, remainingToReduce);
-          const newBatchQuantity = batch.quantity - reduceFromBatch;
-          await tx.inventoryBatch.update({
-            where: { id: batch.id },
-            data: {
-              quantity: newBatchQuantity,
-              status: newBatchQuantity === 0 ? 'SOLD_OUT' : 'ACTIVE',
-            },
-          });
-          remainingToReduce -= reduceFromBatch;
-        }
       }
 
       return {
@@ -200,6 +184,12 @@ router.post('/adjust', authenticateToken, requirePermission('inventory:write'), 
       message: 'Stock adjustment completed successfully',
       ...result,
     });
+
+    if (result.stockMovement?.id) {
+      stockSyncService.syncMovementById(result.stockMovement.id).catch((err) => {
+        console.warn('[adjustments] stock sync failed:', err.message);
+      });
+    }
   } catch (error) {
     console.error('❌ Error processing stock adjustment:', error);
     res.status(500).json({ 

@@ -1,62 +1,86 @@
-import React, { useState, useEffect } from 'react';
-import { useAuth } from '../../../contexts/AuthContext';
+import React, { useState, useEffect, useMemo } from 'react';
 import CashierHeader from './CashierHeader';
 import CashierTabs from './CashierTabs';
 import ProductGrid from './ProductGrid';
 import CartSection from './CartSection';
 import StatusBar from './StatusBar';
 import CheckoutModal from '../../CheckoutModal';
-import { fetchProducts, fetchCategories, mockProducts, mockCategories } from '../../../api/cashierApi';
+import {
+  fetchProducts,
+  fetchCategories,
+  fetchVsdcStatus,
+  mockProducts,
+  mockCategories,
+} from '../../../api/cashierApi';
+import { calculateCartTotals } from '../../../utils/cartTotals';
 
 const CashierDashboard = () => {
-  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('quickshop');
   const [currentTime, setCurrentTime] = useState(new Date());
   const [showCheckout, setShowCheckout] = useState(false);
   const [usingMockData, setUsingMockData] = useState(false);
-  
-  // Data states
+
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [cart, setCart] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
-  
-  // System status
-  const [systemStatus] = useState({
-    zra: 'connected',
-    printer: 'ready',
-    network: 'connected'
-  });
 
-  // Update time every second
+  const [discountType, setDiscountType] = useState('percentage');
+  const [discountValue, setDiscountValue] = useState('');
+
+  const [zraStatus, setZraStatus] = useState('checking');
+  const [printerStatus] = useState('ready');
+  const [networkStatus] = useState('connected');
+  const [stockNotice, setStockNotice] = useState('');
+
+  const cartTotals = useMemo(
+    () => calculateCartTotals(cart, { discountType, discountValue }),
+    [cart, discountType, discountValue]
+  );
+
   useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentTime(new Date());
-    }, 1000);
-
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
-  // Fetch initial data
   useEffect(() => {
     fetchInitialData();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadVsdc = async () => {
+      try {
+        const status = await fetchVsdcStatus();
+        if (!cancelled) {
+          setZraStatus(status.initialized ? 'connected' : 'not initialized');
+        }
+      } catch {
+        if (!cancelled) setZraStatus('offline');
+      }
+    };
+
+    loadVsdc();
+    const interval = setInterval(loadVsdc, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, []);
 
   const fetchInitialData = async () => {
     setIsLoading(true);
     try {
-      // Fetch products and categories
       const [productsData, categoriesData] = await Promise.all([
         fetchProducts(),
-        fetchCategories()
+        fetchCategories(),
       ]);
-
       setProducts(productsData);
       setCategories(categoriesData);
       setUsingMockData(false);
     } catch (error) {
       console.error('Failed to fetch data:', error);
-      // Fallback to mock data
       setProducts(mockProducts);
       setCategories(mockCategories);
       setUsingMockData(true);
@@ -65,20 +89,35 @@ const CashierDashboard = () => {
     }
   };
 
-  // Cart management
+  const getAvailableStock = (productId) =>
+    products.find((product) => product.id === productId)?.stock ?? 0;
+
+  const showStockNotice = (message) => {
+    setStockNotice(message);
+    window.setTimeout(() => setStockNotice(''), 3000);
+  };
+
   const addToCart = (product) => {
-    setCart(prevCart => {
-      const existingItem = prevCart.find(item => item.id === product.id);
-      
-      if (existingItem) {
-        return prevCart.map(item =>
-          item.id === product.id
-            ? { ...item, quantity: item.quantity + 1 }
-            : item
-        );
-      } else {
-        return [...prevCart, { ...product, quantity: 1 }];
+    if (product.stock <= 0) {
+      showStockNotice(`${product.name} is out of stock.`);
+      return;
+    }
+
+    setCart((prevCart) => {
+      const existingItem = prevCart.find((item) => item.id === product.id);
+      const nextQuantity = (existingItem?.quantity ?? 0) + 1;
+
+      if (nextQuantity > product.stock) {
+        showStockNotice(`Only ${product.stock} of ${product.name} available.`);
+        return prevCart;
       }
+
+      if (existingItem) {
+        return prevCart.map((item) =>
+          item.id === product.id ? { ...item, quantity: nextQuantity } : item
+        );
+      }
+      return [...prevCart, { ...product, quantity: 1 }];
     });
   };
 
@@ -88,34 +127,28 @@ const CashierDashboard = () => {
       return;
     }
 
-    setCart(prevCart =>
-      prevCart.map(item =>
-        item.id === itemId ? { ...item, quantity: newQuantity } : item
-      )
+    const availableStock = getAvailableStock(itemId);
+    const cappedQuantity = Math.min(newQuantity, availableStock);
+
+    if (cappedQuantity < newQuantity) {
+      const item = cart.find((entry) => entry.id === itemId);
+      showStockNotice(`Only ${availableStock} of ${item?.name || 'this item'} available.`);
+    }
+
+    setCart((prevCart) =>
+      prevCart.map((item) => (item.id === itemId ? { ...item, quantity: cappedQuantity } : item))
     );
   };
 
   const removeFromCart = (itemId) => {
-    setCart(prevCart => prevCart.filter(item => item.id !== itemId));
+    setCart((prevCart) => prevCart.filter((item) => item.id !== itemId));
   };
 
   const clearCart = () => {
     setCart([]);
+    setDiscountValue('');
   };
 
-  const getCartTotal = () => {
-    return cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-  };
-
-  const getCartSummary = () => {
-    const itemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
-    return {
-      itemCount,
-      total: getCartTotal()
-    };
-  };
-
-  // Checkout handling
   const handleCheckout = () => {
     if (cart.length > 0) {
       setShowCheckout(true);
@@ -125,14 +158,12 @@ const CashierDashboard = () => {
   const handleCheckoutSuccess = () => {
     setShowCheckout(false);
     clearCart();
-    // You can add success notification here
   };
 
   const handleCheckoutClose = () => {
     setShowCheckout(false);
   };
 
-  // Tab content rendering
   const renderTabContent = () => {
     switch (activeTab) {
       case 'quickshop':
@@ -153,8 +184,12 @@ const CashierDashboard = () => {
                 onUpdateQuantity={updateCartQuantity}
                 onRemoveItem={removeFromCart}
                 onClearCart={clearCart}
-                onCheckout={handleCheckout}
+                discountType={discountType}
+                discountValue={discountValue}
+                onDiscountTypeChange={setDiscountType}
+                onDiscountValueChange={setDiscountValue}
                 usingMockData={usingMockData}
+                getAvailableStock={getAvailableStock}
               />
             </div>
           </div>
@@ -196,39 +231,31 @@ const CashierDashboard = () => {
   };
 
   return (
-    <div className="min-h-[calc(100vh-3rem)] flex flex-col -m-4 bg-surface">
-      {/* Header */}
-      <CashierHeader
-        user={user}
-        currentTime={currentTime}
-        notifications={0}
-      />
+    <div className="h-full flex flex-col bg-surface">
+      <CashierHeader currentTime={currentTime} />
 
-      {/* Tabs */}
-      <CashierTabs
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-      />
+      <CashierTabs activeTab={activeTab} onTabChange={setActiveTab} />
 
-      {/* Main Content */}
-      <main className="flex-1 p-4 overflow-auto">
-        {renderTabContent()}
-      </main>
+      {stockNotice && (
+        <div className="mx-4 mt-3 px-3 py-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded">
+          {stockNotice}
+        </div>
+      )}
 
-      {/* Status Bar */}
+      <main className="flex-1 p-4 overflow-auto">{renderTabContent()}</main>
+
       <StatusBar
-        zraStatus={systemStatus.zra}
-        printerStatus={systemStatus.printer}
-        networkStatus={systemStatus.network}
-        cartSummary={getCartSummary()}
+        zraStatus={zraStatus}
+        printerStatus={printerStatus}
+        networkStatus={networkStatus}
+        cartSummary={{ itemCount: cartTotals.itemCount, total: cartTotals.total }}
         onCheckout={handleCheckout}
       />
 
-      {/* Checkout Modal */}
       {showCheckout && (
         <CheckoutModal
           cart={cart}
-          total={getCartTotal()}
+          cartTotals={cartTotals}
           onSuccess={handleCheckoutSuccess}
           onClose={handleCheckoutClose}
           usingMockData={usingMockData}

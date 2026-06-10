@@ -78,6 +78,12 @@ model Product {
   
   // Inventory management
   minStockLevel         Int      @default(0)
+
+  // VSDC item registration (Section 6.1)
+  zraRegistrationStatus ZraRegistrationStatus @default(PENDING)
+  zraRegisteredAt       DateTime?
+  zraRegistrationError  String?
+  vsdcItemResponse      Json?
   
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
@@ -99,7 +105,7 @@ model Sale {
   tax         Float?
   discount    Float?
   subtotal    Float
-  status      SaleStatus @default(COMPLETED)
+  status      SaleStatus @default(PENDING)
   paymentMethod PaymentMethod
   userId      String
   createdAt   DateTime   @default(now())
@@ -110,6 +116,9 @@ model Sale {
   rcptSign       String?    // Digital signature
   qrCode         String?    // QR Code URL
   vsdcTimestamp  DateTime?  // Timestamp ZRA issued invoice
+  vsdcRequest    Json?      // VSDC request payload (retention)
+  vsdcResponse   Json?      // VSDC response payload (retention)
+  fiscalError    String?    // Last fiscal submission error
   
   // Relations
   user        User       @relation(fields: [userId], references: [id])
@@ -294,6 +303,11 @@ model StockMovement {
   
   // User Information
   userId            String
+
+  // VSDC stock sync (Section 6.2)
+  zraSyncedAt       DateTime?
+  zraSyncError      String?
+  zraSyncResponse   Json?
   
   createdAt         DateTime            @default(now())
   
@@ -306,6 +320,25 @@ model StockMovement {
   @@map("stock_movements")
 }
 
+model VsdcDevice {
+  id           String   @id @default(cuid())
+  tpin         String
+  bhfId        String
+  dvcSrlNo     String
+  sdicId       String?
+  mrcNo        String?
+  intrlKey     String?
+  signKey      String?
+  cmcKey       String?
+  initialized  Boolean  @default(false)
+  initResponse Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([tpin, bhfId, dvcSrlNo])
+  @@map("vsdc_devices")
+}
+
 enum Role {
   ADMIN
   MANAGER
@@ -315,7 +348,9 @@ enum Role {
 
 enum SaleStatus {
   PENDING
+  FISCAL_SUBMITTING
   COMPLETED
+  FISCAL_FAILED
   CANCELLED
   REFUNDED
 }
@@ -349,6 +384,12 @@ enum StockAdjustmentType {
   RECOUNT
   DAMAGED
   EXPIRED
+}
+
+enum ZraRegistrationStatus {
+  PENDING
+  REGISTERED
+  FAILED
 }
 
 enum StockMovementType {

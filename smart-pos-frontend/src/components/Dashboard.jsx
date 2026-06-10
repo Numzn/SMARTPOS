@@ -23,7 +23,7 @@ const Dashboard = () => {
       
       try {
         // Fetch sales data from backend
-        const salesResponse = await api.get('/api/sales')
+        const salesResponse = await api.get('/sales')
         const sales = salesResponse.data || []
         
         // Calculate today's sales

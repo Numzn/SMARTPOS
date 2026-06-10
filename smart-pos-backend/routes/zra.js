@@ -1,45 +1,66 @@
 const express = require('express');
 const router = express.Router();
 const zraInvoiceService = require('../services/zraInvoice');
+const { finalizeSaleFiscally } = require('../lib/saleFiscal');
+const prisma = require('../lib/prisma');
 const { authenticateToken, requirePermission, requireAnyPermission } = require('../middleware/auth');
 
 /**
  * Send sale to ZRA VSDC for Smart Invoice generation (requires zra:submit permission)
  * POST /api/zra/send-invoice/:saleId
+ * Retries fiscal submission for PENDING/FISCAL_FAILED sales.
  */
 router.post('/send-invoice/:saleId', authenticateToken, requirePermission('zra:submit'), async (req, res) => {
   try {
     const { saleId } = req.params;
 
     if (!saleId) {
+      return res.status(400).json({ error: 'Sale ID is required' });
+    }
+
+    const existing = await prisma.sale.findUnique({ where: { id: saleId } });
+    if (!existing) {
+      return res.status(404).json({ error: 'Sale not found' });
+    }
+
+    if (existing.status === 'COMPLETED' && existing.rcptNo) {
+      const status = await zraInvoiceService.getReceiptStatus(saleId);
+      return res.json({
+        message: 'Sale already submitted to ZRA',
+        sale: existing,
+        zraResponse: status,
+      });
+    }
+
+    if (!['PENDING', 'FISCAL_FAILED', 'FISCAL_SUBMITTING'].includes(existing.status)) {
       return res.status(400).json({
-        error: 'Sale ID is required'
+        error: `Cannot fiscalize sale in status ${existing.status}`,
       });
     }
 
     console.log(`🧾 Processing ZRA invoice for sale: ${saleId}`);
 
-    const result = await zraInvoiceService.sendToVSDC(saleId);
+    const outcome = await finalizeSaleFiscally(saleId);
 
-    if (!result.success) {
-      return res.status(400).json({
-        error: result.message,
-        data: result.data
+    if (!outcome.success) {
+      return res.status(422).json({
+        error: outcome.fiscal?.error || 'ZRA submission failed',
+        sale: outcome.sale,
+        fiscal: outcome.fiscal,
       });
     }
 
     res.json({
-      message: result.message,
-      sale: result.data,
-      zraResponse: result.zraResponse
+      message: 'Smart Invoice generated successfully',
+      sale: outcome.sale,
+      zraResponse: outcome.fiscal,
+      receiptNumber: outcome.fiscal.rcptNo,
     });
-
   } catch (error) {
     console.error('ZRA Invoice Error:', error.message);
-    
-    res.status(500).json({
+    res.status(error.status || 500).json({
       error: 'Failed to generate Smart Invoice',
-      details: error.message
+      details: error.message,
     });
   }
 });
@@ -113,12 +134,12 @@ router.post('/bulk-send', authenticateToken, requirePermission('zra:submit'), as
 
     for (const saleId of saleIds) {
       try {
-        const result = await zraInvoiceService.sendToVSDC(saleId);
+        const result = await finalizeSaleFiscally(saleId);
         results.push({
           saleId,
           success: result.success,
-          receiptNo: result.data?.rcptNo,
-          message: result.message
+          receiptNo: result.sale?.rcptNo,
+          message: result.fiscal?.error || 'OK',
         });
       } catch (error) {
         errors.push({
@@ -169,11 +190,11 @@ router.post('/process-pending', authenticateToken, requirePermission('zra:submit
 
     for (const sale of pendingSales) {
       try {
-        const result = await zraInvoiceService.sendToVSDC(sale.id);
+        const result = await finalizeSaleFiscally(sale.id);
         results.push({
           saleId: sale.id,
           success: result.success,
-          receiptNo: result.data?.rcptNo
+          receiptNo: result.sale?.rcptNo
         });
       } catch (error) {
         errors.push({

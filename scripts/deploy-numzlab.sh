@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
 # Deploy Smart POS to the Numzlab server via Docker Compose.
+# Builds ONLY from this repo — never pulls NUMZFLEET or other project images.
 # Run from the repo root: ./scripts/deploy-numzlab.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+
+COMPOSE_FILE="docker-compose.yml:docker-compose.numzlab.yml"
+export COMPOSE_FILE
+
+compose() {
+  docker compose "$@"
+}
 
 PULL=false
 NO_SEED=false
@@ -17,6 +25,8 @@ for arg in "$@"; do
       echo "Usage: $0 [--pull] [--no-seed]"
       echo "  --pull     git pull origin main before building"
       echo "  --no-seed  set SEED_ON_BOOT=false in .env (safe for updates)"
+      echo ""
+      echo "Uses: docker-compose.yml + docker-compose.numzlab.yml (Caddy frontend, no Hub pulls)"
       exit 0
       ;;
     *) echo "Unknown option: $arg"; exit 1 ;;
@@ -28,8 +38,18 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! docker compose version >/dev/null 2>&1; then
+if ! compose version >/dev/null 2>&1; then
   echo "ERROR: docker compose v2 is required."
+  exit 1
+fi
+
+# Guard: must be SMARTPOS repo, not another project
+if [ ! -f docker-compose.yml ] || [ ! -f docker-compose.numzlab.yml ]; then
+  echo "ERROR: missing SMARTPOS compose files in $(pwd)"
+  exit 1
+fi
+if grep -q numzfleet docker-compose.yml 2>/dev/null; then
+  echo "ERROR: docker-compose.yml contains numzfleet references — wrong project?"
   exit 1
 fi
 
@@ -57,8 +77,9 @@ if [ "$NO_SEED" = true ]; then
   echo "[deploy] SEED_ON_BOOT=false"
 fi
 
-echo "[deploy] building and starting stack..."
-docker compose up -d --build
+echo "[deploy] building from source (no registry pulls)..."
+compose build --pull=false
+compose up -d
 
 echo "[deploy] waiting for health checks..."
 sleep 10
@@ -68,7 +89,7 @@ check() {
   if curl -sf "$url" >/dev/null 2>&1; then
     echo "[OK]   $name — $url"
   else
-    echo "[WARN] $name — $url (not ready yet; check: docker compose logs -f)"
+    echo "[WARN] $name — $url (not ready yet; check: compose logs -f)"
   fi
 }
 
@@ -78,4 +99,4 @@ check "mock-vsdc" "http://127.0.0.1:${MOCK_VSDC_PORT:-8090}/health"
 
 echo ""
 echo "[deploy] done. Frontend: http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'localhost'):${FRONTEND_PORT:-8080}"
-docker compose ps
+compose ps

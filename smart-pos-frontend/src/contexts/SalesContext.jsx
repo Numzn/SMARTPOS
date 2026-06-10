@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import api from '../services/api';
+import { useAuth } from './AuthContext';
 
 const SalesContext = createContext();
 
@@ -13,6 +14,7 @@ export const useSales = () => {
 };
 
 export const SalesProvider = ({ children }) => {
+  const { user } = useAuth();
   const [cart, setCart] = useState([]);
   const [customer, setCustomer] = useState(null);
   const [discount, setDiscount] = useState(0);
@@ -92,9 +94,14 @@ export const SalesProvider = ({ children }) => {
 
   const processCheckout = async () => {
     try {
+      if (!user?.id) {
+        return { success: false, error: 'You must be logged in to complete a sale.' };
+      }
+
       const { discountAmount, taxAmount } = getCartTotal();
-      
+
       const saleData = {
+        userId: user.id,
         items: cart.map(item => ({
           productId: item.productId,
           quantity: item.quantity,
@@ -106,14 +113,21 @@ export const SalesProvider = ({ children }) => {
         customer: customer
       };
 
-      const response = await api.post('/api/sales', saleData);
-      
-      // Clear cart after successful sale
-      clearCart();
-      
+      const response = await api.post('/sales/checkout', saleData);
+
+      if (response.data?.fiscal?.success) {
+        clearCart();
+        return {
+          success: true,
+          sale: response.data.sale,
+          fiscal: response.data.fiscal,
+        };
+      }
+
       return {
-        success: true,
-        sale: response.data
+        success: false,
+        error: response.data?.fiscal?.error || 'Fiscal submission failed',
+        sale: response.data?.sale,
       };
     } catch (error) {
       return {

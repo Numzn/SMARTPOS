@@ -9,7 +9,9 @@ import Dashboard from './components/dashboard/Dashboard';
 import ProductsPage from './pages/ProductsPage';
 import InventoryPage from './pages/InventoryPage';
 import ReportsPage from './components/reports/ReportsPage';
+import SalesPage from './components/sales/SalesPage';
 import CashierPage from './pages/CashierPage';
+import UsersPage from './pages/UsersPage';
 
 function App() {
   return (
@@ -32,11 +34,12 @@ function App() {
               >
                 <Route index element={<Navigate to="/dashboard" replace />} />
                 <Route path="dashboard" element={<Dashboard />} />
-                <Route path="sales" element={<Dashboard />} />
+                <Route path="sales" element={<SalesPage />} />
                 <Route path="cashier" element={<CashierPage />} />
                 <Route path="products" element={<ProductsPage />} />
                 <Route path="inventory" element={<InventoryPage />} />
                 <Route path="reports" element={<ReportsPage />} />
+                <Route path="users" element={<UsersPage />} />
                 <Route path="settings" element={<div className="p-6"><h1 className="text-2xl font-bold">Settings</h1><p>Settings page coming soon...</p></div>} />
               </Route>
 

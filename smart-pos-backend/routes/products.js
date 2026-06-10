@@ -2,42 +2,54 @@ const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
 const { authenticateToken, requirePermission, optionalAuth } = require('../middleware/auth');
+const { resolveProductStock, DEFAULT_BRANCH } = require('../lib/productStockView');
+const {
+  registerProductWithVsdc,
+  isRegistrationStrict,
+  validateRegistrationFields,
+} = require('../lib/productRegistration');
+
+async function registerAfterSave(productId) {
+  const registration = await registerProductWithVsdc(productId);
+  if (!registration.success && isRegistrationStrict()) {
+    const err = new Error(registration.error || 'VSDC item registration failed');
+    err.status = 502;
+    err.registration = registration;
+    throw err;
+  }
+  return registration;
+}
 
 // Get all products with category info (public endpoint with optional auth for enhanced features)
 router.get('/', optionalAuth, async (req, res) => {
   try {
+    const branchId = req.query.branchId || DEFAULT_BRANCH;
+
     const products = await prisma.product.findMany({
       include: {
         category: true,
+        inventory: { where: { branchId } },
         InventoryItem: {
           select: {
             quantity: true,
-            expiryDate: true
-          }
-        }
+            expiryDate: true,
+          },
+        },
       },
       orderBy: {
-        createdAt: 'desc'
-      }
+        createdAt: 'desc',
+      },
     });
 
-    // Calculate total quantities and add inventory info
-    const productsWithInventory = products.map(product => {
-      const totalQuantity = product.InventoryItem.reduce((sum, item) => sum + item.quantity, 0);
-      const hasExpiredItems = product.InventoryItem.some(item => 
-        item.expiryDate && new Date(item.expiryDate) < new Date()
-      );
-      const hasNearExpiryItems = product.InventoryItem.some(item => 
-        item.expiryDate && new Date(item.expiryDate) < new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-      );
-
+    const productsWithInventory = products.map((product) => {
+      const stockView = resolveProductStock(product, branchId);
       return {
         ...product,
-        totalQuantity,
-        stock: totalQuantity, // legacy alias used by frontend cashier/sales UIs
-        hasExpiredItems,
-        hasNearExpiryItems,
-        lowStockAlert: totalQuantity <= (product.minStockLevel || 0)
+        totalQuantity: stockView.totalQuantity,
+        stock: stockView.stock,
+        hasExpiredItems: stockView.hasExpiredItems,
+        hasNearExpiryItems: stockView.hasNearExpiryItems,
+        lowStockAlert: stockView.lowStockAlert,
       };
     });
 
@@ -51,44 +63,40 @@ router.get('/', optionalAuth, async (req, res) => {
 // Get product by ID (public with optional auth)
 router.get('/:id', optionalAuth, async (req, res) => {
   try {
+    const branchId = req.query.branchId || DEFAULT_BRANCH;
+
     const product = await prisma.product.findUnique({
       where: { id: req.params.id },
-      include: { 
+      include: {
         category: true,
+        inventory: { where: { branchId } },
         InventoryItem: {
           select: {
             quantity: true,
             expiryDate: true,
             batchNumber: true,
             costPrice: true,
-            sellingPrice: true
-          }
-        }
-      }
+            sellingPrice: true,
+          },
+        },
+      },
     });
-    
+
     if (!product) {
       return res.status(404).json({ error: 'Product not found' });
     }
 
-    // Add inventory calculations
-    const totalQuantity = product.InventoryItem.reduce((sum, item) => sum + item.quantity, 0);
-    const hasExpiredItems = product.InventoryItem.some(item => 
-      item.expiryDate && new Date(item.expiryDate) < new Date()
-    );
-    const hasNearExpiryItems = product.InventoryItem.some(item => 
-      item.expiryDate && new Date(item.expiryDate) < new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-    );
+    const stockView = resolveProductStock(product, branchId);
 
     const productWithInventory = {
       ...product,
-      totalQuantity,
-      stock: totalQuantity,
-      hasExpiredItems,
-      hasNearExpiryItems,
-      lowStockAlert: totalQuantity <= (product.minStockLevel || 0),
+      totalQuantity: stockView.totalQuantity,
+      stock: stockView.stock,
+      hasExpiredItems: stockView.hasExpiredItems,
+      hasNearExpiryItems: stockView.hasNearExpiryItems,
+      lowStockAlert: stockView.lowStockAlert,
     };
-    
+
     res.json(productWithInventory);
   } catch (error) {
     console.error('Error fetching product:', error);
@@ -152,6 +160,23 @@ router.post('/', authenticateToken, requirePermission('products:write'), async (
       });
     }
 
+    const draftProduct = {
+      sku: sku.trim().toUpperCase(),
+      zraClassificationCode: zraClassificationCode?.trim() || null,
+      zraItemClassification: zraClassificationCode?.trim() || null,
+      zraPackageUnit: req.body.zraPackageUnit || 'EA',
+      zraQuantityUnit: req.body.zraQuantityUnit || 'EA',
+      unit: req.body.unit || 'EA',
+      vatCategoryCode: vatCategoryCode || 'STANDARD',
+    };
+    const regErrors = validateRegistrationFields(draftProduct);
+    if (regErrors.length > 0 && isRegistrationStrict()) {
+      return res.status(400).json({
+        error: 'Product cannot be saved without VSDC registration fields',
+        details: regErrors,
+      });
+    }
+
     // Check if SKU is unique
     const existingSku = await prisma.product.findUnique({
       where: { sku }
@@ -180,6 +205,10 @@ router.post('/', authenticateToken, requirePermission('products:write'), async (
           // ZRA Compliance
           vatCategoryCode: vatCategoryCode || 'STANDARD',
           zraClassificationCode: zraClassificationCode?.trim() || null,
+          zraItemClassification: zraClassificationCode?.trim() || null,
+          zraPackageUnit: req.body.zraPackageUnit || 'EA',
+          zraQuantityUnit: req.body.zraQuantityUnit || 'EA',
+          unit: req.body.unit || 'EA',
           exciseTaxCode: exciseTaxCode?.trim() || null,
           hasExpiry: hasExpiry || false,
           shelfLifeDays: hasExpiry && shelfLifeDays ? parseInt(shelfLifeDays) : null,
@@ -235,9 +264,27 @@ router.post('/', authenticateToken, requirePermission('products:write'), async (
       return { product, inventory };
     });
 
+    let registration;
+    try {
+      registration = await registerAfterSave(result.product.id);
+    } catch (regErr) {
+      await prisma.product.delete({ where: { id: result.product.id } }).catch(() => {});
+      return res.status(regErr.status || 502).json({
+        error: regErr.message,
+        registration: regErr.registration,
+      });
+    }
+
+    const productWithReg = await prisma.product.findUnique({
+      where: { id: result.product.id },
+      include: { category: true, InventoryItem: true },
+    });
+
     res.status(201).json({
-      ...result,
-      message: 'Product created successfully'
+      product: productWithReg,
+      inventory: result.inventory,
+      registration,
+      message: 'Product created successfully',
     });
 
   } catch (error) {
@@ -355,7 +402,12 @@ router.put('/:id', authenticateToken, requirePermission('products:write'), async
         // ZRA Compliance
         vatCategoryCode: vatCategoryCode || 'STANDARD',
         zraClassificationCode: zraClassificationCode?.trim() || null,
+        zraItemClassification: zraClassificationCode?.trim() || null,
+        zraPackageUnit: req.body.zraPackageUnit || existingProduct.zraPackageUnit || 'EA',
+        zraQuantityUnit: req.body.zraQuantityUnit || existingProduct.zraQuantityUnit || 'EA',
         exciseTaxCode: exciseTaxCode?.trim() || null,
+        zraRegistrationStatus: 'PENDING',
+        zraRegistrationError: null,
         hasExpiry: hasExpiry || false,
         shelfLifeDays: hasExpiry && shelfLifeDays ? parseInt(shelfLifeDays) : null,
         // Inventory
@@ -367,9 +419,26 @@ router.put('/:id', authenticateToken, requirePermission('products:write'), async
       }
     });
     
+    let registration;
+    try {
+      registration = await registerAfterSave(updatedProduct.id);
+    } catch (regErr) {
+      return res.status(regErr.status || 502).json({
+        error: regErr.message,
+        product: updatedProduct,
+        registration: regErr.registration,
+      });
+    }
+
+    const productWithReg = await prisma.product.findUnique({
+      where: { id: updatedProduct.id },
+      include: { category: true, InventoryItem: true },
+    });
+
     res.json({
-      ...updatedProduct,
-      message: 'Product updated successfully'
+      ...productWithReg,
+      registration,
+      message: 'Product updated successfully',
     });
 
   } catch (error) {

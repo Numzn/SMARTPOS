@@ -1,6 +1,10 @@
-const axios = require('axios')
 const prisma = require('../lib/prisma')
 const vsdcService = require('./vsdcService')
+const {
+  markRegistrationSuccess,
+  markRegistrationFailed,
+  getProductClassification,
+} = require('../lib/productRegistrationState')
 
 /**
  * Enhanced Item Management Service for 100% ZRA Compliance
@@ -52,7 +56,7 @@ class ItemManagementService {
         tpin: process.env.BUSINESS_TPIN,
         bhfId: process.env.BRANCH_ID || '000',
         itemCd: productData.sku || productData.id,
-        itemClsCd: productData.zraItemClassification || '50102303', // Default classification
+        itemClsCd: getProductClassification(productData) || productData.zraItemClassification,
         itemTyCd: '2', // 1=Raw Material, 2=Finished Product, 3=Service
         itemNm: productData.name,
         itemStdNm: productData.name, // Standard name (same as name)
@@ -82,8 +86,7 @@ class ItemManagementService {
       const result = await this.submitWithRetry(vsdcPayload)
       
       if (result.success) {
-        // Update local product with ZRA response
-        await this.updateLocalProduct(productData.id, result.data)
+        await markRegistrationSuccess(productData.id, result.data)
         
         console.log(`✅ Item saved to VSDC successfully: ${productData.name}`)
         return {
@@ -97,6 +100,9 @@ class ItemManagementService {
       }
     } catch (error) {
       console.error('❌ Failed to save item to VSDC:', error.message)
+      if (productData.id) {
+        await markRegistrationFailed(productData.id, error.message)
+      }
       return {
         success: false,
         error: error.message,
@@ -210,11 +216,15 @@ class ItemManagementService {
             price: parseFloat(vsdcItem.dftPrc),
             barcode: vsdcItem.bcd,
             zraItemClassification: vsdcItem.itemClsCd,
+            zraClassificationCode: vsdcItem.itemClsCd,
             zraPackageUnit: vsdcItem.pkgUnitCd,
             zraQuantityUnit: vsdcItem.qtyUnitCd,
             taxType: vsdcItem.taxTyCd,
-            minStock: parseInt(vsdcItem.sftyQty || 0),
+            minStockLevel: parseInt(vsdcItem.sftyQty || 0, 10),
             isActive: vsdcItem.useYn === 'Y',
+            zraRegistrationStatus: 'REGISTERED',
+            zraRegisteredAt: new Date(),
+            zraRegistrationError: null,
             updatedAt: new Date()
           },
           create: {
@@ -224,11 +234,14 @@ class ItemManagementService {
             price: parseFloat(vsdcItem.dftPrc),
             barcode: vsdcItem.bcd,
             zraItemClassification: vsdcItem.itemClsCd,
+            zraClassificationCode: vsdcItem.itemClsCd,
             zraPackageUnit: vsdcItem.pkgUnitCd,
             zraQuantityUnit: vsdcItem.qtyUnitCd,
             taxType: vsdcItem.taxTyCd,
-            minStock: parseInt(vsdcItem.sftyQty || 0),
+            minStockLevel: parseInt(vsdcItem.sftyQty || 0, 10),
             isActive: vsdcItem.useYn === 'Y',
+            zraRegistrationStatus: 'REGISTERED',
+            zraRegisteredAt: new Date(),
             categoryId: await this.getDefaultCategoryId()
           }
         })
@@ -294,14 +307,22 @@ class ItemManagementService {
     }
     
     // ZRA specific validations
-    if (!productData.zraItemClassification) {
-      warnings.push('ZRA item classification code recommended for compliance')
+    const classification =
+      getProductClassification(productData) || productData.zraItemClassification;
+    if (!classification) {
+      errors.push('ZRA item classification code is required')
     }
-    if (!productData.taxType) {
+    if (!productData.sku && !productData.id) {
+      errors.push('SKU is required for VSDC item registration')
+    }
+    if (!productData.taxType && !productData.vatCategoryCode) {
       warnings.push('Tax type should be specified for accurate tax calculation')
     }
-    if (!productData.zraPackageUnit) {
-      warnings.push('Package unit recommended for ZRA reporting')
+    if (!productData.zraPackageUnit && !productData.unit) {
+      errors.push('Package unit is required for ZRA reporting')
+    }
+    if (!productData.zraQuantityUnit && !productData.unit) {
+      errors.push('Quantity unit is required for ZRA reporting')
     }
     
     // Barcode validation
@@ -325,21 +346,10 @@ class ItemManagementService {
   }
 
   /**
-   * Update local product with ZRA response data
+   * @deprecated Use productRegistration.markRegistrationSuccess instead
    */
   async updateLocalProduct(productId, zraResponse) {
-    try {
-      await prisma.product.update({
-        where: { id: productId },
-        data: {
-          // Store ZRA specific data or mapping as needed
-          updatedAt: new Date()
-        }
-      })
-    } catch (error) {
-      console.error('❌ Failed to update local product:', error.message)
-      // Don't throw error as VSDC submission was successful
-    }
+    await markRegistrationSuccess(productId, zraResponse)
   }
 
   /**

@@ -124,6 +124,6 @@ Default API: `http://localhost:4000/api/health`
 
 ## Known follow-ups
 
-- `stockSyncService` / `itemClassificationService` still reference some schema fields that may not exist on all models — validate before production ZRA sync.
 - Walk-in sales use default customer name; B2B sales may need explicit `customerTpin` on the sale model later.
 - Reporting, purchases, and credit notes remain per compliance roadmap.
+- Item registration is centralized in `lib/productRegistration.js` + `services/itemManagement.js`; `itemClassificationService` is a thin compatibility facade.

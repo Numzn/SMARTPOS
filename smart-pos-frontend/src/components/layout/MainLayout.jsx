@@ -3,7 +3,6 @@ import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
   CreditCard,
-  Receipt,
   Package,
   Warehouse,
   BarChart2,
@@ -22,7 +21,6 @@ import { usePermissions } from '../../hooks/usePermissions';
 const NAV_ITEMS = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, show: () => true },
   { name: 'Cashier', href: '/cashier', icon: CreditCard, show: (p, u) => p.createSale || p.viewSales || u?.role === 'CASHIER' },
-  { name: 'Sales', href: '/sales', icon: Receipt, show: (p) => p.createSale || p.viewSales },
   { name: 'Products', href: '/products', icon: Package, show: (p) => p.viewProducts },
   { name: 'Inventory', href: '/inventory', icon: Warehouse, show: (p) => p.viewInventory },
   { name: 'Reports', href: '/reports', icon: BarChart2, show: (p) => p.viewReports },
@@ -39,6 +37,7 @@ const MainLayout = () => {
   const [profileOpen, setProfileOpen] = useState(false);
 
   const navigation = NAV_ITEMS.filter((item) => item.show(permissions.canAccess, user));
+  const isCashierRoute = location.pathname === '/cashier';
 
   const handleLogout = () => {
     logout();
@@ -100,6 +99,7 @@ const MainLayout = () => {
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0">
+        {!isCashierRoute && (
         <header className="h-12 flex-shrink-0 bg-surface-raised border-b border-surface-border flex items-center justify-between px-4">
           <div className="flex items-center gap-3 flex-1 min-w-0">
             <button
@@ -111,13 +111,13 @@ const MainLayout = () => {
               <Menu className="w-4 h-4" />
             </button>
             <div className="relative max-w-md flex-1 hidden sm:block">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-              <input
-                type="search"
-                placeholder="Search SKU, product, receipt…"
-                className="input-sys pl-8 py-1.5 h-8"
-              />
-            </div>
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                <input
+                  type="search"
+                  placeholder="Search SKU, product, receipt…"
+                  className="input-sys pl-8 py-1.5 h-8"
+                />
+              </div>
           </div>
 
           <div className="flex items-center gap-2">
@@ -157,9 +157,14 @@ const MainLayout = () => {
             </div>
           </div>
         </header>
+        )}
 
-        <main className="flex-1 overflow-y-auto p-4">
-          <Outlet />
+        <main
+          className={`flex-1 min-h-0 ${
+            isCashierRoute ? 'overflow-hidden p-0' : 'overflow-y-auto p-4'
+          }`}
+        >
+          <Outlet context={{ openSidebar: () => setSidebarOpen(true) }} />
         </main>
       </div>
 

@@ -12,10 +12,9 @@ import {
   ArrowRight,
   ArrowLeft,
 } from 'lucide-react';
-import { createSale, submitToZRA, mapPaymentMethod } from '../api/cashierApi';
+import { checkoutSale, submitToZRA, mapPaymentMethod } from '../api/cashierApi';
 import { useAuth } from '../contexts/AuthContext';
-
-const VAT_RATE = 0.16;
+import { calculateCartTotals, formatZmw } from '../utils/cartTotals';
 
 const PAYMENT_METHODS = [
   { id: 'cash', label: 'Cash', shortcut: '1', icon: Banknote, hint: 'Physical cash payment' },
@@ -31,23 +30,21 @@ const STEP = {
   RECEIPT: 4,
 };
 
-const formatCurrency = (amount) =>
-  new Intl.NumberFormat('en-ZM', {
-    style: 'currency',
-    currency: 'ZMW',
-    minimumFractionDigits: 2,
-  }).format(Number.isFinite(amount) ? amount : 0);
+const formatCurrency = formatZmw;
 
-const CheckoutModal = ({ cart = [], total: totalProp, onClose, onSuccess, usingMockData = false }) => {
+const CheckoutModal = ({
+  cart = [],
+  cartTotals: cartTotalsProp,
+  onClose,
+  onSuccess,
+  usingMockData = false,
+}) => {
   const { user } = useAuth();
 
-  const totals = useMemo(() => {
-    const cartTotal =
-      totalProp ?? cart.reduce((sum, item) => sum + Number(item.price) * Number(item.quantity), 0);
-    const vat = cartTotal * VAT_RATE;
-    const subtotal = cartTotal - vat;
-    return { total: cartTotal, vat, subtotal };
-  }, [cart, totalProp]);
+  const totals = useMemo(
+    () => cartTotalsProp ?? calculateCartTotals(cart),
+    [cart, cartTotalsProp]
+  );
 
   const [step, setStep] = useState(STEP.METHOD);
   const [paymentMethod, setPaymentMethod] = useState('cash');
@@ -150,7 +147,7 @@ const CheckoutModal = ({ cart = [], total: totalProp, onClose, onSuccess, usingM
         })),
         paymentMethod: mapPaymentMethod(paymentMethod),
         tax: totals.vat,
-        discount: 0,
+        discount: totals.discount,
         customerInfo,
         paymentDetails: {
           method: paymentMethod,
@@ -161,28 +158,61 @@ const CheckoutModal = ({ cart = [], total: totalProp, onClose, onSuccess, usingM
         },
       };
 
-      const sale = await createSale(payload);
-      setSaleId(sale.id);
-
-      if (!usingMockData) {
-        setZraState('submitting');
-        try {
-          const zra = await submitToZRA(sale.id);
-          setZraReceipt(zra?.receiptNumber || zra?.rcptNo || zra?.zraReceiptNumber || 'OK');
-          setZraState('submitted');
-        } catch (zraErr) {
-          console.warn('ZRA submission failed:', zraErr);
-          setZraState('failed');
-        }
-      } else {
+      if (usingMockData) {
         setZraState('submitted');
         setZraReceipt('MOCK');
+        setSaleId('mock-sale');
+        setStep(STEP.RECEIPT);
+        return;
       }
 
-      setStep(STEP.RECEIPT);
+      setZraState('submitting');
+      const result = await checkoutSale(payload);
+      setSaleId(result.sale?.id);
+
+      if (result.fiscal?.success) {
+        setZraReceipt(result.fiscal.rcptNo || result.fiscal.receiptNumber || 'OK');
+        setZraState('submitted');
+        setStep(STEP.RECEIPT);
+      } else {
+        setZraState('failed');
+        setError(result.fiscal?.error || 'Fiscal submission failed');
+      }
     } catch (err) {
       console.error('Payment processing failed:', err);
-      setError(err.message || 'Payment processing failed. Please try again.');
+      if (err.data?.sale?.id) {
+        setSaleId(err.data.sale.id);
+        setZraState('failed');
+      }
+      setError(
+        err.status === 409 || err.data?.code === 'PRODUCTS_NOT_REGISTERED'
+          ? err.message || err.data?.error || 'One or more items are not registered with ZRA.'
+          : err.message || err.data?.error || 'Payment processing failed. Please try again.'
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const retryFiscal = async () => {
+    if (!saleId || usingMockData) return;
+    setSubmitting(true);
+    setError(null);
+    setZraState('submitting');
+    try {
+      const result = await submitToZRA(saleId);
+      const rcpt = result.zraResponse?.rcptNo || result.sale?.rcptNo || result.receiptNumber;
+      if (rcpt) {
+        setZraReceipt(rcpt);
+        setZraState('submitted');
+        setStep(STEP.RECEIPT);
+      } else {
+        setZraState('failed');
+        setError('Fiscal retry did not return a receipt number');
+      }
+    } catch (err) {
+      setZraState('failed');
+      setError(err.message || 'Fiscal retry failed');
     } finally {
       setSubmitting(false);
     }
@@ -240,7 +270,19 @@ const CheckoutModal = ({ cart = [], total: totalProp, onClose, onSuccess, usingM
           {error && (
             <div className="flex items-start gap-2 border border-red-200 bg-red-50 text-red-800 text-xs p-2 rounded">
               <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-              <span>{error}</span>
+              <div className="flex-1">
+                <span>{error}</span>
+                {zraState === 'failed' && saleId && !usingMockData && (
+                  <button
+                    type="button"
+                    onClick={retryFiscal}
+                    disabled={submitting}
+                    className="mt-2 block text-left underline font-medium"
+                  >
+                    Retry fiscal submission
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
@@ -415,6 +457,14 @@ const CheckoutModal = ({ cart = [], total: totalProp, onClose, onSuccess, usingM
                   <span className="text-gray-500">Subtotal</span>
                   <span className="font-mono">{formatCurrency(totals.subtotal)}</span>
                 </div>
+                {totals.discount > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Discount</span>
+                    <span className="font-mono text-emerald-700">
+                      -{formatCurrency(totals.discount)}
+                    </span>
+                  </div>
+                )}
                 <div className="flex justify-between">
                   <span className="text-gray-500">VAT 16%</span>
                   <span className="font-mono">{formatCurrency(totals.vat)}</span>

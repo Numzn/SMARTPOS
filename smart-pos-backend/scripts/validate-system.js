@@ -4,7 +4,7 @@
  */
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 const path = require('path');
 const http = require('http');
 
@@ -19,7 +19,7 @@ function pass(name, ok, detail) {
   console.log(`[${ok ? 'PASS' : 'FAIL'}] ${name} - ${detail}`);
 }
 
-function request(method, url, body, token) {
+function request(method, url, body, token, expectStatus) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
     const data = body ? JSON.stringify(body) : null;
@@ -42,8 +42,17 @@ function request(method, url, body, token) {
         try {
           parsed = raw ? JSON.parse(raw) : {};
         } catch (_) {}
-        if (res.statusCode >= 400) {
-          reject(new Error(`${res.statusCode}: ${typeof parsed === 'object' ? JSON.stringify(parsed) : raw}`));
+        if (expectStatus) {
+          if (res.statusCode === expectStatus) {
+            resolve({ status: res.statusCode, data: parsed });
+          } else {
+            reject(new Error(`Expected ${expectStatus}, got ${res.statusCode}: ${raw}`));
+          }
+        } else if (res.statusCode >= 400) {
+          const err = new Error(`${res.statusCode}: ${typeof parsed === 'object' ? JSON.stringify(parsed) : raw}`);
+          err.status = res.statusCode;
+          err.data = parsed;
+          reject(err);
         } else {
           resolve(parsed);
         }
@@ -68,26 +77,46 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+async function runStockConsistencyCheck() {
+  try {
+    execSync('node scripts/verify-stock-consistency.js', { cwd: ROOT, stdio: 'pipe' });
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 async function main() {
   console.log('\n=== Smart POS System Validation ===\n');
 
   pass('Node.js', true, process.version);
 
-  // Database
-  let dbOk = false;
+  let prisma;
   try {
     const { PrismaClient } = require('@prisma/client');
-    const prisma = new PrismaClient();
+    prisma = new PrismaClient();
     await prisma.$connect();
     await prisma.$queryRaw`SELECT 1`;
     const users = await prisma.user.count();
-    await prisma.$disconnect();
-    dbOk = true;
     pass('PostgreSQL', true, `Connected (${users} users)`);
   } catch (e) {
     pass('PostgreSQL', false, e.message);
     console.log('\nStart Postgres: npm run db:up\n');
     process.exit(1);
+  }
+
+  try {
+    execSync('node scripts/seed-inventory.js', { cwd: ROOT, stdio: 'pipe' });
+    pass('Inventory seed', true, 'Stock and batches reset for validation');
+  } catch (e) {
+    pass('Inventory seed', false, e.stderr?.toString() || e.message);
+  }
+
+  try {
+    execSync('node scripts/register-seed-products.js', { cwd: ROOT, stdio: 'pipe' });
+    pass('Product registration', true, 'Seed products registered with mock VSDC');
+  } catch (e) {
+    pass('Product registration', false, e.stderr?.toString() || e.message);
   }
 
   const mockProc = startProcess('mock-vsdc-server.js');
@@ -123,9 +152,12 @@ async function main() {
   try {
     const products = await request('GET', `${BASE}/api/products`, null, token);
     const list = Array.isArray(products) ? products : [];
+    const registered = list.filter((p) => p.zraRegistrationStatus === 'REGISTERED').length;
     pass('Products API', list.length > 0, `${list.length} product(s)`);
+    pass('All products registered', registered === list.length, `${registered}/${list.length} REGISTERED`);
   } catch (e) {
     pass('Products API', false, e.message);
+    pass('All products registered', false, 'skipped');
   }
 
   try {
@@ -141,36 +173,95 @@ async function main() {
     const profile = await request('GET', `${BASE}/api/users/profile`, null, token);
     const products = await request('GET', `${BASE}/api/products`, null, token);
     const list = Array.isArray(products) ? products : [];
-    const product = list[0];
-    if (!product) throw new Error('No products - run: npx prisma db seed');
+    const product = list.find((p) => p.zraRegistrationStatus === 'REGISTERED') || list[0];
+    if (!product) throw new Error('No products - run: node scripts/seed-inventory.js');
 
-    await request('POST', `${BASE}/api/inventory/receive`, {
-      productId: product.id,
-      quantity: 50,
-      unitCost: 1,
-      branchId: 'main',
-    }, token);
-
-    const sale = await request('POST', `${BASE}/api/sales`, {
+    const sale = await request('POST', `${BASE}/api/sales/checkout`, {
       userId: profile.id,
       paymentMethod: 'CASH',
+      tax: 0,
+      discount: 0,
       items: [{ productId: product.id, quantity: 1, price: product.price }],
     }, token);
-    saleId = sale.id;
+    saleId = sale.sale?.id;
+    const rcpt = sale.fiscal?.rcptNo;
     pass('Create sale', !!saleId, `Sale ${saleId}`);
+    pass('ZRA invoice', !!rcpt, rcpt || 'no receipt');
   } catch (e) {
     pass('Create sale', false, e.message);
+    pass('ZRA invoice', false, 'skipped');
   }
 
-  if (saleId) {
+  if (saleId && token) {
+    let movement;
     try {
-      const zra = await request('POST', `${BASE}/api/zra/send-invoice/${saleId}`, null, token);
-      const rcpt = zra.sale?.rcptNo || zra.zraResponse?.rcptNo;
-      pass('ZRA invoice', !!rcpt, rcpt || 'no receipt');
+      await sleep(2000);
+      movement = await prisma.stockMovement.findFirst({
+        where: { referenceId: saleId, movementType: 'SALE_OUT' },
+      });
+      pass('Stock movement synced', !!movement?.zraSyncedAt, movement?.zraSyncedAt ? 'zraSyncedAt set' : 'missing');
     } catch (e) {
-      pass('ZRA invoice', false, e.message);
+      pass('Stock movement synced', false, e.message);
     }
+
+    try {
+      const sync = await request('POST', `${BASE}/api/vsdc/stock/sync`, { referenceId: saleId }, token);
+      const syncOk = sync.succeeded >= 1 || !!movement?.zraSyncedAt;
+      pass(
+        'VSDC stock sync',
+        syncOk,
+        movement?.zraSyncedAt && sync.attempted === 0
+          ? 'already synced via post-sale hook'
+          : `${sync.succeeded}/${sync.attempted} synced`
+      );
+    } catch (e) {
+      pass('VSDC stock sync', !!movement?.zraSyncedAt, e.message);
+    }
+  } else {
+    pass('VSDC stock sync', false, 'skipped');
+    pass('Stock movement synced', false, 'skipped');
   }
+
+  const consistent = await runStockConsistencyCheck();
+  pass('Stock batch consistency', consistent, consistent ? 'currentStock matches batch sum' : 'drift detected');
+
+  try {
+    const products = await request('GET', `${BASE}/api/products`, null, token);
+    const list = Array.isArray(products) ? products : [];
+    const testProduct = list.find((p) => p.sku === 'COKE500') || list[0];
+    if (testProduct && prisma) {
+      await prisma.product.update({
+        where: { id: testProduct.id },
+        data: { zraRegistrationStatus: 'PENDING' },
+      });
+      const profile = await request('GET', `${BASE}/api/users/profile`, null, token);
+      try {
+        await request(
+          'POST',
+          `${BASE}/api/sales/checkout`,
+          {
+            userId: profile.id,
+            paymentMethod: 'CASH',
+            tax: 0,
+            discount: 0,
+            items: [{ productId: testProduct.id, quantity: 1, price: testProduct.price }],
+          },
+          token,
+          409
+        );
+        pass('Unregistered checkout blocked', true, 'HTTP 409');
+      } catch (e) {
+        pass('Unregistered checkout blocked', false, e.message);
+      }
+      execSync('node scripts/register-seed-products.js', { cwd: ROOT, stdio: 'pipe' });
+    } else {
+      pass('Unregistered checkout blocked', false, 'no product for test');
+    }
+  } catch (e) {
+    pass('Unregistered checkout blocked', false, e.message);
+  }
+
+  if (prisma) await prisma.$disconnect();
 
   try {
     process.kill(-mockProc.pid);

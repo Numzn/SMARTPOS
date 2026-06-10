@@ -26,7 +26,7 @@ const Dashboard = () => {
     setIsLoading(true);
     setError(null);
     try {
-      const salesResponse = await api.get('/api/sales');
+      const salesResponse = await api.get('/sales');
       const sales = salesResponse.data || [];
       const today = new Date().toDateString();
       const todaySales = sales.filter((s) => new Date(s.createdAt).toDateString() === today);

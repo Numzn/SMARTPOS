@@ -1,0 +1,22 @@
+:80 {
+	encode gzip
+	root * /srv/www
+
+	handle /api/* {
+		reverse_proxy backend:4000
+	}
+
+	handle /assets/* {
+		header Cache-Control "public, max-age=2592000, immutable"
+		file_server
+	}
+
+	handle {
+		try_files {path} /index.html
+		file_server
+	}
+
+	header X-Frame-Options "SAMEORIGIN"
+	header X-Content-Type-Options "nosniff"
+	header Referrer-Policy "no-referrer-when-downgrade"
+}

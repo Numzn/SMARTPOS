@@ -2,6 +2,7 @@ const axios = require('axios')
 const crypto = require('crypto')
 const fs = require('fs')
 const path = require('path')
+const prisma = require('../lib/prisma')
 
 /**
  * VSDC Service - Enhanced implementation based on VSDC API Specification v1.0.8
@@ -24,8 +25,9 @@ class VSDCService {
     // VSDC API endpoints as per specification
     this.endpoints = {
       login: '/api/login',
-      ping: '/api/ping', 
+      ping: '/api/ping',
       initialize: '/api/initialize',
+      initializePdf: '/initializer/selectInitInfo',
       itemSave: '/api/items/save',
       itemsSync: '/api/items/sync',
       stockSave: '/api/stock/save',
@@ -117,7 +119,9 @@ class VSDCService {
         // Verify session is still valid with health check
         const health = await this.healthCheck()
         if (health.connected && health.sessionValid) {
-          this.isInitialized = true
+          if (await this.isDeviceReady()) {
+            this.isInitialized = true
+          }
           console.log('✅ VSDC System initialized with recovered session')
           return {
             success: true,
@@ -152,6 +156,7 @@ class VSDCService {
       const response = await this.makeAuthenticatedRequest('POST', this.endpoints.initialize, initPayload)
       
       if (response.success && response.data.resultCd === '000') {
+        await this.persistDeviceFromInit(initPayload, response.data)
         this.isInitialized = true
         console.log('✅ VSDC System initialized successfully')
         
@@ -608,6 +613,9 @@ class VSDCService {
    * Uses system MAC address as unique identifier
    */
   async getDeviceSerial() {
+    if (process.env.DVC_SRL_NO) {
+      return process.env.DVC_SRL_NO
+    }
     try {
       const { networkInterfaces } = require('os')
       const nets = networkInterfaces()
@@ -626,6 +634,149 @@ class VSDCService {
       console.warn('⚠️ Could not get device serial, using random:', error.message)
       return crypto.randomBytes(6).toString('hex').toUpperCase()
     }
+  }
+
+  /**
+   * Extract cryptographic keys from VSDC init response (flat or nested shapes).
+   */
+  extractInitKeys(data) {
+    const info = data?.data?.info || data?.info || data
+    return {
+      intrlKey: info.intrlKey || info.intrlData || null,
+      signKey: info.signKey || null,
+      cmcKey: info.cmcKey || null,
+      sdicId: info.sdicId || info.sdcId || null,
+      mrcNo: info.mrcNo || null,
+    }
+  }
+
+  async persistDeviceFromInit(initPayload, responseData) {
+    const keys = this.extractInitKeys(responseData)
+    const tpin = initPayload.tpin || this.tpin
+    const bhfId = initPayload.bhfId || this.bhfId
+    const dvcSrlNo = initPayload.dvcSrlNo
+
+    await prisma.vsdcDevice.upsert({
+      where: {
+        tpin_bhfId_dvcSrlNo: { tpin, bhfId, dvcSrlNo },
+      },
+      create: {
+        tpin,
+        bhfId,
+        dvcSrlNo,
+        sdicId: keys.sdicId,
+        mrcNo: keys.mrcNo,
+        intrlKey: keys.intrlKey,
+        signKey: keys.signKey,
+        cmcKey: keys.cmcKey,
+        initialized: true,
+        initResponse: responseData,
+      },
+      update: {
+        sdicId: keys.sdicId,
+        mrcNo: keys.mrcNo,
+        intrlKey: keys.intrlKey,
+        signKey: keys.signKey,
+        cmcKey: keys.cmcKey,
+        initialized: true,
+        initResponse: responseData,
+      },
+    })
+  }
+
+  async isDeviceReady() {
+    try {
+      const device = await prisma.vsdcDevice.findFirst({
+        where: { tpin: this.tpin, bhfId: this.bhfId, initialized: true },
+        orderBy: { updatedAt: 'desc' },
+      })
+      return Boolean(device)
+    } catch (error) {
+      console.warn('[vsdcService] isDeviceReady check failed:', error.message)
+      return this.isInitialized
+    }
+  }
+
+  async getDeviceStatus() {
+    const device = await prisma.vsdcDevice.findFirst({
+      where: { tpin: this.tpin, bhfId: this.bhfId },
+      orderBy: { updatedAt: 'desc' },
+      select: {
+        id: true,
+        tpin: true,
+        bhfId: true,
+        dvcSrlNo: true,
+        sdicId: true,
+        mrcNo: true,
+        initialized: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    })
+
+    return {
+      initialized: Boolean(device?.initialized),
+      tpin: device?.tpin || this.tpin,
+      bhfId: device?.bhfId || this.bhfId,
+      dvcSrlNo: device?.dvcSrlNo || null,
+      sdicId: device?.sdicId || null,
+      mrcNo: device?.mrcNo || null,
+      lastInitializedAt: device?.updatedAt || null,
+    }
+  }
+
+  async ensureDeviceInitialized() {
+    if (await this.isDeviceReady()) {
+      this.isInitialized = true
+      return { success: true, message: 'VSDC device already initialized' }
+    }
+    return this.initialize()
+  }
+
+  formatVsdcDateTime(date = new Date()) {
+    const d = date instanceof Date ? date : new Date(date)
+    const pad = (n) => String(n).padStart(2, '0')
+    return (
+      `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}` +
+      `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
+    )
+  }
+
+  /**
+   * Submit stock IO to VSDC (Section 6.2).
+   */
+  async submitStockIo(stockPayload) {
+    const ready = await this.ensureDeviceInitialized()
+    if (!ready.success) {
+      throw new Error(ready.error || 'VSDC not initialized')
+    }
+
+    const vsdcBody = {
+      tpin: this.tpin,
+      bhfId: this.bhfId,
+      itemCd: stockPayload.itemCd,
+      sarTyCd: stockPayload.sarTyCd || stockPayload.vsdcCode || '02',
+      sarNo: stockPayload.sarNo || stockPayload.referenceId || stockPayload.movementId,
+      qty: stockPayload.qty ?? stockPayload.quantity,
+      ocrnDt: stockPayload.ocrnDt || this.formatVsdcDateTime(stockPayload.occurredAt || new Date()),
+      totItemCnt: 1,
+      regrId: 'SYSTEM',
+      regrNm: 'SYSTEM',
+      modrId: 'SYSTEM',
+      modrNm: 'SYSTEM',
+    }
+
+    const response = await this.makeAuthenticatedRequest(
+      'POST',
+      this.endpoints.stockSave,
+      vsdcBody
+    )
+
+    if (!response.success || response.data?.resultCd !== '000') {
+      throw new Error(response.data?.resultMsg || 'VSDC stock save failed')
+    }
+
+    return response.data
   }
 
   /**

@@ -1,9 +1,9 @@
 import axios from 'axios';
 import Cookies from 'js-cookie';
-import { API_ROOT, getAuthToken } from '../lib/apiClient';
+import { API_BASE, getAuthToken } from '../lib/apiClient';
 
 const api = axios.create({
-  baseURL: API_ROOT,
+  baseURL: API_BASE,
   timeout: 15000,
   headers: {
     'Content-Type': 'application/json',

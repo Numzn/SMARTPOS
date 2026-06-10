@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const prisma = require('../../lib/prisma');
 const { authenticateToken, requirePermission } = require('../../middleware/auth');
+const stockSyncService = require('../../services/stockSyncService');
 
 // Get all inventory with product details and expiry tracking
 router.get('/', authenticateToken, requirePermission('inventory:read'), async (req, res) => {
@@ -290,6 +291,12 @@ router.post('/receive', authenticateToken, requirePermission('inventory:write'),
       batch: result.inventoryBatch,
       movement: result.stockMovement
     });
+
+    if (result.stockMovement?.id) {
+      stockSyncService.syncMovementById(result.stockMovement.id).catch((err) => {
+        console.warn('[inventory/receive] stock sync failed:', err.message);
+      });
+    }
     
   } catch (error) {
     console.error('❌ Error receiving stock:', error);

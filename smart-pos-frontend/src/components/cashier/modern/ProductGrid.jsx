@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Search, Filter, Package, AlertCircle } from 'lucide-react';
+import { Search, Package, AlertCircle } from 'lucide-react';
+import { getCashierStockStatus, isProductLowStock, isProductRegisteredForSale } from '../../../utils/productUtils';
 
 const ProductGrid = ({ 
   products = [], 
@@ -11,12 +12,6 @@ const ProductGrid = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [sortBy, setSortBy] = useState('name');
-
-  const getStockStatus = (stock) => {
-    if (stock <= 0) return { status: 'out', color: 'text-red-600', bg: 'bg-red-50' };
-    if (stock <= 10) return { status: 'low', color: 'text-orange-600', bg: 'bg-orange-50' };
-    return { status: 'in', color: 'text-green-600', bg: 'bg-green-50' };
-  };
 
   const filteredProducts = products.filter(product => {
     const matchesSearch = product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -129,19 +124,32 @@ const ProductGrid = ({
       {sortedProducts.length > 0 ? (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           {sortedProducts.map((product) => {
-            const stockStatus = getStockStatus(product.stock);
+            const stockStatus = getCashierStockStatus(product);
+            const registered = isProductRegisteredForSale(product);
+            const canAdd = product.stock > 0 && registered;
             
             return (
               <div
                 key={product.id}
-                className="border border-surface-border rounded p-3 hover:border-gray-400 bg-white cursor-pointer"
-                onClick={() => onAddToCart(product)}
+                className={`relative border border-surface-border rounded p-3 bg-white ${
+                  canAdd ? 'hover:border-gray-400 cursor-pointer' : 'opacity-75 cursor-not-allowed'
+                }`}
+                onClick={() => canAdd && onAddToCart(product)}
+                title={!registered ? 'Not registered with ZRA — cannot sell' : undefined}
               >
-                {/* Stock Status Badge */}
-                <div className={`absolute top-2 right-2 px-2 py-1 rounded-full text-xs font-medium ${stockStatus.bg} ${stockStatus.color}`}>
-                  {stockStatus.status === 'out' ? 'Out of Stock' : 
-                   stockStatus.status === 'low' ? 'Low Stock' : 'In Stock'}
-                </div>
+                {!registered && (
+                  <div className="absolute top-2 right-2 px-2 py-0.5 rounded text-[10px] font-medium bg-yellow-50 border border-yellow-200 text-yellow-800">
+                    Not registered
+                  </div>
+                )}
+                {registered && stockStatus && (
+                  <div
+                    className={`absolute top-2 right-2 px-2 py-0.5 rounded text-[10px] font-medium ${stockStatus.bg} ${stockStatus.color}`}
+                    aria-label={stockStatus.label}
+                  >
+                    {stockStatus.label}
+                  </div>
+                )}
 
                 {/* Product Image Placeholder */}
                 <div className="w-full h-16 bg-gray-100 border border-surface-border mb-2 flex items-center justify-center">
@@ -164,20 +172,31 @@ const ProductGrid = ({
                   </div>
 
                   <div className="flex items-center justify-between text-xs text-gray-500">
-                    <span>Stock: {product.stock}</span>
-                    <span>{typeof product.category === 'object' ? product.category.name : product.category}</span>
+                    <span className={
+                      product.stock <= 0
+                        ? 'text-red-600 font-medium'
+                        : isProductLowStock(product)
+                          ? 'text-orange-600 font-medium'
+                          : ''
+                    }>
+                      Stock: {product.stock}
+                      {product.minStockLevel > 0 && isProductLowStock(product) && (
+                        <span className="text-gray-400 font-normal"> (min {product.minStockLevel})</span>
+                      )}
+                    </span>
+                    <span>{typeof product.category === 'object' ? product.category?.name : product.category}</span>
                   </div>
 
                   {/* Add to Cart Button */}
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      onAddToCart(product);
+                      if (canAdd) onAddToCart(product);
                     }}
-                    disabled={product.stock <= 0}
-                    className="btn-primary w-full mt-2 text-xs py-1.5"
+                    disabled={!canAdd}
+                    className="btn-primary w-full mt-2 text-xs py-1.5 disabled:opacity-50"
                   >
-                    {product.stock > 0 ? 'Add to Cart' : 'Out of Stock'}
+                    {!registered ? 'Not registered' : product.stock > 0 ? 'Add to Cart' : 'Out of Stock'}
                   </button>
                 </div>
               </div>

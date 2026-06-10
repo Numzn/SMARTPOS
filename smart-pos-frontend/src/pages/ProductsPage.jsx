@@ -26,24 +26,6 @@ const ProductsPage = () => {
   const [errors, setErrors] = useState({});
   const [productData, setProductData] = useState(getInitialProductData());
 
-  useEffect(() => {
-    loadInitialData();
-  }, [loadInitialData]);
-
-  const loadInitialData = useCallback(async () => {
-    try {
-      await Promise.all([
-        fetchProducts(),
-        fetchCategories(),
-        fetchInventoryOverview()
-      ]);
-    } catch (error) {
-      console.error('Error loading initial data:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
   const fetchProducts = async () => {
     try {
       const data = await productApi.fetchProducts();
@@ -96,6 +78,24 @@ const ProductsPage = () => {
       console.error('Error fetching inventory:', error);
     }
   };
+
+  const loadInitialData = useCallback(async () => {
+    try {
+      await Promise.all([
+        fetchProducts(),
+        fetchCategories(),
+        fetchInventoryOverview()
+      ]);
+    } catch (error) {
+      console.error('Error loading initial data:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadInitialData();
+  }, [loadInitialData]);
 
   const validateForm = () => {
     const newErrors = validateProductForm(productData);

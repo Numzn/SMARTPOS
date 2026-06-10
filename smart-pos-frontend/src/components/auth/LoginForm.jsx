@@ -20,7 +20,7 @@ const LoginForm = () => {
 
   useEffect(() => {
     api
-      .get('/api/health')
+      .get('/health')
       .then(() => setApiStatus('online'))
       .catch(() => setApiStatus('offline'));
   }, []);

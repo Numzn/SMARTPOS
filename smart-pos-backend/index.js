@@ -9,6 +9,7 @@ const inventoryRoutes = require('./routes/inventory'); // Now uses routes/invent
 const saleRoutes = require('./routes/sales');
 const userRoutes = require('./routes/users');
 const zraRoutes = require('./routes/zra');
+const vsdcRoutes = require('./routes/vsdc');
 const branchRoutes = require('./routes/branches');
 const itemRoutes = require('./routes/items'); // Add items route for VSDC Section 6.1
 const stockAdjustmentRoutes = require('./routes/stock-adjustments'); // ZRA stock management compliance
@@ -28,6 +29,7 @@ app.use('/api/inventory', inventoryRoutes);
 app.use('/api/sales', saleRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/zra', zraRoutes);
+app.use('/api/vsdc', vsdcRoutes);
 app.use('/api/branches', branchRoutes);
 app.use('/api/items', itemRoutes); // VSDC Item Management endpoints (Section 6.1)
 app.use('/api/stock-adjustments', stockAdjustmentRoutes); // ZRA stock management compliance

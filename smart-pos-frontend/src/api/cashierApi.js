@@ -1,14 +1,5 @@
 // Centralized API service for cashier dashboard (aligned with backend auth)
-import Cookies from 'js-cookie';
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
-
-function getAuthHeaders() {
-  const token = Cookies.get('token') || localStorage.getItem('token');
-  const headers = { 'Content-Type': 'application/json' };
-  if (token) headers.Authorization = `Bearer ${token}`;
-  return headers;
-}
+import { API_BASE, getAuthHeaders } from '../lib/apiClient';
 
 export async function fetchProducts() {
   const res = await fetch(`${API_BASE}/products`, { headers: getAuthHeaders() });
@@ -22,6 +13,12 @@ export async function fetchCategories() {
   return res.json();
 }
 
+export async function fetchVsdcStatus() {
+  const res = await fetch(`${API_BASE}/vsdc/status`, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error('Failed to fetch VSDC status');
+  return res.json();
+}
+
 /** Map UI payment ids to backend PaymentMethod enum */
 export function mapPaymentMethod(method) {
   const map = {
@@ -31,6 +28,22 @@ export function mapPaymentMethod(method) {
     bank: 'BANK_TRANSFER',
   };
   return map[method] || 'CASH';
+}
+
+export async function checkoutSale(saleData) {
+  const res = await fetch(`${API_BASE}/sales/checkout`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(saleData),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(data.error || 'Checkout failed');
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
 }
 
 export async function createSale(saleData) {
@@ -51,17 +64,17 @@ export async function submitToZRA(saleId) {
     method: 'POST',
     headers: getAuthHeaders(),
   });
+  const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || 'Failed to submit to ZRA');
+    throw new Error(data.error || 'Failed to submit to ZRA');
   }
-  return res.json();
+  return data;
 }
 
 // Mock data fallback when API is unavailable
 export const mockProducts = [
-  { id: 1, name: 'Coca Cola 500ml', price: 8.5, category: 'Beverages', stock: 50 },
-  { id: 2, name: 'Bread Loaf', price: 12, category: 'Bakery', stock: 25 },
+  { id: 1, name: 'Coca Cola 500ml', price: 8.5, category: 'Beverages', stock: 50, minStockLevel: 10, lowStockAlert: false },
+  { id: 2, name: 'Bread Loaf', price: 12, category: 'Bakery', stock: 8, minStockLevel: 10, lowStockAlert: true },
 ];
 
 export const mockCategories = [

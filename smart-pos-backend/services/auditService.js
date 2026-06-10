@@ -418,7 +418,8 @@ class AuditService {
    * Create audit trail table if it doesn't exist
    */
   async createAuditTable() {
-    const createTableSQL = `
+    // PostgreSQL prepared statements allow one command per $executeRawUnsafe call.
+    await this.prisma.$executeRawUnsafe(`
       CREATE TABLE IF NOT EXISTS audit_trail (
         id VARCHAR(50) PRIMARY KEY,
         event_type VARCHAR(50) NOT NULL,
@@ -440,16 +441,25 @@ class AuditService {
         metadata TEXT,
         hash VARCHAR(64) NOT NULL,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
+      )
+    `)
 
-      CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_trail(timestamp);
-      CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_trail(user_id);
-      CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_trail(entity_type, entity_id);
-      CREATE INDEX IF NOT EXISTS idx_audit_event_type ON audit_trail(event_type);
-      CREATE INDEX IF NOT EXISTS idx_audit_risk_level ON audit_trail(risk_level);
-    `
+    await this.prisma.$executeRawUnsafe(
+      `CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_trail(timestamp)`
+    )
+    await this.prisma.$executeRawUnsafe(
+      `CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_trail(user_id)`
+    )
+    await this.prisma.$executeRawUnsafe(
+      `CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_trail(entity_type, entity_id)`
+    )
+    await this.prisma.$executeRawUnsafe(
+      `CREATE INDEX IF NOT EXISTS idx_audit_event_type ON audit_trail(event_type)`
+    )
+    await this.prisma.$executeRawUnsafe(
+      `CREATE INDEX IF NOT EXISTS idx_audit_risk_level ON audit_trail(risk_level)`
+    )
 
-    await this.prisma.$executeRawUnsafe(createTableSQL)
     console.log('✅ Audit trail table created')
   }
 

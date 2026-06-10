@@ -1,0 +1,31 @@
+# Numzlab server overrides — SMARTPOS only, no cross-project images.
+# Always use with base compose:
+#   docker compose -f docker-compose.yml -f docker-compose.numzlab.yml up -d --build
+#
+# - Frontend: Caddy (not nginx) — avoids Docker Hub rate limits on numz14 account
+# - pull_policy / build.pull: false — use locally cached base images only
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    pull_policy: never
+
+  frontend:
+    build:
+      context: ./smart-pos-frontend
+      dockerfile: Dockerfile.caddy
+      pull: false
+      args:
+        VITE_API_URL: /api
+
+  backend:
+    build:
+      context: ./smart-pos-backend
+      dockerfile: Dockerfile
+      pull: false
+
+  mock-vsdc:
+    build:
+      context: ./smart-pos-backend
+      dockerfile: Dockerfile
+      pull: false

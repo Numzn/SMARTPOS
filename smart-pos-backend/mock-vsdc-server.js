@@ -29,9 +29,28 @@ app.post('/api/login', (req, res) => {
   );
 });
 
-app.post('/api/initialize', (req, res) => {
-  res.json(ok({ initialized: true }));
+const initKeys = () => ({
+  intrlKey: `MOCK-INTRL-${Date.now()}`,
+  signKey: `MOCK-SIGN-KEY-${Date.now()}`,
+  cmcKey: `MOCK-CMC-${Date.now()}`,
+  sdicId: 'MOCK-SDC-001',
+  mrcNo: 'MOCK-MRC-001',
 });
+
+const handleInitialize = (req, res) => {
+  console.log('🔧 Mock VSDC initialize:', req.body.tpin, req.body.bhfId, req.body.dvcSrlNo);
+  const keys = initKeys();
+  res.json(
+    ok({
+      initialized: true,
+      ...keys,
+      data: { info: keys },
+    })
+  );
+};
+
+app.post('/api/initialize', handleInitialize);
+app.post('/initializer/selectInitInfo', handleInitialize);
 
 app.post('/api/invoice/submit', (req, res) => {
   console.log('🧾 Mock VSDC invoice submit');
@@ -46,6 +65,31 @@ app.post('/api/invoice/submit', (req, res) => {
       sdcId: 'MOCK-SDC-001',
       mrcNo: 'MOCK-MRC-001',
       intrlData: `MOCK-SIGN-${Math.random().toString(36).slice(2, 11)}`,
+    })
+  );
+});
+
+app.post('/api/items/save', (req, res) => {
+  console.log('📦 Mock VSDC item save:', req.body.itemCd);
+  res.json(
+    ok({
+      itemCd: req.body.itemCd,
+      itemNm: req.body.itemNm,
+    })
+  );
+});
+
+app.post('/api/items/sync', (req, res) => {
+  console.log('🔄 Mock VSDC items sync');
+  res.json(ok({ itemList: [] }));
+});
+
+app.post('/api/stock/save', (req, res) => {
+  console.log('📊 Mock VSDC stock save:', req.body.itemCd, req.body.qty);
+  res.json(
+    ok({
+      itemCd: req.body.itemCd,
+      sarNo: req.body.sarNo || `MOCK-SAR-${Date.now()}`,
     })
   );
 });
@@ -73,5 +117,5 @@ app.get('/health', (req, res) => {
 
 const HOST = process.env.HOST || '0.0.0.0';
 app.listen(PORT, HOST, () => {
-  console.log(`Mock VSDC: http://${HOST}:${PORT} (ping, login, invoice/submit)`);
+  console.log(`Mock VSDC: http://${HOST}:${PORT} (ping, login, invoice/submit, items/save, stock/save)`);
 });

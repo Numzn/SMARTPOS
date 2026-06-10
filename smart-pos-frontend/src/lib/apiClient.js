@@ -1,7 +1,21 @@
 import Cookies from 'js-cookie';
 
-export const API_ROOT = import.meta.env.VITE_API_URL || 'http://localhost:4000';
-export const API_BASE = `${API_ROOT}/api`;
+const configured = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+
+// Relative VITE_API_URL (e.g. "/api") is already the API prefix on the same origin.
+// Absolute host URLs (dev) need "/api" appended once.
+function resolveApiBase() {
+  if (configured.startsWith('/')) {
+    return configured.replace(/\/$/, '');
+  }
+  const root = configured.replace(/\/$/, '');
+  return root.endsWith('/api') ? root : `${root}/api`;
+}
+
+export const API_ROOT = configured.startsWith('/')
+  ? configured.replace(/\/$/, '')
+  : configured.replace(/\/$/, '');
+export const API_BASE = resolveApiBase();
 
 export function getAuthToken() {
   return Cookies.get('token') || localStorage.getItem('token');

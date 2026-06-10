@@ -110,8 +110,53 @@ export const getStockStatus = (inventory, productId) => {
   return { label: 'In Stock', color: 'bg-green-100 text-green-800' };
 };
 
-export const navigateToInventory = (productId) => {
-  // Store the product ID for filtering in inventory page
-  localStorage.setItem('inventoryFilter', productId);
-  window.location.href = '#/inventory';
+/** Cashier / product list: uses API lowStockAlert or minStockLevel vs current stock. */
+export const isProductRegisteredForSale = (product) =>
+  product?.zraRegistrationStatus === 'REGISTERED';
+
+export const getRegistrationStatusBadge = (status) => {
+  switch (status) {
+    case 'REGISTERED':
+      return { label: 'Registered', className: 'bg-green-100 text-green-800' };
+    case 'FAILED':
+      return { label: 'Reg. failed', className: 'bg-red-100 text-red-800' };
+    default:
+      return { label: 'Pending', className: 'bg-yellow-100 text-yellow-800' };
+  }
+};
+
+export const isProductLowStock = (product) => {
+  const stock = product?.stock ?? 0;
+  if (stock <= 0) return false;
+  if (typeof product?.lowStockAlert === 'boolean') return product.lowStockAlert;
+  return stock <= (product?.minStockLevel ?? 0);
+};
+
+export const getCashierStockStatus = (product) => {
+  const stock = product?.stock ?? 0;
+
+  if (stock <= 0) {
+    return {
+      status: 'out',
+      label: 'Out of stock',
+      color: 'text-red-700',
+      bg: 'bg-red-50 border border-red-200',
+    };
+  }
+
+  if (isProductLowStock(product)) {
+    return {
+      status: 'low',
+      label: `Low stock · ${stock}`,
+      color: 'text-orange-700',
+      bg: 'bg-orange-50 border border-orange-200',
+    };
+  }
+
+  return null;
+};
+
+export const navigateToInventory = (productId, productName) => {
+  localStorage.setItem('inventoryFilter', productName || productId);
+  window.location.href = '/inventory';
 };

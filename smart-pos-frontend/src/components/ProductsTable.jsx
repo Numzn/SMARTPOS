@@ -1,4 +1,5 @@
 import React from 'react';
+import { getRegistrationStatusBadge } from '../utils/productUtils';
 
 const ProductsTable = ({ 
   products, 
@@ -67,7 +68,7 @@ const ProductsTable = ({
                         {inventoryInfo.currentStock}
                       </span>
                       <button
-                        onClick={() => navigateToInventory(product.id)}
+                        onClick={() => navigateToInventory(product.id, product.name)}
                         className="text-xs text-blue-600 hover:text-blue-800"
                       >
                         📊 View
@@ -75,16 +76,20 @@ const ProductsTable = ({
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-xs">
-                      <div className={`inline-flex px-2 py-1 rounded-full ${
-                        product.vatCategoryCode === 'STANDARD' ? 'bg-blue-100 text-blue-800' :
-                        product.vatCategoryCode === 'EXEMPT' ? 'bg-gray-100 text-gray-800' :
-                        'bg-green-100 text-green-800'
-                      }`}>
-                        {product.vatCategoryCode || 'STANDARD'}
+                    <div className="text-xs space-y-1">
+                      {(() => {
+                        const reg = getRegistrationStatusBadge(product.zraRegistrationStatus);
+                        return (
+                          <div className={`inline-flex px-2 py-1 rounded-full ${reg.className}`}>
+                            {reg.label}
+                          </div>
+                        );
+                      })()}
+                      <div className="text-gray-500">
+                        VAT: {product.vatCategoryCode || 'STANDARD'}
                       </div>
                       {product.zraClassificationCode && (
-                        <div className="text-gray-500 mt-1">ZRA: {product.zraClassificationCode}</div>
+                        <div className="text-gray-500">Class: {product.zraClassificationCode}</div>
                       )}
                     </div>
                   </td>
