@@ -366,6 +366,69 @@ class ZRAInvoiceService {
   }
 
   /**
+   * Build VSDC credit note payload from a Refund (rcptTyCd=R, orgInvcNo set).
+   */
+  buildCreditNoteFromRefund(refund, originalSale) {
+    const customerName = 'Walk-in Customer';
+
+    const items = refund.refundItems.map((line) => {
+      const product = line.product;
+      const itemClassification = getProductClassification(product);
+      if (!itemClassification) {
+        throw new Error(
+          `Product ${product.sku || product.name} is missing ZRA classification code`
+        );
+      }
+      return {
+        itemCode: product.sku || product.id,
+        itemClassification,
+        itemName: product.name,
+        barcode: product.barcode,
+        packageUnit: product.zraPackageUnit || product.unit || 'EA',
+        packageQuantity: line.pkg ?? 1,
+        quantityUnit: product.zraQuantityUnit || product.unit || 'EA',
+        quantity: line.qty,
+        unitPrice: line.prc,
+        supplyAmount: line.splyAmt,
+        discountRate: 0,
+        discountAmount: 0,
+        taxType: product.taxType || 'A',
+        taxableAmount: line.taxblAmt,
+        taxAmount: line.taxAmt,
+        totalAmount: line.totAmt,
+      };
+    });
+
+    const orgInvcNo =
+      (originalSale.vsdcResponse && originalSale.vsdcResponse.invcNo) ||
+      (originalSale.vsdcResponse && originalSale.vsdcResponse.data?.invcNo) ||
+      0;
+
+    return {
+      invoiceNumber: refund.id,
+      originalInvoiceNumber: orgInvcNo,
+      customerTpin: null,
+      customerName,
+      customerBranchId: '00',
+      salesType: this.salesTypes.NORMAL,
+      receiptType: this.receiptTypes.REFUND,
+      paymentMethod: refund.paymentMethod,
+      salesStatus: this.salesStatus.APPROVED,
+      confirmationDate: refund.createdAt,
+      salesDate: refund.createdAt,
+      refundDate: new Date(),
+      refundReasonCode: refund.reasonCode,
+      remark: refund.reason || 'Credit note / refund',
+      items,
+      totalTaxableAmount: items.reduce((s, i) => s + i.taxableAmount, 0),
+      totalTaxAmount: items.reduce((s, i) => s + i.taxAmount, 0),
+      totalAmount: refund.total,
+      registeredBy: refund.userId,
+      registeredByName: refund.user?.name || refund.user?.email || 'SYSTEM',
+    };
+  }
+
+  /**
    * Load sale and build invoice data for VSDC submission.
    */
   async generateInvoiceDataFromSale(saleId, options = {}) {
@@ -457,6 +520,90 @@ class ZRAInvoiceService {
     return {
       success: true,
       message: result.message || 'Smart Invoice generated successfully',
+      zraResponse: result.zraResponse,
+      vsdcRequest,
+      vsdcResponse,
+    };
+  }
+
+  /**
+   * Submit refund credit note to VSDC — does not update refund status or stock (owned by saleRefund).
+   */
+  async submitFiscalForRefund(refundId) {
+    const refund = await this.prisma.refund.findUnique({
+      where: { id: refundId },
+      include: {
+        refundItems: { include: { product: true } },
+        user: { select: { id: true, name: true, email: true } },
+        originalSale: true,
+      },
+    });
+
+    if (!refund) {
+      return { success: false, message: 'Refund not found', data: null };
+    }
+
+    if (refund.rcptNo) {
+      return {
+        success: true,
+        message: 'Refund already submitted to ZRA',
+        zraResponse: {
+          rcptNo: refund.rcptNo,
+          qrCode: refund.qrCode,
+          rcptSign: refund.rcptSign,
+        },
+        vsdcRequest: refund.vsdcRequest,
+        vsdcResponse: refund.vsdcResponse,
+      };
+    }
+
+    if (!refund.originalSale?.rcptNo) {
+      return {
+        success: false,
+        message: 'Original sale has no fiscal receipt',
+        code: 'ORIGINAL_SALE_NOT_FISCAL',
+      };
+    }
+
+    const ready = await vsdcService.isDeviceReady();
+    if (!ready) {
+      const init = await vsdcService.ensureDeviceInitialized();
+      if (!init.success) {
+        return {
+          success: false,
+          message: init.error || 'VSDC device not initialized',
+          code: 'VSDC_NOT_INITIALIZED',
+        };
+      }
+    }
+
+    const invoiceData = this.buildCreditNoteFromRefund(refund, refund.originalSale);
+    const vsdcRequest = invoiceData;
+
+    await this.prisma.refund.update({
+      where: { id: refundId },
+      data: { vsdcRequest },
+    });
+
+    const result = await this.submitInvoiceWithRetry(invoiceData);
+
+    const vsdcResponse = result.success
+      ? result.zraResponse
+      : { error: result.error, code: result.code, resultMsg: result.error };
+
+    if (!result.success) {
+      return {
+        success: false,
+        message: result.error || 'ZRA credit note submission failed',
+        vsdcRequest,
+        vsdcResponse,
+        zraResponse: result,
+      };
+    }
+
+    return {
+      success: true,
+      message: result.message || 'Credit note submitted successfully',
       zraResponse: result.zraResponse,
       vsdcRequest,
       vsdcResponse,

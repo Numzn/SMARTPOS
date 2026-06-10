@@ -53,13 +53,15 @@ app.post('/api/initialize', handleInitialize);
 app.post('/initializer/selectInitInfo', handleInitialize);
 
 app.post('/api/invoice/submit', (req, res) => {
-  console.log('🧾 Mock VSDC invoice submit');
+  const rcptType = req.body.rcptTyCd || 'S';
+  const orgInvc = req.body.orgInvcNo || 0;
+  console.log(`🧾 Mock VSDC invoice submit (rcptTyCd=${rcptType}, orgInvcNo=${orgInvc})`);
   const invcNo = req.body.invcNo || Date.now();
   res.json(
     ok({
       invcSdcId: `MOCK-SDC-${invcNo}`,
       invcNo,
-      rcptNo: `MOCK-RCPT-${invcNo}`,
+      rcptNo: rcptType === 'R' ? `MOCK-CRN-${invcNo}` : `MOCK-RCPT-${invcNo}`,
       totRcptNo: 1,
       qrCode: `https://mock.zra.zm/receipt/${invcNo}`,
       sdcId: 'MOCK-SDC-001',

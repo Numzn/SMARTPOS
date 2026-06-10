@@ -192,6 +192,26 @@ async function main() {
     pass('ZRA invoice', false, 'skipped');
   }
 
+  let refundId;
+  if (saleId && token) {
+    try {
+      const profile = await request('GET', `${BASE}/api/users/profile`, null, token);
+      const refund = await request(
+        'POST',
+        `${BASE}/api/sales/${saleId}/refund`,
+        { userId: profile.id, reasonCode: '01', reason: 'Validation test refund' },
+        token
+      );
+      refundId = refund.refund?.id;
+      const crn = refund.fiscal?.rcptNo;
+      pass('Credit note refund', !!refundId && !!crn, crn || 'no credit receipt');
+    } catch (e) {
+      pass('Credit note refund', false, e.message);
+    }
+  } else {
+    pass('Credit note refund', false, 'skipped');
+  }
+
   if (saleId && token) {
     let movement;
     try {

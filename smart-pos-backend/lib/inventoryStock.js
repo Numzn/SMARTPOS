@@ -193,10 +193,71 @@ async function deductStockForSale(
   return updated;
 }
 
+/**
+ * Restore stock after a fiscal refund (RETURN_IN movement + batch).
+ */
+async function restoreStockForRefund(
+  tx,
+  { productId, quantity, branchId = DEFAULT_BRANCH, userId, refundId }
+) {
+  const qty = Math.abs(parseInt(quantity, 10));
+  if (!qty || qty < 1) {
+    throw new Error(`Invalid refund quantity for product ${productId}`);
+  }
+
+  const inventory = await getOrCreateInventory(tx, productId, branchId);
+  const unitCost = inventory.averageCost || 0;
+  const previousStock = inventory.currentStock;
+  const newStock = previousStock + qty;
+
+  await tx.inventoryBatch.create({
+    data: {
+      inventoryId: inventory.id,
+      productId,
+      batchNumber: `RFD-${String(refundId).slice(-8)}-${Date.now()}`,
+      quantity: qty,
+      unitCost,
+      totalCost: qty * unitCost,
+      costPrice: unitCost,
+      sellingPrice: unitCost * 1.2,
+      status: 'ACTIVE',
+    },
+  });
+
+  const updated = await tx.inventory.update({
+    where: { productId_branchId: { productId, branchId } },
+    data: {
+      currentStock: newStock,
+      totalValue: newStock * unitCost,
+      lowStockAlert: newStock <= inventory.reorderPoint,
+      excessStockAlert: newStock >= inventory.maximumStock,
+    },
+  });
+
+  await tx.stockMovement.create({
+    data: {
+      productId,
+      branchId,
+      movementType: 'RETURN_IN',
+      quantity: qty,
+      previousStock,
+      newStock,
+      unitCost,
+      totalCost: qty * unitCost,
+      referenceType: 'REFUND',
+      referenceId: refundId,
+      userId,
+    },
+  });
+
+  return updated;
+}
+
 module.exports = {
   DEFAULT_BRANCH,
   getOrCreateInventory,
   deductBatchesFifo,
   assertSufficientStock,
   deductStockForSale,
+  restoreStockForRefund,
 };

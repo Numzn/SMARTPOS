@@ -7,6 +7,7 @@ const {
   finalizeSaleFiscally,
   saleInclude,
 } = require('../lib/saleFiscal');
+const { refundSale, refundInclude } = require('../lib/saleRefund');
 const { authenticateToken, requirePermission } = require('../middleware/auth');
 
 // Get all sales (requires sales:read permission)
@@ -87,6 +88,48 @@ router.post('/checkout', authenticateToken, requirePermission('sales:write'), as
   } catch (error) {
     console.error('Checkout error:', error);
     res.status(error.status || 500).json({ error: error.message || 'Checkout failed' });
+  }
+});
+
+/**
+ * POST /api/sales/:id/refund — fiscal credit note + stock restore (VSDC rcptTyCd=R)
+ */
+router.post('/:id/refund', authenticateToken, requirePermission('sales:write'), async (req, res) => {
+  try {
+    const outcome = await refundSale(req.params.id, req.body);
+
+    if (!outcome.success) {
+      return res.status(422).json({
+        error: outcome.fiscal?.error || 'Credit note submission failed',
+        refund: outcome.refund,
+        fiscal: outcome.fiscal,
+      });
+    }
+
+    res.status(201).json({
+      refund: outcome.refund,
+      fiscal: outcome.fiscal,
+    });
+  } catch (error) {
+    console.error('Refund error:', error);
+    res.status(error.status || 500).json({ error: error.message || 'Refund failed' });
+  }
+});
+
+/**
+ * GET /api/sales/:id/refunds — list credit notes for a sale
+ */
+router.get('/:id/refunds', authenticateToken, requirePermission('sales:read'), async (req, res) => {
+  try {
+    const refunds = await prisma.refund.findMany({
+      where: { originalSaleId: req.params.id },
+      include: refundInclude,
+      orderBy: { createdAt: 'desc' },
+    });
+    res.json(refunds);
+  } catch (error) {
+    console.error('Error fetching refunds:', error);
+    res.status(500).json({ error: 'Failed to fetch refunds' });
   }
 });
 

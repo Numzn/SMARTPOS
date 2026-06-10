@@ -26,6 +26,7 @@ model User {
   
   // Relations
   sales            Sale[]
+  refunds          Refund[]
   stockAdjustments StockAdjustment[]
   stockMovements   StockMovement[]
   
@@ -92,6 +93,7 @@ model Product {
   category              Category     @relation(fields: [categoryId], references: [id])
   inventory             Inventory[]
   saleItems             SaleItem[]
+  refundItems           RefundItem[]
   stockAdjustments      StockAdjustment[]
   stockMovements        StockMovement[]
   InventoryItem         InventoryBatch[] @relation("ProductBatches") // Use InventoryBatch for consistency
@@ -123,8 +125,62 @@ model Sale {
   // Relations
   user        User       @relation(fields: [userId], references: [id])
   saleItems   SaleItem[]
+  refunds     Refund[]   @relation("SaleRefunds")
   
   @@map("sales")
+}
+
+model Refund {
+  id             String       @id @default(cuid())
+  originalSaleId String
+  userId         String
+  status         RefundStatus @default(PENDING)
+  reasonCode     String       @default("01")
+  reason         String?
+  subtotal       Float
+  tax            Float?
+  discount       Float?
+  total          Float
+  paymentMethod  PaymentMethod
+
+  rcptNo         String?
+  rcptSign       String?
+  qrCode         String?
+  vsdcTimestamp  DateTime?
+  vsdcRequest    Json?
+  vsdcResponse   Json?
+  fiscalError    String?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  originalSale   Sale         @relation("SaleRefunds", fields: [originalSaleId], references: [id])
+  user           User         @relation(fields: [userId], references: [id])
+  refundItems    RefundItem[]
+
+  @@map("refunds")
+}
+
+model RefundItem {
+  id         String  @id @default(cuid())
+  refundId   String
+  saleItemId String?
+  productId  String
+  quantity   Int
+  price      Float
+  total      Float
+  pkg        Int?
+  qty        Int
+  prc        Float
+  splyAmt    Float
+  taxblAmt   Float
+  taxAmt     Float
+  totAmt     Float
+
+  refund     Refund  @relation(fields: [refundId], references: [id], onDelete: Cascade)
+  product    Product @relation(fields: [productId], references: [id])
+
+  @@map("refund_items")
 }
 
 model SaleItem {
@@ -344,6 +400,14 @@ enum Role {
   MANAGER
   CASHIER
   VIEWER
+}
+
+enum RefundStatus {
+  PENDING
+  FISCAL_SUBMITTING
+  COMPLETED
+  FISCAL_FAILED
+  CANCELLED
 }
 
 enum SaleStatus {
