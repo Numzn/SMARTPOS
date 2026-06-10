@@ -94,7 +94,7 @@ router.post('/checkout', authenticateToken, requirePermission('sales:write'), as
 /**
  * POST /api/sales/:id/refund — fiscal credit note + stock restore (VSDC rcptTyCd=R)
  */
-router.post('/:id/refund', authenticateToken, requirePermission('sales:write'), async (req, res) => {
+router.post('/:id/refund', authenticateToken, requirePermission('sales:refund'), async (req, res) => {
   try {
     const outcome = await refundSale(req.params.id, req.body);
 

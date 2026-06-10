@@ -13,7 +13,7 @@ const PERMISSIONS = {
     'products:read', 'products:write', 'products:delete',
     'categories:read', 'categories:write', 'categories:delete',
     'inventory:read', 'inventory:write', 'inventory:delete',
-    'sales:read', 'sales:write', 'sales:delete',
+    'sales:read', 'sales:write', 'sales:delete', 'sales:refund',
     'reports:read', 'reports:write',
     'settings:read', 'settings:write',
     'zra:submit', 'zra:sync', 'zra:read'
@@ -23,7 +23,7 @@ const PERMISSIONS = {
     'products:read', 'products:write',
     'categories:read', 'categories:write',
     'inventory:read', 'inventory:write',
-    'sales:read', 'sales:write',
+    'sales:read', 'sales:write', 'sales:refund',
     'reports:read',
     'zra:submit', 'zra:sync', 'zra:read'
   ],

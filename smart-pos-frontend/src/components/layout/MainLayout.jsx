@@ -14,6 +14,7 @@ import {
   Bell,
   LogOut,
   ChevronDown,
+  Receipt,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -21,6 +22,7 @@ import { usePermissions } from '../../hooks/usePermissions';
 const NAV_ITEMS = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, show: () => true },
   { name: 'Cashier', href: '/cashier', icon: CreditCard, show: (p, u) => p.createSale || p.viewSales || u?.role === 'CASHIER' },
+  { name: 'Sales', href: '/sales', icon: Receipt, show: (p) => p.viewSales || p.refundSale },
   { name: 'Products', href: '/products', icon: Package, show: (p) => p.viewProducts },
   { name: 'Inventory', href: '/inventory', icon: Warehouse, show: (p) => p.viewInventory },
   { name: 'Reports', href: '/reports', icon: BarChart2, show: (p) => p.viewReports },
