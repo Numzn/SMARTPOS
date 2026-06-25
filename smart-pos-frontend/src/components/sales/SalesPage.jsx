@@ -1,8 +1,25 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
-import { RefreshCw, RotateCcw, Receipt } from 'lucide-react';
+import { useOutletContext } from 'react-router-dom';
+import { RefreshCw, RotateCcw, Receipt, Search } from 'lucide-react';
 import { fetchSales, getSaleStatusBadge } from '../../api/salesApi';
 import { usePermissions } from '../../hooks/usePermissions';
 import RefundModal from './RefundModal';
+
+function saleMatchesSearch(sale, term) {
+  const q = term.trim().toLowerCase();
+  if (!q) return true;
+  if (sale.rcptNo?.toLowerCase().includes(q)) return true;
+  if (sale.id?.toLowerCase().includes(q)) return true;
+  if (sale.user?.name?.toLowerCase().includes(q)) return true;
+  if (sale.user?.email?.toLowerCase().includes(q)) return true;
+  if (String(sale.total).includes(q)) return true;
+  if (sale.status?.toLowerCase().includes(q)) return true;
+  for (const item of sale.saleItems || []) {
+    if (item.product?.name?.toLowerCase().includes(q)) return true;
+    if (item.product?.sku?.toLowerCase().includes(q)) return true;
+  }
+  return false;
+}
 
 const STATUS_FILTERS = [
   { id: 'all', label: 'All' },
@@ -13,10 +30,14 @@ const STATUS_FILTERS = [
 
 const SalesPage = () => {
   const { canAccess } = usePermissions();
+  const outlet = useOutletContext() || {};
+  const headerSearch = outlet.headerSearch ?? '';
+  const setHeaderSearch = outlet.setHeaderSearch;
   const [sales, setSales] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [statusFilter, setStatusFilter] = useState('all');
+  const [localSearch, setLocalSearch] = useState('');
   const [refundSale, setRefundSale] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
 
@@ -37,10 +58,18 @@ const SalesPage = () => {
     loadSales();
   }, [loadSales]);
 
+  const searchTerm = localSearch || headerSearch;
+
   const filtered = useMemo(() => {
-    if (statusFilter === 'all') return sales;
-    return sales.filter((s) => s.status === statusFilter);
-  }, [sales, statusFilter]);
+    let list = sales;
+    if (statusFilter !== 'all') {
+      list = list.filter((s) => s.status === statusFilter);
+    }
+    if (searchTerm.trim()) {
+      list = list.filter((s) => saleMatchesSearch(s, searchTerm));
+    }
+    return list;
+  }, [sales, statusFilter, searchTerm]);
 
   const canRefund = (sale) =>
     canAccess.refundSale &&
@@ -70,6 +99,27 @@ const SalesPage = () => {
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           Refresh
         </button>
+      </div>
+
+      <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input
+            type="search"
+            placeholder="Search receipt, cashier, product, amount…"
+            value={localSearch || headerSearch}
+            onChange={(e) => {
+              const v = e.target.value;
+              setLocalSearch(v);
+              setHeaderSearch?.(v);
+            }}
+            className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-400"
+            aria-label="Search sales"
+          />
+        </div>
+        <p className="text-xs text-gray-500 sm:text-right">
+          {filtered.length} of {sales.length} sale{sales.length === 1 ? '' : 's'}
+        </p>
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -117,7 +167,7 @@ const SalesPage = () => {
               {!loading && filtered.length === 0 && (
                 <tr>
                   <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-500">
-                    No sales match this filter.
+                    No sales match your search or filter.
                   </td>
                 </tr>
               )}

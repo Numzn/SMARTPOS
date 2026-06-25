@@ -71,7 +71,7 @@ router.get('/analytics/summary', authenticateToken, requirePermission('reports:r
  */
 router.post('/checkout', authenticateToken, requirePermission('sales:write'), async (req, res) => {
   try {
-    const outcome = await checkoutSale(req.body);
+    const outcome = await checkoutSale({ ...req.body, userId: req.user.userId });
 
     if (!outcome.success) {
       return res.status(422).json({

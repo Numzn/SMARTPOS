@@ -1,47 +1,48 @@
-# Smart POS
+# SMARTPOS on Numzlab
 
-Full-stack point-of-sale system with ZRA/VSDC compliance, inventory management, and a modern cashier UI.
+SMARTPOS is **fully independent** from NUMZFLEET and other homelab projects. It has its own Postgres (port **5434**), network (`smartpos_default`), and volumes.
 
-| Layer    | Stack                          | Port (dev) |
-|----------|--------------------------------|------------|
-| Frontend | React 19, Vite, Tailwind, nginx | 5173 / 8080 (Docker) |
-| Backend  | Express 5, Prisma, PostgreSQL  | 4000       |
-| Mock VSDC| Node (ZRA compliance mock)     | 8090       |
+## Server path
 
-**Repository:** [github.com/Numzn/SMARTPOS](https://github.com/Numzn/SMARTPOS)
+Live deployment: `/srv/projects/smartpos` (cloned from [github.com/Numzn/SMARTPOS](https://github.com/Numzn/SMARTPOS))
 
-## Quick start (Docker)
+## Deploy (numzlab only)
+
+Always use the numzlab override — never bare `docker compose up` (that pulls `nginx` from Docker Hub):
 
 ```bash
-cp .env.docker.example .env   # edit JWT_SECRET and POSTGRES_PASSWORD
-npm run docker:up
+ssh homelab
+cd /srv/projects/smartpos
+./scripts/deploy-numzlab.sh --no-seed   # updates without re-seeding DB
 ```
 
-Open http://localhost:8080 — default seed users are in [DEPLOY.md](DEPLOY.md).
-
-## Local development
+Or use the compose wrapper:
 
 ```bash
-npm install                   # workspace install (root)
-cd smart-pos-backend && npm run db:up && npm run setup-db
-npm start                     # frontend + backend via dev-helper
+./scripts/compose-numzlab.sh ps
+./scripts/compose-numzlab.sh up -d --build
 ```
 
-See [DEV_GUIDE.md](DEV_GUIDE.md) for VS Code tasks and detailed workflows.
+## Numzlab-specific files (mirror)
 
-## Deployment
+These files live in the SMARTPOS repo for numzlab; they do not change the default dev `docker-compose.yml`:
 
-Production deployment (GitHub push, Numzlab server, Docker Compose, backups) is documented in **[DEPLOY.md](DEPLOY.md)**.
+| File | Purpose |
+|------|---------|
+| `docker-compose.numzlab.yml` | Caddy frontend, `pull_policy: never`, `build.pull: false` |
+| `smart-pos-frontend/Dockerfile.caddy` | Frontend image (Caddy, not nginx) |
+| `smart-pos-frontend/Caddyfile` | Reverse proxy `/api` → backend |
+| `scripts/deploy-numzlab.sh` | Safe deploy from source only |
+| `scripts/compose-numzlab.sh` | Compose wrapper with override |
 
-## Project layout
+## Access
 
-```
-smart-pos-frontend/   React SPA (cashier, dashboard, inventory, reports)
-smart-pos-backend/    REST API, Prisma, ZRA/VSDC services
-docker-compose.yml    Full stack: Postgres + backend + frontend + mock VSDC
-scripts/              Deploy and smoke-test scripts
-```
+| Service | LAN | Tailscale |
+|---------|-----|-----------|
+| UI | http://192.168.1.147:8080 | http://100.121.79.2:8080 |
+| API | :4000/api/health | same |
+| Postgres | :5434 | same |
 
-## CI
+## Not SMARTPOS (separate stacks)
 
-GitHub Actions runs on push/PR to `main`: Prisma migrations, backend validation, frontend build, and Docker image builds (see `.github/workflows/ci.yml`).
+NUMZFLEET image pulls (`numz14/numzfleet-*`) come from `/srv/projects/numzfleet/deployment/compose/docker-compose.staging.yml` — a different compose project. They are not triggered by SMARTPOS deploy scripts.

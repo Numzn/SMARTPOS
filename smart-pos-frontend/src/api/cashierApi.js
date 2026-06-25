@@ -13,12 +13,6 @@ export async function fetchCategories() {
   return res.json();
 }
 
-export async function fetchVsdcStatus() {
-  const res = await fetch(`${API_BASE}/vsdc/status`, { headers: getAuthHeaders() });
-  if (!res.ok) throw new Error('Failed to fetch VSDC status');
-  return res.json();
-}
-
 /** Map UI payment ids to backend PaymentMethod enum */
 export function mapPaymentMethod(method) {
   const map = {
@@ -28,6 +22,12 @@ export function mapPaymentMethod(method) {
     bank: 'BANK_TRANSFER',
   };
   return map[method] || 'CASH';
+}
+
+export async function fetchVsdcStatus() {
+  const res = await fetch(`${API_BASE}/vsdc/status`, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error('Failed to fetch VSDC status');
+  return res.json();
 }
 
 export async function checkoutSale(saleData) {
@@ -73,8 +73,8 @@ export async function submitToZRA(saleId) {
 
 // Mock data fallback when API is unavailable
 export const mockProducts = [
-  { id: 1, name: 'Coca Cola 500ml', price: 8.5, category: 'Beverages', stock: 50, minStockLevel: 10, lowStockAlert: false },
-  { id: 2, name: 'Bread Loaf', price: 12, category: 'Bakery', stock: 8, minStockLevel: 10, lowStockAlert: true },
+  { id: 1, name: 'Coca Cola 500ml', price: 8.5, category: 'Beverages', stock: 50 },
+  { id: 2, name: 'Bread Loaf', price: 12, category: 'Bakery', stock: 25 },
 ];
 
 export const mockCategories = [

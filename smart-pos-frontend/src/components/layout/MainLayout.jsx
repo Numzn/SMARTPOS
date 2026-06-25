@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -37,9 +37,23 @@ const MainLayout = () => {
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [headerSearch, setHeaderSearch] = useState('');
 
   const navigation = NAV_ITEMS.filter((item) => item.show(permissions.canAccess, user));
   const isCashierRoute = location.pathname === '/cashier';
+
+  useEffect(() => {
+    setHeaderSearch('');
+  }, [location.pathname]);
+
+  const headerSearchPlaceholder =
+    location.pathname === '/sales'
+      ? 'Search receipt, cashier, product…'
+      : location.pathname === '/products'
+        ? 'Search products…'
+        : location.pathname === '/inventory'
+          ? 'Search inventory…'
+          : 'Search SKU, product, receipt…';
 
   const handleLogout = () => {
     logout();
@@ -116,8 +130,11 @@ const MainLayout = () => {
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                 <input
                   type="search"
-                  placeholder="Search SKU, product, receipt…"
+                  placeholder={headerSearchPlaceholder}
+                  value={headerSearch}
+                  onChange={(e) => setHeaderSearch(e.target.value)}
                   className="input-sys pl-8 py-1.5 h-8"
+                  aria-label="Search"
                 />
               </div>
           </div>
@@ -166,7 +183,13 @@ const MainLayout = () => {
             isCashierRoute ? 'overflow-hidden p-0' : 'overflow-y-auto p-4'
           }`}
         >
-          <Outlet context={{ openSidebar: () => setSidebarOpen(true) }} />
+          <Outlet
+            context={{
+              openSidebar: () => setSidebarOpen(true),
+              headerSearch,
+              setHeaderSearch,
+            }}
+          />
         </main>
       </div>
 

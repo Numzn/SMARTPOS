@@ -554,52 +554,6 @@ class VSDCService {
   }
 
   /**
-   * Make authenticated request to VSDC
-   * Handles session management and token refresh
-   */
-  async makeAuthenticatedRequest(method, endpoint, data = null) {
-    try {
-      // Check if session is valid
-      if (!this.isSessionValid()) {
-        const authResult = await this.authenticate()
-        if (!authResult.success) {
-          throw new Error('Failed to authenticate with VSDC')
-        }
-      }
-
-      const config = {
-        method,
-        url: `${this.baseURL}${endpoint}`,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.sessionToken}`,
-          'User-Agent': 'SmartPOS-Zambia/1.0'
-        },
-        timeout: 30000
-      }
-
-      if (data) {
-        config.data = data
-      }
-
-      const response = await axios(config)
-      
-      return {
-        success: true,
-        data: response.data,
-        status: response.status
-      }
-    } catch (error) {
-      console.error(`❌ VSDC Request failed (${method} ${endpoint}):`, error.message)
-      return {
-        success: false,
-        error: error.message,
-        code: error.response?.data?.resultCd || 'REQUEST_ERROR'
-      }
-    }
-  }
-
-  /**
    * Check if current session is valid
    */
   isSessionValid() {
