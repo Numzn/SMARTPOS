@@ -2,6 +2,7 @@ const vsdcService = require('./vsdcService')
 const auditService = require('./auditService')
 const prisma = require('../lib/prisma')
 const { getProductClassification } = require('../lib/productRegistration')
+const { allocateFiscalInvcNo, resolveOriginalInvcNo } = require('../lib/fiscalInvoiceNumber')
 
 /**
  * ZRA Invoice Service - VSDC PDF Compliant Implementation
@@ -59,12 +60,17 @@ class ZRAInvoiceService {
         throw new Error(`Invalid invoice data: ${validation.errors.join(', ')}`)
       }
 
+      const invcNo = Number(invoiceData.invoiceNumber)
+      if (!Number.isFinite(invcNo) || invcNo < 1) {
+        throw new Error('Invalid invoice data: Fiscal invoice number must be a positive integer')
+      }
+
       // Prepare VSDC compliant invoice data
       const vsdcInvoiceData = {
         tpin: vsdcService.tpin,
         bhfId: vsdcService.bhfId,
-        invcNo: parseInt(invoiceData.invoiceNumber),
-        orgInvcNo: invoiceData.originalInvoiceNumber || 0,
+        invcNo: Math.floor(invcNo),
+        orgInvcNo: Number(invoiceData.originalInvoiceNumber) || 0,
         custTpin: invoiceData.customerTpin || null,
         custNm: invoiceData.customerName,
         custBhfId: invoiceData.customerBranchId || '00',
@@ -345,8 +351,13 @@ class ZRAInvoiceService {
       };
     });
 
+    const invcNo = options.invcNo ?? sale.fiscalInvcNo;
+    if (!invcNo) {
+      throw new Error('Fiscal invoice number not allocated');
+    }
+
     return {
-      invoiceNumber: sale.id,
+      invoiceNumber: invcNo,
       customerTpin,
       customerName,
       customerBranchId: '00',
@@ -368,7 +379,7 @@ class ZRAInvoiceService {
   /**
    * Build VSDC credit note payload from a Refund (rcptTyCd=R, orgInvcNo set).
    */
-  buildCreditNoteFromRefund(refund, originalSale) {
+  buildCreditNoteFromRefund(refund, originalSale, options = {}) {
     const customerName = 'Walk-in Customer';
 
     const items = refund.refundItems.map((line) => {
@@ -399,13 +410,14 @@ class ZRAInvoiceService {
       };
     });
 
-    const orgInvcNo =
-      (originalSale.vsdcResponse && originalSale.vsdcResponse.invcNo) ||
-      (originalSale.vsdcResponse && originalSale.vsdcResponse.data?.invcNo) ||
-      0;
+    const orgInvcNo = resolveOriginalInvcNo(originalSale);
+    const invcNo = options.invcNo ?? refund.fiscalInvcNo;
+    if (!invcNo) {
+      throw new Error('Fiscal invoice number not allocated');
+    }
 
     return {
-      invoiceNumber: refund.id,
+      invoiceNumber: invcNo,
       originalInvoiceNumber: orgInvcNo,
       customerTpin: null,
       customerName,
@@ -493,7 +505,16 @@ class ZRAInvoiceService {
       }
     }
 
-    const invoiceData = this.buildInvoiceDataFromSale(sale, options);
+    const fiscalInvcNo = sale.fiscalInvcNo || (await allocateFiscalInvcNo());
+    if (!sale.fiscalInvcNo) {
+      await this.prisma.sale.update({
+        where: { id: saleId },
+        data: { fiscalInvcNo },
+      });
+      sale.fiscalInvcNo = fiscalInvcNo;
+    }
+
+    const invoiceData = this.buildInvoiceDataFromSale(sale, { ...options, invcNo: fiscalInvcNo });
     const vsdcRequest = invoiceData;
 
     await this.prisma.sale.update({
@@ -577,7 +598,20 @@ class ZRAInvoiceService {
       }
     }
 
-    const invoiceData = this.buildCreditNoteFromRefund(refund, refund.originalSale);
+    const fiscalInvcNo = refund.fiscalInvcNo || (await allocateFiscalInvcNo());
+    if (!refund.fiscalInvcNo) {
+      await this.prisma.refund.update({
+        where: { id: refundId },
+        data: { fiscalInvcNo },
+      });
+      refund.fiscalInvcNo = fiscalInvcNo;
+    }
+
+    const invoiceData = this.buildCreditNoteFromRefund(
+      refund,
+      refund.originalSale,
+      { invcNo: fiscalInvcNo }
+    );
     const vsdcRequest = invoiceData;
 
     await this.prisma.refund.update({
@@ -720,6 +754,9 @@ class ZRAInvoiceService {
 
     // Required fields validation
     if (!invoiceData.invoiceNumber) errors.push('Invoice number is required')
+    else if (!Number.isFinite(Number(invoiceData.invoiceNumber)) || Number(invoiceData.invoiceNumber) < 1) {
+      errors.push('Invoice number must be a positive integer fiscal sequence')
+    }
     if (!invoiceData.customerName) errors.push('Customer name is required')
     if (!invoiceData.items || invoiceData.items.length === 0) {
       errors.push('Invoice must have at least one item')
