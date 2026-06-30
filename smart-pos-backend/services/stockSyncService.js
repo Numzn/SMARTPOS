@@ -179,6 +179,25 @@ function syncAfterSale(saleId, branchId = 'main') {
   });
 }
 
+/** Fire-and-forget sync for one or more movement ids; never throws. */
+function syncAfterMovements(movementIds, branchId = 'main') {
+  const ids = (Array.isArray(movementIds) ? movementIds : [movementIds]).filter(Boolean);
+  if (ids.length === 0) return;
+
+  Promise.all(ids.map((id) => syncMovementById(id)))
+    .then((results) => {
+      const failed = results.filter((r) => !r.ok && !r.skipped);
+      if (failed.length) {
+        console.warn(
+          `[stockSyncService] ${failed.length}/${ids.length} movement sync(s) failed (branch=${branchId})`
+        );
+      }
+    })
+    .catch((err) => {
+      console.warn('[stockSyncService] post-movement sync failed:', err.message);
+    });
+}
+
 module.exports = {
   MOVEMENT_TYPE_TO_VSDC,
   toVsdcPayload,
@@ -187,4 +206,5 @@ module.exports = {
   syncMovementById,
   syncRecentMovements,
   syncAfterSale,
+  syncAfterMovements,
 };

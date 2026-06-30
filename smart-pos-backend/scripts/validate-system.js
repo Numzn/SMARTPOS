@@ -301,6 +301,72 @@ async function main() {
   try {
     const products = await request('GET', `${BASE}/api/products`, null, token);
     const list = Array.isArray(products) ? products : [];
+    const bulkProduct = list.find((p) => p.sku === 'SUGAR1K') || list[2];
+    if (bulkProduct && token) {
+      await request(
+        'POST',
+        `${BASE}/api/inventory/bulk-adjust`,
+        {
+          adjustments: [
+            {
+              productId: bulkProduct.id,
+              adjustmentType: 'DECREASE',
+              quantity: 1,
+              reason: 'validate-system bulk sync',
+            },
+          ],
+        },
+        token
+      );
+      await sleep(1500);
+      const bulkMovement = await prisma.stockMovement.findFirst({
+        where: { productId: bulkProduct.id, referenceType: 'BULK_ADJUSTMENT' },
+        orderBy: { createdAt: 'desc' },
+      });
+      pass(
+        'Bulk adjust stock synced',
+        !!bulkMovement?.zraSyncedAt,
+        bulkMovement?.zraSyncedAt ? 'zraSyncedAt set' : 'missing'
+      );
+    } else {
+      pass('Bulk adjust stock synced', false, 'no product');
+    }
+  } catch (e) {
+    pass('Bulk adjust stock synced', false, e.message);
+  }
+
+  try {
+    const batch = await prisma.inventoryBatch.findFirst({
+      where: { status: 'ACTIVE', quantity: { gt: 0 } },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (batch && token) {
+      await request(
+        'POST',
+        `${BASE}/api/inventory/mark-expired`,
+        { batchId: batch.id, reason: 'validate-system expiry sync' },
+        token
+      );
+      await sleep(1500);
+      const expiryMovement = await prisma.stockMovement.findFirst({
+        where: { referenceType: 'EXPIRY', productId: batch.productId },
+        orderBy: { createdAt: 'desc' },
+      });
+      pass(
+        'Mark expired stock synced',
+        !!expiryMovement?.zraSyncedAt,
+        expiryMovement?.zraSyncedAt ? 'zraSyncedAt set' : 'missing'
+      );
+    } else {
+      pass('Mark expired stock synced', false, 'no active batch');
+    }
+  } catch (e) {
+    pass('Mark expired stock synced', false, e.message);
+  }
+
+  try {
+    const products = await request('GET', `${BASE}/api/products`, null, token);
+    const list = Array.isArray(products) ? products : [];
     const testProduct = list.find((p) => p.sku === 'COKE500') || list[0];
     if (testProduct && prisma) {
       await prisma.product.update({

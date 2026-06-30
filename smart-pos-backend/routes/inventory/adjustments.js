@@ -329,7 +329,7 @@ router.post('/bulk-adjust', authenticateToken, requirePermission('inventory:writ
             },
           });
 
-          await tx.stockMovement.create({
+          const stockMovement = await tx.stockMovement.create({
             data: {
               productId,
               branchId,
@@ -356,7 +356,15 @@ router.post('/bulk-adjust', authenticateToken, requirePermission('inventory:writ
             },
           });
 
-          return { productId, success: true, newStock };
+          if (direction === 'OUT') {
+            await deductBatchesFifo(tx, {
+              inventoryId: inventory.id,
+              productId,
+              quantity: adjustmentQty,
+            });
+          }
+
+          return { productId, success: true, newStock, stockMovementId: stockMovement.id };
         });
 
         results.push(result);
@@ -374,8 +382,13 @@ router.post('/bulk-adjust', authenticateToken, requirePermission('inventory:writ
       successful: results.length,
       failed: errors.length,
       results,
-      errors
+      errors,
     });
+
+    const movementIds = results.map((r) => r.stockMovementId).filter(Boolean);
+    if (movementIds.length) {
+      stockSyncService.syncAfterMovements(movementIds, branchId);
+    }
   } catch (error) {
     console.error('❌ Error processing bulk adjustment:', error);
     res.status(500).json({ 

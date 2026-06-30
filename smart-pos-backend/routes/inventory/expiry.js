@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const prisma = require('../../lib/prisma');
 const { authenticateToken, requirePermission } = require('../../middleware/auth');
+const stockSyncService = require('../../services/stockSyncService');
 
 // Helper functions for expiry
 const calculateDaysUntilExpiry = (expiryDate) => {
@@ -104,7 +105,7 @@ router.post('/mark-expired', authenticateToken, requirePermission('inventory:wri
       });
 
       // Create stock movement record
-      await tx.stockMovement.create({
+      const stockMovement = await tx.stockMovement.create({
         data: {
           productId: batch.productId,
           branchId: batch.inventory.branchId,
@@ -116,18 +117,22 @@ router.post('/mark-expired', authenticateToken, requirePermission('inventory:wri
           totalCost: batch.quantity * batch.unitCost,
           referenceType: 'EXPIRY',
           reason: reason,
-          userId
-        }
+          userId,
+        },
       });
 
-      return { batch, newStock };
+      return { batch, newStock, stockMovementId: stockMovement.id };
     });
 
     res.json({
       message: 'Batch marked as expired successfully',
       batch: result.batch,
-      newStock: result.newStock
+      newStock: result.newStock,
     });
+
+    if (result.stockMovementId) {
+      stockSyncService.syncAfterMovements(result.stockMovementId, result.batch.inventory.branchId);
+    }
   } catch (error) {
     console.error('❌ Error marking batch as expired:', error);
     res.status(500).json({ 
