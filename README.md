@@ -2,6 +2,8 @@
 
 SMARTPOS is **fully independent** from NUMZFLEET and other homelab projects. It has its own Postgres (port **5434**), network (`smartpos_default`), and volumes.
 
+**Project status:** see [STATUS.md](./STATUS.md) for the three-lens scorecard, gaps, and roadmap.
+
 ## Server path
 
 Live deployment: `/srv/projects/smartpos` (cloned from [github.com/Numzn/SMARTPOS](https://github.com/Numzn/SMARTPOS))

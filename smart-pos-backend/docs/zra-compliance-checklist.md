@@ -1,26 +1,41 @@
 # ZRA Smart Invoice Compliance Checklist
 
-## 📋 Implementation Progress Tracker
+> **Living checklist** — authoritative project status is in [STATUS.md](../../STATUS.md).
 
-### ✅ Completed
+## Implementation Progress Tracker
+
+*Last aligned with Phase 1 engineering hardening (commit `9915cb5`).*
+
+### Done (mock-validated)
+
 - [x] Basic POS system structure
-- [x] Database schema with Prisma
-- [x] Sales transaction processing
-- [x] JWT authentication system
+- [x] Database schema with Prisma (PostgreSQL)
+- [x] JWT authentication and role-based permissions
 - [x] Product and category management
-- [x] Basic ZRA service structure
+- [x] Fiscal checkout (`POST /api/sales/checkout`) with stock reserve → VSDC → deduct
+- [x] Refunds / credit notes with partial discount proration
+- [x] Fiscal reconciliation for stuck `FISCAL_SUBMITTING` sales
+- [x] Sequential `fiscalInvcNo` per branch
+- [x] Branch management (`Branch` model, `/api/branches`)
+- [x] Stock synchronization (reserve/deduct, bulk adjust, mark-expired sync)
+- [x] Product registration gates before checkout
+- [x] Mock VSDC integration (`validate-system.js` → 24/24)
 
-### 🔄 In Progress
-- [ ] Enhanced ZRA Service integration
-- [ ] VSDC communication setup
-- [ ] Audit trail implementation
+### Mock only (not live ZRA certified)
 
-### ⏳ Pending
-- [ ] Branch management system
-- [ ] User role enforcement
-- [ ] Stock synchronization
-- [ ] Invoice immutability
-- [ ] Backup and recovery system
+- [x] VSDC communication against **mock** server (`:8090`)
+- [ ] Real VSDC endpoint integration and sandbox certification
+- [ ] Mandatory codes cache for offline operation
+
+### Not done
+
+- [ ] Purchases §8 (`routes/purchases.js`)
+- [ ] Dashboard/reports wired to real APIs
+- [ ] Debit notes
+- [ ] B2B explicit `customerTpin` on sales
+- [ ] Cancel/void flows
+- [ ] 5-year audit retention policy
+- [ ] Backup and recovery automation
 
 ---
 

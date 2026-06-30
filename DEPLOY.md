@@ -1,5 +1,7 @@
 # Smart POS — Deployment Guide
 
+**Project status:** [STATUS.md](./STATUS.md)
+
 Deploy the full stack (PostgreSQL + backend + frontend + mock VSDC) to **GitHub** and the **Numzlab server**.
 
 | Service      | Port (default) | URL (local)                    |
@@ -8,6 +10,8 @@ Deploy the full stack (PostgreSQL + backend + frontend + mock VSDC) to **GitHub*
 | Backend API  | 4000           | http://localhost:4000/api/health |
 | Mock VSDC    | 8090           | http://localhost:8090/health   |
 | PostgreSQL   | 5432           | localhost:5432                 |
+
+**Numzlab note:** the `docker-compose.numzlab.yml` override maps Postgres to host port **5434** (see [README.md](./README.md)). Local default compose uses **5432**.
 
 **Default seed users** (created on first boot only):
 
@@ -129,6 +133,20 @@ curl -s http://localhost:8090/health
 Open the frontend in a browser: `http://<server-ip>:8080`
 
 Login with `admin@smartpos.com` / `admin123`, then **change passwords immediately**.
+
+### Post-deploy validation
+
+Run the end-to-end fiscal validation suite (expects **24/24 PASS** against mock VSDC):
+
+```bash
+docker exec smart-pos-backend node scripts/validate-system.js
+```
+
+On numzlab:
+
+```bash
+./scripts/compose-numzlab.sh exec backend node scripts/validate-system.js
+```
 
 ---
 

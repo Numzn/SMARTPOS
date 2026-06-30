@@ -1,5 +1,7 @@
 # 🚀 Smart POS Development Helper
 
+**Project status:** [STATUS.md](./STATUS.md)
+
 This helper script and VS Code tasks make it easy to switch between frontend and backend development without confusion about which commands to run where.
 
 ## 🎯 Quick Start
@@ -95,8 +97,10 @@ POSPROJECT/
 
 ### Database migration fails
 1. Check the schema syntax in `prisma/schema.prisma`
-2. Make sure SQLite database file isn't locked
-3. Try **🏷️ Backend: Reset Database** if needed
+2. Ensure Postgres is running: `cd smart-pos-backend && npm run db:up`
+3. Verify `DATABASE_URL` in `.env` matches your Postgres instance
+4. Check migration state: `cd smart-pos-backend && npx prisma migrate status`
+5. Try **🏷️ Backend: Reset Database** if needed (destructive)
 
 ### Dependencies issues
 1. Delete `node_modules` folders in both frontend and backend
