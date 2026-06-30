@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
 const {
-  createPendingSale,
+  createGatedPendingSale,
   checkoutSale,
   finalizeSaleFiscally,
   saleInclude,
@@ -153,12 +153,12 @@ router.get('/:id', authenticateToken, requirePermission('sales:read'), async (re
 });
 
 /**
- * POST /api/sales — create PENDING sale only (no stock deduct, no VSDC)
- * Use /checkout for fiscal-lock flow.
+ * POST /api/sales — create PENDING sale after stock + registration gates (no VSDC deduct).
+ * Use /checkout for the full fiscal-lock flow.
  */
 router.post('/', authenticateToken, requirePermission('sales:write'), async (req, res) => {
   try {
-    const sale = await createPendingSale(req.body);
+    const sale = await createGatedPendingSale({ ...req.body, userId: req.user.userId });
     res.status(201).json(sale);
   } catch (error) {
     console.error('Error creating sale:', error);

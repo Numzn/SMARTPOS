@@ -221,6 +221,30 @@ async function finalizeSaleFiscally(saleId, { branchId = DEFAULT_BRANCH } = {}) 
     throw err;
   }
 
+  try {
+    await assertRegisteredProducts(
+      sale.saleItems.map((item) => ({
+        productId: item.productId,
+        quantity: item.quantity,
+      }))
+    );
+  } catch (regErr) {
+    const failed = await prisma.sale.update({
+      where: { id: saleId },
+      data: {
+        status: 'FISCAL_FAILED',
+        fiscalError: regErr.message || 'Product not registered with ZRA',
+      },
+      include: saleInclude,
+    });
+    regErr.status = regErr.status || 409;
+    return {
+      success: false,
+      sale: failed,
+      fiscal: { success: false, error: failed.fiscalError },
+    };
+  }
+
   if (['PENDING', 'FISCAL_FAILED'].includes(sale.status)) {
     try {
       await reserveStockForSaleRecord(sale, branchId);
@@ -298,18 +322,27 @@ async function finalizeSaleFiscally(saleId, { branchId = DEFAULT_BRANCH } = {}) 
   };
 }
 
-async function checkoutSale(body) {
+/**
+ * Create a PENDING sale only after stock + registration gates (no VSDC/stock deduct).
+ */
+async function createGatedPendingSale(body) {
   const branchId = body.branchId || DEFAULT_BRANCH;
   const parsed = parseSalePayload(body);
   await assertSufficientStock(parsed.items, branchId);
   await assertRegisteredProducts(parsed.items);
-  const pending = await createPendingSale(body);
+  return createPendingSale(body);
+}
+
+async function checkoutSale(body) {
+  const branchId = body.branchId || DEFAULT_BRANCH;
+  const pending = await createGatedPendingSale(body);
   return finalizeSaleFiscally(pending.id, { branchId });
 }
 
 module.exports = {
   parseSalePayload,
   createPendingSale,
+  createGatedPendingSale,
   finalizeSaleFiscally,
   completeSaleAfterFiscalSuccess,
   extractZraFromVsdcPayload,

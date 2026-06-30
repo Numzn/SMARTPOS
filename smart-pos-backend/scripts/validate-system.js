@@ -255,23 +255,30 @@ async function main() {
         data: { zraRegistrationStatus: 'PENDING' },
       });
       const profile = await request('GET', `${BASE}/api/users/profile`, null, token);
+      const unregisteredPayload = {
+        userId: profile.id,
+        paymentMethod: 'CASH',
+        tax: 0,
+        discount: 0,
+        items: [{ productId: testProduct.id, quantity: 1, price: testProduct.price }],
+      };
       try {
         await request(
           'POST',
           `${BASE}/api/sales/checkout`,
-          {
-            userId: profile.id,
-            paymentMethod: 'CASH',
-            tax: 0,
-            discount: 0,
-            items: [{ productId: testProduct.id, quantity: 1, price: testProduct.price }],
-          },
+          unregisteredPayload,
           token,
           409
         );
         pass('Unregistered checkout blocked', true, 'HTTP 409');
       } catch (e) {
         pass('Unregistered checkout blocked', false, e.message);
+      }
+      try {
+        await request('POST', `${BASE}/api/sales`, unregisteredPayload, token, 409);
+        pass('Unregistered POST /sales blocked', true, 'HTTP 409');
+      } catch (e) {
+        pass('Unregistered POST /sales blocked', false, e.message);
       }
       execSync('node scripts/register-seed-products.js', { cwd: ROOT, stdio: 'pipe' });
     } else {
