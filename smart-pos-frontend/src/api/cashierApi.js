@@ -1,16 +1,12 @@
-// Centralized API service for cashier dashboard (aligned with backend auth)
-import { API_BASE, getAuthHeaders } from '../lib/apiClient';
+// Cashier API — uses shared apiFetch client
+import { apiFetch } from '../lib/apiClient';
 
 export async function fetchProducts() {
-  const res = await fetch(`${API_BASE}/products`, { headers: getAuthHeaders() });
-  if (!res.ok) throw new Error('Failed to fetch products');
-  return res.json();
+  return apiFetch('/products');
 }
 
 export async function fetchCategories() {
-  const res = await fetch(`${API_BASE}/categories`, { headers: getAuthHeaders() });
-  if (!res.ok) throw new Error('Failed to fetch categories');
-  return res.json();
+  return apiFetch('/categories');
 }
 
 /** Map UI payment ids to backend PaymentMethod enum */
@@ -25,50 +21,25 @@ export function mapPaymentMethod(method) {
 }
 
 export async function fetchVsdcStatus() {
-  const res = await fetch(`${API_BASE}/vsdc/status`, { headers: getAuthHeaders() });
-  if (!res.ok) throw new Error('Failed to fetch VSDC status');
-  return res.json();
+  return apiFetch('/vsdc/status');
 }
 
 export async function checkoutSale(saleData) {
-  const res = await fetch(`${API_BASE}/sales/checkout`, {
+  return apiFetch('/sales/checkout', {
     method: 'POST',
-    headers: getAuthHeaders(),
     body: JSON.stringify(saleData),
   });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const err = new Error(data.error || 'Checkout failed');
-    err.status = res.status;
-    err.data = data;
-    throw err;
-  }
-  return data;
 }
 
 export async function createSale(saleData) {
-  const res = await fetch(`${API_BASE}/sales`, {
+  return apiFetch('/sales', {
     method: 'POST',
-    headers: getAuthHeaders(),
     body: JSON.stringify(saleData),
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || 'Failed to create sale');
-  }
-  return res.json();
 }
 
 export async function submitToZRA(saleId) {
-  const res = await fetch(`${API_BASE}/zra/send-invoice/${saleId}`, {
-    method: 'POST',
-    headers: getAuthHeaders(),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to submit to ZRA');
-  }
-  return data;
+  return apiFetch(`/zra/send-invoice/${saleId}`, { method: 'POST' });
 }
 
 // Mock data fallback when API is unavailable

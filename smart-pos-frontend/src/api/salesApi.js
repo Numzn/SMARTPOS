@@ -1,18 +1,15 @@
-import api from '../services/api';
+import { apiFetch } from '../lib/apiClient';
 
 export async function fetchSales() {
-  const { data } = await api.get('/sales');
-  return data;
+  return apiFetch('/sales');
 }
 
 export async function fetchSale(saleId) {
-  const { data } = await api.get(`/sales/${saleId}`);
-  return data;
+  return apiFetch(`/sales/${saleId}`);
 }
 
 export async function fetchSaleRefunds(saleId) {
-  const { data } = await api.get(`/sales/${saleId}/refunds`);
-  return data;
+  return apiFetch(`/sales/${saleId}/refunds`);
 }
 
 /**
@@ -20,8 +17,10 @@ export async function fetchSaleRefunds(saleId) {
  * @param {{ userId: string, reasonCode?: string, reason?: string, items?: { saleItemId: string, quantity: number }[] }} payload
  */
 export async function refundSale(saleId, payload) {
-  const { data } = await api.post(`/sales/${saleId}/refund`, payload);
-  return data;
+  return apiFetch(`/sales/${saleId}/refund`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 }
 
 export const REFUND_REASON_CODES = [

@@ -1,38 +1,14 @@
-import axios from 'axios';
-import Cookies from 'js-cookie';
-import { API_BASE, getAuthToken } from '../lib/apiClient';
-
-const api = axios.create({
-  baseURL: API_BASE,
-  timeout: 15000,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-});
-
-api.interceptors.request.use(
-  (config) => {
-    const token = getAuthToken();
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
-
-api.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response?.status === 401 && !error.config?.url?.includes('/login')) {
-      Cookies.remove('token');
-      localStorage.removeItem('token');
-      if (!window.location.pathname.includes('/login')) {
-        window.location.href = '/login';
-      }
-    }
-    return Promise.reject(error);
-  }
-);
-
-export default api;
+/**
+ * @deprecated Import from `../lib/apiClient` instead.
+ * Kept for backward-compatible import paths during migration.
+ */
+export {
+  api as default,
+  api,
+  apiFetch,
+  ApiError,
+  API_BASE,
+  API_ROOT,
+  getAuthToken,
+  getAuthHeaders,
+} from '../lib/apiClient';
