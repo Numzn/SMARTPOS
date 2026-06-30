@@ -27,7 +27,8 @@
     "check": "npm run validate && npm run status && npm run tasks",
     "validate:system": "node scripts/validate-system.js",
     "validate:frontend": "node scripts/validate-frontend-backend.js",
-    "validate:full": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-and-validate.ps1"
+    "validate:full": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-and-validate.ps1",
+    "reconcile:fiscal": "node jobs/reconcileFiscal.js"
   },
   "keywords": [],
   "author": "",

@@ -267,6 +267,7 @@ model Inventory {
   
   // Stock Information
   currentStock      Int       @default(0)
+  reservedStock     Int       @default(0) // Held during FISCAL_SUBMITTING (pre-deduct)
   minimumStock      Int       @default(0)
   maximumStock      Int       @default(1000)
   reorderPoint      Int       @default(10)

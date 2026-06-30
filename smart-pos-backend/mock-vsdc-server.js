@@ -6,6 +6,9 @@ const express = require('express');
 const app = express();
 const PORT = process.env.MOCK_VSDC_PORT || 8090;
 
+/** invcNo → last successful submit payload (reconciliation lookups) */
+const submittedInvoices = new Map();
+
 app.use(express.json());
 
 const ok = (extra = {}) => ({
@@ -57,18 +60,28 @@ app.post('/api/invoice/submit', (req, res) => {
   const orgInvc = req.body.orgInvcNo || 0;
   console.log(`🧾 Mock VSDC invoice submit (rcptTyCd=${rcptType}, orgInvcNo=${orgInvc})`);
   const invcNo = req.body.invcNo || Date.now();
-  res.json(
-    ok({
-      invcSdcId: `MOCK-SDC-${invcNo}`,
-      invcNo,
-      rcptNo: rcptType === 'R' ? `MOCK-CRN-${invcNo}` : `MOCK-RCPT-${invcNo}`,
-      totRcptNo: 1,
-      qrCode: `https://mock.zra.zm/receipt/${invcNo}`,
-      sdcId: 'MOCK-SDC-001',
-      mrcNo: 'MOCK-MRC-001',
-      intrlData: `MOCK-SIGN-${Math.random().toString(36).slice(2, 11)}`,
-    })
-  );
+  const payload = {
+    invcSdcId: `MOCK-SDC-${invcNo}`,
+    invcNo,
+    rcptNo: rcptType === 'R' ? `MOCK-CRN-${invcNo}` : `MOCK-RCPT-${invcNo}`,
+    totRcptNo: 1,
+    qrCode: `https://mock.zra.zm/receipt/${invcNo}`,
+    sdcId: 'MOCK-SDC-001',
+    mrcNo: 'MOCK-MRC-001',
+    intrlData: `MOCK-SIGN-${Math.random().toString(36).slice(2, 11)}`,
+  };
+  submittedInvoices.set(Number(invcNo), payload);
+  res.json(ok(payload));
+});
+
+/** Read-only receipt lookup for fiscal reconciliation */
+app.post('/trnsSales/selectSales', (req, res) => {
+  const invcNo = Number(req.body.invcNo);
+  const found = submittedInvoices.get(invcNo);
+  if (found) {
+    return res.json(ok(found));
+  }
+  res.json({ resultCd: '001', resultMsg: 'Invoice not found', resultDt: ok().resultDt });
 });
 
 app.post('/api/items/save', (req, res) => {

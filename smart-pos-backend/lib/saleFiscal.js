@@ -4,7 +4,13 @@
  */
 
 const prisma = require('./prisma');
-const { deductStockForSale, assertSufficientStock, DEFAULT_BRANCH } = require('./inventoryStock');
+const {
+  deductStockForSale,
+  assertSufficientStock,
+  reserveStockForSale,
+  releaseStockReservationForSale,
+  DEFAULT_BRANCH,
+} = require('./inventoryStock');
 const { assertRegisteredProducts } = require('./productRegistration');
 const zraInvoiceService = require('../services/zraInvoice');
 const vsdcService = require('../services/vsdcService');
@@ -96,6 +102,18 @@ async function createPendingSale(body) {
   });
 }
 
+async function reserveStockForSaleRecord(sale, branchId = DEFAULT_BRANCH) {
+  await prisma.$transaction(async (tx) => {
+    for (const item of sale.saleItems) {
+      await reserveStockForSale(tx, {
+        productId: item.productId,
+        quantity: item.quantity,
+        branchId,
+      });
+    }
+  });
+}
+
 async function deductStockForSaleRecord(sale, branchId = DEFAULT_BRANCH) {
   await prisma.$transaction(async (tx) => {
     for (const item of sale.saleItems) {
@@ -110,9 +128,58 @@ async function deductStockForSaleRecord(sale, branchId = DEFAULT_BRANCH) {
   });
 }
 
+function extractZraFromVsdcPayload(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+  const data = payload.data && typeof payload.data === 'object' ? payload.data : payload;
+  if (!data.rcptNo) return null;
+  return {
+    rcptNo: data.rcptNo,
+    qrCode: data.qrCode,
+    intrlData: data.intrlData || data.rcptSign,
+    rcptSign: data.rcptSign || data.intrlData,
+  };
+}
+
+/**
+ * Complete sale after confirmed VSDC success (used by checkout and reconciliation).
+ */
+async function completeSaleAfterFiscalSuccess(saleId, zra, fiscalPayload = {}, branchId = DEFAULT_BRANCH) {
+  let sale = await prisma.sale.update({
+    where: { id: saleId },
+    data: {
+      status: 'COMPLETED',
+      rcptNo: zra.rcptNo,
+      rcptSign: zra.intrlData || zra.rcptSign,
+      qrCode: zra.qrCode,
+      vsdcTimestamp: new Date(),
+      vsdcRequest: fiscalPayload.vsdcRequest ?? undefined,
+      vsdcResponse: fiscalPayload.vsdcResponse ?? undefined,
+      fiscalError: null,
+    },
+    include: saleInclude,
+  });
+
+  const existingMovement = await prisma.stockMovement.findFirst({
+    where: {
+      referenceType: 'SALE',
+      referenceId: sale.id,
+      movementType: 'SALE_OUT',
+    },
+  });
+
+  if (!existingMovement) {
+    await deductStockForSaleRecord(sale, branchId);
+  }
+
+  const stockSyncService = require('../services/stockSyncService');
+  stockSyncService.syncAfterSale(sale.id, branchId);
+
+  return sale;
+}
+
 /**
  * Submit sale to VSDC and complete or mark fiscal failure.
- * Stock is deducted only after VSDC success.
+ * Stock is reserved before VSDC and deducted only after VSDC success.
  */
 async function finalizeSaleFiscally(saleId, { branchId = DEFAULT_BRANCH } = {}) {
   const ready = await vsdcService.isDeviceReady();
@@ -154,6 +221,27 @@ async function finalizeSaleFiscally(saleId, { branchId = DEFAULT_BRANCH } = {}) 
     throw err;
   }
 
+  if (['PENDING', 'FISCAL_FAILED'].includes(sale.status)) {
+    try {
+      await reserveStockForSaleRecord(sale, branchId);
+    } catch (reserveErr) {
+      const failed = await prisma.sale.update({
+        where: { id: saleId },
+        data: {
+          status: 'FISCAL_FAILED',
+          fiscalError: reserveErr.message || 'Insufficient stock to reserve',
+        },
+        include: saleInclude,
+      });
+      reserveErr.status = reserveErr.status || 409;
+      return {
+        success: false,
+        sale: failed,
+        fiscal: { success: false, error: failed.fiscalError },
+      };
+    }
+  }
+
   await prisma.sale.update({
     where: { id: saleId },
     data: { status: 'FISCAL_SUBMITTING', fiscalError: null },
@@ -162,6 +250,10 @@ async function finalizeSaleFiscally(saleId, { branchId = DEFAULT_BRANCH } = {}) 
   const fiscalResult = await zraInvoiceService.submitFiscalForSale(saleId);
 
   if (!fiscalResult.success) {
+    await prisma.$transaction(async (tx) => {
+      await releaseStockReservationForSale(tx, sale, branchId);
+    });
+
     const failed = await prisma.sale.update({
       where: { id: saleId },
       data: {
@@ -184,25 +276,15 @@ async function finalizeSaleFiscally(saleId, { branchId = DEFAULT_BRANCH } = {}) 
   }
 
   const zra = fiscalResult.zraResponse;
-  sale = await prisma.sale.update({
-    where: { id: saleId },
-    data: {
-      status: 'COMPLETED',
-      rcptNo: zra.rcptNo,
-      rcptSign: zra.intrlData || zra.rcptSign,
-      qrCode: zra.qrCode,
-      vsdcTimestamp: new Date(),
-      vsdcRequest: fiscalResult.vsdcRequest ?? undefined,
-      vsdcResponse: fiscalResult.vsdcResponse ?? undefined,
-      fiscalError: null,
+  sale = await completeSaleAfterFiscalSuccess(
+    saleId,
+    zra,
+    {
+      vsdcRequest: fiscalResult.vsdcRequest,
+      vsdcResponse: fiscalResult.vsdcResponse,
     },
-    include: saleInclude,
-  });
-
-  await deductStockForSaleRecord(sale, branchId);
-
-  const stockSyncService = require('../services/stockSyncService');
-  stockSyncService.syncAfterSale(sale.id, branchId);
+    branchId
+  );
 
   return {
     success: true,
@@ -229,6 +311,11 @@ module.exports = {
   parseSalePayload,
   createPendingSale,
   finalizeSaleFiscally,
+  completeSaleAfterFiscalSuccess,
+  extractZraFromVsdcPayload,
   checkoutSale,
   saleInclude,
+  reserveStockForSaleRecord,
+  releaseStockReservationForSale,
+  deductStockForSaleRecord,
 };

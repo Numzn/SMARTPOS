@@ -734,6 +734,32 @@ class VSDCService {
   }
 
   /**
+   * Look up a submitted invoice by fiscal invoice number (reconciliation).
+   */
+  async lookupInvoiceByInvcNo(invcNo) {
+    const ready = await this.ensureDeviceInitialized()
+    if (!ready.success) {
+      return { success: false, error: ready.error || 'VSDC not initialized' }
+    }
+
+    const response = await this.makeAuthenticatedRequest('POST', '/trnsSales/selectSales', {
+      tpin: this.tpin,
+      bhfId: this.bhfId,
+      invcNo: Number(invcNo),
+    })
+
+    if (response.success && response.data?.resultCd === '000') {
+      return { success: true, data: response.data }
+    }
+
+    return {
+      success: false,
+      code: response.data?.resultCd || response.code,
+      error: response.data?.resultMsg || response.error || 'Invoice not found on VSDC',
+    }
+  }
+
+  /**
    * Get current system status
    */
   getStatus() {

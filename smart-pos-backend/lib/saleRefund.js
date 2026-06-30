@@ -323,4 +323,5 @@ module.exports = {
   createPendingRefund,
   finalizeRefundFiscally,
   refundSale,
+  restoreStockForRefundRecord,
 };

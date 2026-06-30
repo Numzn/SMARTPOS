@@ -67,6 +67,19 @@ app.listen(PORT, HOST, () => {
   console.log(`   - Sales: http://localhost:${PORT}/api/sales`);
   console.log(`   - Users: http://localhost:${PORT}/api/users`);
   console.log(`   - ZRA: http://localhost:${PORT}/api/zra`);
+
+  if (process.env.FISCAL_RECONCILE_ENABLED !== 'false') {
+    const { reconcileStuckFiscalRecords } = require('./lib/fiscalReconcile');
+    const intervalMs = parseInt(process.env.FISCAL_RECONCILE_INTERVAL_MS || '300000', 10);
+    const runReconcile = () => {
+      reconcileStuckFiscalRecords().catch((err) => {
+        console.error('[Fiscal Reconcile] Scheduled run failed:', err.message);
+      });
+    };
+    setTimeout(runReconcile, 30_000);
+    setInterval(runReconcile, intervalMs);
+    console.log(`🔄 Fiscal reconciliation scheduled every ${intervalMs / 1000}s`);
+  }
 });
 
 module.exports = app;
