@@ -90,6 +90,23 @@ function resolveRefundLines(originalSale, bodyItems, refundedQtyMap) {
   return lines;
 }
 
+/**
+ * Prorate sale-level discount for partial refunds (not full original discount).
+ */
+function prorateSaleDiscount(originalSale, refundSubtotal) {
+  const saleDiscount = Number(originalSale.discount) || 0;
+  if (saleDiscount <= 0) return 0;
+
+  const originalSubtotal =
+    Number(originalSale.subtotal) ||
+    originalSale.saleItems.reduce((sum, line) => sum + line.quantity * line.price, 0);
+
+  if (originalSubtotal <= 0) return 0;
+
+  const ratio = Math.min(1, refundSubtotal / originalSubtotal);
+  return parseFloat((saleDiscount * ratio).toFixed(2));
+}
+
 async function createPendingRefund(originalSaleId, body) {
   const { userId, reasonCode = '01', reason, items: bodyItems } = body;
 
@@ -156,7 +173,8 @@ async function createPendingRefund(originalSaleId, body) {
     };
   });
 
-  const total = subtotal + taxTotal - (originalSale.discount || 0);
+  const proratedDiscount = prorateSaleDiscount(originalSale, subtotal);
+  const total = subtotal + taxTotal - proratedDiscount;
 
   return prisma.refund.create({
     data: {
@@ -167,7 +185,7 @@ async function createPendingRefund(originalSaleId, body) {
       reason: reason || null,
       subtotal,
       tax: taxTotal,
-      discount: originalSale.discount || 0,
+      discount: proratedDiscount,
       total,
       paymentMethod: originalSale.paymentMethod,
       refundItems: { create: refundItemRows },
@@ -320,6 +338,7 @@ async function refundSale(originalSaleId, body) {
 module.exports = {
   refundInclude,
   getOriginalInvcNo,
+  prorateSaleDiscount,
   createPendingRefund,
   finalizeRefundFiscally,
   refundSale,

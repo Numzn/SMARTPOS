@@ -212,6 +212,59 @@ async function main() {
     pass('Credit note refund', false, 'skipped');
   }
 
+  try {
+    const products = await request('GET', `${BASE}/api/products`, null, token);
+    const registered = (Array.isArray(products) ? products : []).filter(
+      (p) => p.zraRegistrationStatus === 'REGISTERED'
+    );
+    if (registered.length >= 2) {
+      const [p1, p2] = registered;
+      const profile = await request('GET', `${BASE}/api/users/profile`, null, token);
+      const saleDiscount = 20;
+      const multi = await request('POST', `${BASE}/api/sales/checkout`, {
+        userId: profile.id,
+        paymentMethod: 'CASH',
+        tax: 0,
+        discount: saleDiscount,
+        items: [
+          { productId: p1.id, quantity: 2, price: p1.price },
+          { productId: p2.id, quantity: 1, price: p2.price },
+        ],
+      }, token);
+      const saleData = multi.sale;
+      const line = saleData.saleItems[0];
+      const partialQty = 1;
+      const refundSubtotal = partialQty * line.price;
+      const originalSubtotal = saleData.subtotal;
+      const expectedDiscount = parseFloat(
+        (saleDiscount * (refundSubtotal / originalSubtotal)).toFixed(2)
+      );
+      const partial = await request(
+        'POST',
+        `${BASE}/api/sales/${saleData.id}/refund`,
+        {
+          userId: profile.id,
+          reasonCode: '01',
+          reason: 'Partial discount proration test',
+          items: [{ saleItemId: line.id, quantity: partialQty }],
+        },
+        token
+      );
+      const refundDiscount = partial.refund?.discount ?? 0;
+      const fullDiscountBug = Math.abs(refundDiscount - saleDiscount) < 0.01;
+      const proratedOk = Math.abs(refundDiscount - expectedDiscount) < 0.02;
+      pass(
+        'Partial refund prorates discount',
+        proratedOk && !fullDiscountBug,
+        `discount=${refundDiscount}, expected≈${expectedDiscount}`
+      );
+    } else {
+      pass('Partial refund prorates discount', false, 'need 2+ registered products');
+    }
+  } catch (e) {
+    pass('Partial refund prorates discount', false, e.message);
+  }
+
   if (saleId && token) {
     let movement;
     try {
