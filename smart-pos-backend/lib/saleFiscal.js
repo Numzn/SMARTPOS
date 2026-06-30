@@ -59,6 +59,7 @@ async function createPendingSale(body) {
         discount: parseFloat(parsed.discountAmount),
         paymentMethod: parsed.paymentMethod,
         status: 'PENDING',
+        branchId: parsed.branchId || DEFAULT_BRANCH,
       },
     });
 

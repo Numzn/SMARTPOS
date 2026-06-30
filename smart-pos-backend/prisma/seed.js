@@ -1,10 +1,14 @@
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
+const { ensureDefaultBranch } = require('../lib/ensureDefaultBranch');
 
 const prisma = new PrismaClient();
 
 async function main() {
   console.log('🌱 Starting database seed...');
+
+  await ensureDefaultBranch();
+  console.log('✅ Default branch ensured (main)');
 
   // Create default admin user
   const adminPassword = await bcrypt.hash('admin123', 10);

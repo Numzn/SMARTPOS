@@ -29,6 +29,8 @@ model User {
   refunds          Refund[]
   stockAdjustments StockAdjustment[]
   stockMovements   StockMovement[]
+  branchId         String?
+  branch           Branch?   @relation(fields: [branchId], references: [code])
   
   @@map("users")
 }
@@ -122,9 +124,11 @@ model Sale {
   vsdcResponse   Json?      // VSDC response payload (retention)
   fiscalError    String?    // Last fiscal submission error
   fiscalInvcNo   Int?       // Sequential VSDC invoice number (per device)
+  branchId       String     @default("main") // Operational branch code (inventory.branchId)
   
   // Relations
   user        User       @relation(fields: [userId], references: [id])
+  branch      Branch     @relation(fields: [branchId], references: [code])
   saleItems   SaleItem[]
   refunds     Refund[]   @relation("SaleRefunds")
   
@@ -378,6 +382,36 @@ model StockMovement {
   batch             InventoryBatch?     @relation(fields: [batchId], references: [id])
   
   @@map("stock_movements")
+}
+
+// Business branch (VSDC Section 7.1) — code matches inventory.branchId / sale.branchId
+model Branch {
+  id                    String    @id @default(cuid())
+  code                  String    @unique
+  bhfId                 String    @unique
+  name                  String
+  address               String
+  phone                 String?
+  email                 String?
+  managerName           String?
+  managerPhone          String?
+  province              String?
+  district              String?
+  isActive              Boolean   @default(true)
+  zraRegistered         Boolean   @default(false)
+  zraRegistrationDate   DateTime?
+  zraRegistrationNumber String?
+  createdBy             String?
+  updatedBy             String?
+  deactivatedAt         DateTime?
+  deactivatedBy         String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  users                 User[]
+  sales                 Sale[]
+
+  @@map("branches")
 }
 
 model VsdcDevice {

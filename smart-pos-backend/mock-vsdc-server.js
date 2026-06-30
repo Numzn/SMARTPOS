@@ -8,6 +8,8 @@ const PORT = process.env.MOCK_VSDC_PORT || 8090;
 
 /** invcNo → last successful submit payload (reconciliation lookups) */
 const submittedInvoices = new Map();
+/** bhfId → branch payload */
+const registeredBranches = new Map();
 
 app.use(express.json());
 
@@ -107,6 +109,28 @@ app.post('/api/stock/save', (req, res) => {
       sarNo: req.body.sarNo || `MOCK-SAR-${Date.now()}`,
     })
   );
+});
+
+app.post('/api/branch/save', (req, res) => {
+  const bhfId = String(req.body.bhfId || '000').padStart(3, '0');
+  console.log('🏢 Mock VSDC branch save:', bhfId, req.body.bhfNm);
+  const payload = {
+    bhfId,
+    bhfNm: req.body.bhfNm,
+    rcptNo: `MOCK-BHF-${bhfId}`,
+    ...req.body,
+  };
+  registeredBranches.set(bhfId, payload);
+  res.json(ok(payload));
+});
+
+app.get('/api/branch/get/:bhfId', (req, res) => {
+  const bhfId = String(req.params.bhfId || '').padStart(3, '0');
+  const found = registeredBranches.get(bhfId);
+  if (found) {
+    return res.json(ok(found));
+  }
+  res.json({ resultCd: '001', resultMsg: 'Branch not found', resultDt: ok().resultDt });
 });
 
 // Legacy endpoint (older integrations)

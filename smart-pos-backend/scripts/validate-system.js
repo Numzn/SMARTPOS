@@ -99,6 +99,8 @@ async function main() {
     await prisma.$queryRaw`SELECT 1`;
     const users = await prisma.user.count();
     pass('PostgreSQL', true, `Connected (${users} users)`);
+    const { ensureDefaultBranch } = require('../lib/ensureDefaultBranch');
+    await ensureDefaultBranch();
   } catch (e) {
     pass('PostgreSQL', false, e.message);
     console.log('\nStart Postgres: npm run db:up\n');
@@ -166,6 +168,49 @@ async function main() {
     pass('Inventory API', true, `${n} item(s)`);
   } catch (e) {
     pass('Inventory API', false, e.message);
+  }
+
+  try {
+    const branches = await request('GET', `${BASE}/api/branches`, null, token);
+    const list = branches.branches || [];
+    const main = list.find((b) => b.code === 'main');
+    pass('Branches API list', branches.success === true && !!main, main ? main.name : 'no main branch');
+  } catch (e) {
+    pass('Branches API list', false, e.message);
+  }
+
+  let testBranchId;
+  try {
+    const code = `val-${Date.now().toString(36).slice(-6)}`;
+    const created = await request(
+      'POST',
+      `${BASE}/api/branches`,
+      {
+        name: 'Validation Test Branch',
+        code,
+        address: 'Test Address, Lusaka',
+        province: 'Lusaka',
+        district: 'Lusaka',
+      },
+      token
+    );
+    testBranchId = created.branch?.id;
+    pass('Branches API create', created.success === true && !!testBranchId, created.branch?.code || 'ok');
+  } catch (e) {
+    pass('Branches API create', false, e.message);
+  }
+
+  try {
+    if (!testBranchId) throw new Error('no test branch');
+    const reg = await request(
+      'POST',
+      `${BASE}/api/branches/${testBranchId}/register-zra`,
+      null,
+      token
+    );
+    pass('Branches ZRA register', reg.success === true, reg.message || 'registered');
+  } catch (e) {
+    pass('Branches ZRA register', false, e.message);
   }
 
   let saleId;
