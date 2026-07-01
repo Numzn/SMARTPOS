@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd /app
+cd "$(dirname "$0")/.."
 
 echo "[entrypoint] waiting for database..."
 # Simple wait loop using node + Prisma DATABASE_URL
@@ -21,6 +21,8 @@ if (!url) { console.error('DATABASE_URL missing'); process.exit(1); }
 
 echo "[entrypoint] applying prisma migrations..."
 npx prisma migrate deploy
+
+node -e "require('./lib/ensureBusinessProfile').ensureDefaultBusinessProfile().then(() => process.exit(0)).catch((e) => { console.warn('[entrypoint] business profile:', e.message); process.exit(0); });"
 
 if [ "${SEED_ON_BOOT:-true}" = "true" ]; then
   user_count="$(node -e "

@@ -1,13 +1,26 @@
+# Build context: repository root
+
 FROM node:20-alpine AS builder
 WORKDIR /app
-COPY package*.json ./
-RUN if [ -f package-lock.json ]; then npm ci; else npm install --no-audit --no-fund; fi
-COPY . .
+
+COPY package.json package-lock.json ./
+COPY packages/receipt-engine/package.json ./packages/receipt-engine/
+COPY smart-pos-frontend/package.json ./smart-pos-frontend/
+
+RUN npm ci
+
+COPY packages/receipt-engine ./packages/receipt-engine
+COPY smart-pos-frontend ./smart-pos-frontend
+
+RUN npm run build -w @smartpos/receipt-engine
+
+WORKDIR /app/smart-pos-frontend
+
 ARG VITE_API_URL=/api
 ENV VITE_API_URL=$VITE_API_URL
 RUN npm run build
 
 FROM caddy:2-alpine AS runtime
-COPY Caddyfile /etc/caddy/Caddyfile
-COPY --from=builder /app/dist /srv/www
+COPY smart-pos-frontend/Caddyfile /etc/caddy/Caddyfile
+COPY --from=builder /app/smart-pos-frontend/dist /srv/www
 EXPOSE 80

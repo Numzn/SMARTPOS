@@ -232,6 +232,16 @@ async function main() {
     const rcpt = sale.fiscal?.rcptNo;
     pass('Create sale', !!saleId, `Sale ${saleId}`);
     pass('ZRA invoice', !!rcpt, rcpt || 'no receipt');
+
+    if (saleId) {
+      const receipt = await request('GET', `${BASE}/api/receipts/sales/${saleId}`, null, token);
+      const ok =
+        receipt?.receiptMeta?.receiptType === 'SALE' &&
+        Array.isArray(receipt?.items) &&
+        receipt.items.length > 0 &&
+        !!receipt?.fiscal?.fiscalReceiptNo;
+      pass('Sale receipt API', ok, receipt?.fiscal?.fiscalReceiptNo || 'missing VM');
+    }
   } catch (e) {
     pass('Create sale', false, e.message);
     pass('ZRA invoice', false, 'skipped');
@@ -250,6 +260,15 @@ async function main() {
       refundId = refund.refund?.id;
       const crn = refund.fiscal?.rcptNo;
       pass('Credit note refund', !!refundId && !!crn, crn || 'no credit receipt');
+
+      if (refundId) {
+        const receipt = await request('GET', `${BASE}/api/receipts/refunds/${refundId}`, null, token);
+        const ok =
+          receipt?.receiptMeta?.receiptType === 'CREDIT_NOTE' &&
+          Array.isArray(receipt?.items) &&
+          !!receipt?.fiscal?.fiscalReceiptNo;
+        pass('Refund receipt API', ok, receipt?.fiscal?.fiscalReceiptNo || 'missing VM');
+      }
     } catch (e) {
       pass('Credit note refund', false, e.message);
     }

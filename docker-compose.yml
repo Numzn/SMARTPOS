@@ -55,8 +55,8 @@ services:
 
   backend:
     build:
-      context: ./smart-pos-backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: smart-pos-backend/Dockerfile
     container_name: smart-pos-backend
     restart: unless-stopped
     depends_on:
@@ -86,8 +86,8 @@ services:
 
   frontend:
     build:
-      context: ./smart-pos-frontend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: smart-pos-frontend/Dockerfile
       args:
         # Frontend talks to /api on the same origin — nginx proxies to backend:4000.
         VITE_API_URL: /api

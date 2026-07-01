@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { X, RotateCcw, Receipt } from 'lucide-react';
+import { fetchReceipt } from '../../api/receiptsApi';
 import { fetchSaleRefunds, refundSale, REFUND_REASON_CODES } from '../../api/salesApi';
+import { ThermalRenderer } from '@smartpos/receipt-engine/react';
 import { useAuth } from '../../contexts/AuthContext';
 
 function computeRemaining(sale, priorRefunds) {
@@ -29,6 +31,8 @@ const RefundModal = ({ sale, onClose, onSuccess }) => {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
+  const [receiptVm, setReceiptVm] = useState(null);
+  const [receiptLoading, setReceiptLoading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -98,10 +102,34 @@ const RefundModal = ({ sale, onClose, onSuccess }) => {
       });
       setResult(data);
       onSuccess?.(data);
+      if (data.refund?.id) {
+        setReceiptLoading(true);
+        try {
+          const vm = await fetchReceipt('refunds', data.refund.id);
+          setReceiptVm(vm);
+        } catch (e) {
+          console.error('Failed to load credit note receipt:', e);
+        } finally {
+          setReceiptLoading(false);
+        }
+      }
     } catch (e) {
       setError(e.response?.data?.error || e.message || 'Refund failed');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handlePrintReceipt = async () => {
+    const refundId = result?.refund?.id;
+    if (!refundId) return;
+    try {
+      const vm = await fetchReceipt('refunds', refundId, { reprint: true });
+      setReceiptVm(vm);
+      setTimeout(() => window.print(), 100);
+    } catch (e) {
+      console.error('Reprint failed:', e);
+      window.print();
     }
   };
 
@@ -120,18 +148,25 @@ const RefundModal = ({ sale, onClose, onSuccess }) => {
 
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
           {result ? (
-            <div className="rounded-lg border border-green-200 bg-green-50 p-4 space-y-2">
-              <div className="flex items-center gap-2 text-green-800 font-medium">
-                <Receipt className="w-5 h-5" />
-                Credit note issued
+            <div className="space-y-3">
+              <div className="rounded-lg border border-green-200 bg-green-50 p-4 space-y-2">
+                <div className="flex items-center gap-2 text-green-800 font-medium">
+                  <Receipt className="w-5 h-5" />
+                  Credit note issued
+                </div>
+                <p className="text-sm text-green-900">
+                  Receipt: <span className="font-mono">{result.fiscal?.rcptNo}</span>
+                </p>
+                <p className="text-sm text-green-800">Stock has been restored for returned items.</p>
               </div>
-              <p className="text-sm text-green-900">
-                Receipt: <span className="font-mono">{result.fiscal?.rcptNo}</span>
-              </p>
-              {result.fiscal?.qrCode && (
-                <p className="text-xs text-green-700 break-all">{result.fiscal.qrCode}</p>
+              {receiptLoading && (
+                <p className="text-sm text-gray-500">Loading credit note receipt…</p>
               )}
-              <p className="text-sm text-green-800">Stock has been restored for returned items.</p>
+              {receiptVm && (
+                <div className="max-h-[50vh] overflow-y-auto border border-gray-200 rounded bg-white">
+                  <ThermalRenderer viewModel={receiptVm} />
+                </div>
+              )}
             </div>
           ) : loading ? (
             <p className="text-sm text-gray-500">Loading sale lines…</p>
@@ -221,6 +256,15 @@ const RefundModal = ({ sale, onClose, onSuccess }) => {
         </div>
 
         <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-2">
+          {result && receiptVm && (
+            <button
+              type="button"
+              onClick={handlePrintReceipt}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+            >
+              Print receipt
+            </button>
+          )}
           <button
             type="button"
             onClick={onClose}

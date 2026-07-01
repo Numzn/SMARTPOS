@@ -13,6 +13,8 @@ import {
   ArrowLeft,
 } from 'lucide-react';
 import { checkoutSale, submitToZRA, mapPaymentMethod } from '../api/cashierApi';
+import { fetchReceipt } from '../api/receiptsApi';
+import { ThermalRenderer } from '@smartpos/receipt-engine/react';
 import { useAuth } from '../contexts/AuthContext';
 import { calculateCartTotals, formatZmw } from '../utils/cartTotals';
 
@@ -51,12 +53,14 @@ const CheckoutModal = ({
   const [cashReceived, setCashReceived] = useState('');
   const [cardLast4, setCardLast4] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
-  const [customerInfo, setCustomerInfo] = useState({ name: '', phone: '' });
+  const [customerInfo, setCustomerInfo] = useState({ name: '', phone: '', tpin: '' });
   const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [zraState, setZraState] = useState('idle'); // idle | submitting | submitted | failed
   const [zraReceipt, setZraReceipt] = useState(null);
   const [saleId, setSaleId] = useState(null);
+  const [receiptVm, setReceiptVm] = useState(null);
+  const [receiptLoading, setReceiptLoading] = useState(false);
 
   const detailRef = useRef(null);
 
@@ -130,6 +134,33 @@ const CheckoutModal = ({
     else if (step === STEP.CONFIRM) setStep(STEP.DETAILS);
   };
 
+  const loadReceipt = async (id) => {
+    setReceiptLoading(true);
+    try {
+      const vm = await fetchReceipt('sales', id);
+      setReceiptVm(vm);
+    } catch (e) {
+      console.error('Failed to load receipt:', e);
+    } finally {
+      setReceiptLoading(false);
+    }
+  };
+
+  const handlePrintReceipt = async () => {
+    if (!saleId || usingMockData) {
+      window.print();
+      return;
+    }
+    try {
+      const vm = await fetchReceipt('sales', saleId, { reprint: true });
+      setReceiptVm(vm);
+      setTimeout(() => window.print(), 100);
+    } catch (e) {
+      console.error('Reprint failed:', e);
+      window.print();
+    }
+  };
+
   const submitSale = async () => {
     if (!user?.id) {
       setError('You must be logged in to complete a sale.');
@@ -174,6 +205,9 @@ const CheckoutModal = ({
         setZraReceipt(result.fiscal.rcptNo || result.fiscal.receiptNumber || 'OK');
         setZraState('submitted');
         setStep(STEP.RECEIPT);
+        if (result.sale?.id) {
+          await loadReceipt(result.sale.id);
+        }
       } else {
         setZraState('failed');
         setError(result.fiscal?.error || 'Fiscal submission failed');
@@ -206,6 +240,7 @@ const CheckoutModal = ({
         setZraReceipt(rcpt);
         setZraState('submitted');
         setStep(STEP.RECEIPT);
+        await loadReceipt(saleId);
       } else {
         setZraState('failed');
         setError('Fiscal retry did not return a receipt number');
@@ -344,6 +379,15 @@ const CheckoutModal = ({
                     className="input-sys"
                   />
                 </div>
+                <input
+                  type="text"
+                  placeholder="Customer TPIN (B2B, optional)"
+                  value={customerInfo.tpin}
+                  onChange={(e) =>
+                    setCustomerInfo({ ...customerInfo, tpin: e.target.value })
+                  }
+                  className="input-sys mt-2 font-mono text-xs"
+                />
               </div>
             </div>
           )}
@@ -520,51 +564,43 @@ const CheckoutModal = ({
 
           {/* STEP 4 — RECEIPT */}
           {step === STEP.RECEIPT && (
-            <div className="space-y-4 text-center py-2">
+            <div className="space-y-4 py-2">
               <div className="flex justify-center">
                 <div className="w-12 h-12 rounded-full bg-emerald-50 border border-emerald-200 flex items-center justify-center">
                   <CheckCircle2 className="w-6 h-6 text-emerald-600" strokeWidth={1.5} />
                 </div>
               </div>
-              <div>
+              <div className="text-center">
                 <div className="text-sm font-semibold text-gray-900">
                   {formatCurrency(totals.total)} captured
                 </div>
-                <div className="text-[11px] text-gray-500 mt-0.5">
-                  Sale ID <span className="font-mono">{saleId}</span>
-                </div>
-              </div>
-
-              <div className="border border-surface-border rounded p-3 text-xs text-left max-w-xs mx-auto space-y-1">
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Method</span>
-                  <span>{PAYMENT_METHODS.find((m) => m.id === paymentMethod)?.label}</span>
-                </div>
-                {paymentMethod === 'cash' && change > 0 && (
-                  <div className="flex justify-between text-emerald-700">
-                    <span>Change to customer</span>
-                    <span className="font-mono">{formatCurrency(change)}</span>
+                {saleId && (
+                  <div className="text-[11px] text-gray-500 mt-0.5">
+                    Sale <span className="font-mono">{saleId}</span>
                   </div>
                 )}
-                <div className="flex justify-between">
-                  <span className="text-gray-500">ZRA</span>
-                  <span
-                    className={`font-medium ${
-                      zraState === 'submitted'
-                        ? 'text-emerald-700'
-                        : zraState === 'failed'
-                        ? 'text-amber-700'
-                        : 'text-gray-700'
-                    }`}
-                  >
-                    {zraState === 'submitted'
-                      ? `Submitted${zraReceipt && zraReceipt !== 'OK' ? ` · ${zraReceipt}` : ''}`
-                      : zraState === 'failed'
-                      ? 'Failed — will retry'
-                      : 'Pending'}
-                  </span>
-                </div>
               </div>
+
+              {receiptLoading && (
+                <p className="text-center text-xs text-gray-500">Loading receipt…</p>
+              )}
+
+              {receiptVm && (
+                <div className="max-h-[50vh] overflow-y-auto border border-surface-border rounded bg-white">
+                  <ThermalRenderer viewModel={receiptVm} />
+                </div>
+              )}
+
+              {!receiptVm && !receiptLoading && !usingMockData && (
+                <div className="border border-surface-border rounded p-3 text-xs text-left max-w-xs mx-auto space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">ZRA</span>
+                    <span className="font-medium text-emerald-700">
+                      {zraReceipt || 'Submitted'}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -575,7 +611,7 @@ const CheckoutModal = ({
             <>
               <button
                 type="button"
-                onClick={() => window.print()}
+                onClick={handlePrintReceipt}
                 className="btn-secondary"
               >
                 <Printer className="w-4 h-4" /> Print receipt

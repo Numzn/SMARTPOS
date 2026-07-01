@@ -316,6 +316,13 @@ async function finalizeRefundFiscally(refundId, { branchId = DEFAULT_BRANCH } = 
 
   await markSaleRefundedIfFully(refund.originalSaleId);
 
+  try {
+    const { createSnapshotFromSource } = require('./receipt/snapshot');
+    await createSnapshotFromSource('CREDIT_NOTE', refundId);
+  } catch (snapErr) {
+    console.warn('[saleRefund] receipt snapshot failed:', snapErr.message);
+  }
+
   return {
     success: true,
     refund,

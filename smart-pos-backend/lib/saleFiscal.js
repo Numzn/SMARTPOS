@@ -21,7 +21,16 @@ const saleInclude = {
 };
 
 function parseSalePayload(body) {
-  const { userId, items, paymentMethod, tax, discount, branchId = DEFAULT_BRANCH } = body;
+  const {
+    userId,
+    items,
+    paymentMethod,
+    tax,
+    discount,
+    branchId = DEFAULT_BRANCH,
+    customerInfo,
+    paymentDetails,
+  } = body;
 
   if (!userId || !Array.isArray(items) || items.length === 0) {
     const err = new Error('userId and items array are required');
@@ -34,6 +43,20 @@ function parseSalePayload(body) {
   const discountAmount = discount || 0;
   const total = subtotal + taxAmount - discountAmount;
 
+  const customerName = customerInfo?.name?.trim() || null;
+  const customerTpin = customerInfo?.tpin?.trim() || customerInfo?.taxId?.trim() || null;
+
+  let amountPaid = null;
+  let changeAmount = null;
+  if (paymentDetails) {
+    if (paymentDetails.cashReceived != null) {
+      amountPaid = parseFloat(paymentDetails.cashReceived);
+    }
+    if (paymentDetails.change != null) {
+      changeAmount = parseFloat(paymentDetails.change);
+    }
+  }
+
   return {
     userId,
     items,
@@ -43,6 +66,10 @@ function parseSalePayload(body) {
     taxAmount,
     discountAmount,
     total,
+    customerName,
+    customerTpin,
+    amountPaid: Number.isFinite(amountPaid) ? amountPaid : null,
+    changeAmount: Number.isFinite(changeAmount) ? changeAmount : null,
   };
 }
 
@@ -60,6 +87,10 @@ async function createPendingSale(body) {
         paymentMethod: parsed.paymentMethod,
         status: 'PENDING',
         branchId: parsed.branchId || DEFAULT_BRANCH,
+        customerName: parsed.customerName,
+        customerTpin: parsed.customerTpin,
+        amountPaid: parsed.amountPaid,
+        changeAmount: parsed.changeAmount,
       },
     });
 
@@ -174,6 +205,13 @@ async function completeSaleAfterFiscalSuccess(saleId, zra, fiscalPayload = {}, b
 
   const stockSyncService = require('../services/stockSyncService');
   stockSyncService.syncAfterSale(sale.id, branchId);
+
+  try {
+    const { createSnapshotFromSource } = require('./receipt/snapshot');
+    await createSnapshotFromSource('SALE', saleId);
+  } catch (snapErr) {
+    console.warn('[saleFiscal] receipt snapshot failed:', snapErr.message);
+  }
 
   return sale;
 }

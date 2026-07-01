@@ -12,16 +12,16 @@ services:
 
   frontend:
     build:
-      context: ./smart-pos-frontend
-      dockerfile: Dockerfile.caddy
+      context: .
+      dockerfile: smart-pos-frontend/Dockerfile.caddy
       pull: false
       args:
         VITE_API_URL: /api
 
   backend:
     build:
-      context: ./smart-pos-backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: smart-pos-backend/Dockerfile
       pull: false
 
   mock-vsdc:

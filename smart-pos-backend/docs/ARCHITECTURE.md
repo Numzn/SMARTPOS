@@ -79,6 +79,27 @@ Checkout integrates VSDC submission inline via `zraInvoice.submitFiscalForSale()
 
 Refunds follow the same fiscal-lock pattern in `lib/saleRefund.js` (credit notes to VSDC, stock restore on success).
 
+## Receipt Engine
+
+Immutable fiscal receipts via `@smartpos/receipt-engine` and `lib/receipt/`:
+
+```mermaid
+sequenceDiagram
+    participant Fiscal as saleFiscal_or_saleRefund
+    participant Snap as receipt_snapshot
+    participant API as GET_api_receipts
+    participant UI as ThermalRenderer
+
+    Fiscal->>Snap: createSnapshot on COMPLETED
+    UI->>API: fetch sales or refunds id
+    API->>Snap: return ReceiptViewModel JSON
+    UI->>API: reprint=true before print
+```
+
+- `GET /api/receipts/sales/:id` — sale tax invoice
+- `GET /api/receipts/refunds/:id` — credit note
+- `GET/PATCH /api/settings/business` — merchant footer and trading name
+
 **Env:** Copy `.env.example` → `.env`. Run mock: `npm run mock-vsdc`.
 
 ## Inventory receive flow

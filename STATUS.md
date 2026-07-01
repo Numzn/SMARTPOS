@@ -76,6 +76,15 @@ Single `apiFetch` in [`smart-pos-frontend/src/lib/apiClient.js`](smart-pos-front
 
 JWT login, role-based permissions on `GET /users/profile`, permission guards on routes.
 
+### Receipt Engine (v1)
+
+`@smartpos/receipt-engine` workspace package — shared `ReceiptViewModel`, 80mm thermal renderer, immutable snapshots.
+
+- `GET /api/receipts/sales/:id` and `GET /api/receipts/refunds/:id`
+- `BusinessProfile` for merchant footer and trading name
+- Snapshots on fiscal completion; `?reprint=true` audits reprints
+- Checkout and refund modals render thermal receipts
+
 ### Stack
 
 PostgreSQL (not SQLite), Express + Prisma backend, React frontend, mock VSDC on port 8090.
@@ -91,7 +100,7 @@ PostgreSQL (not SQLite), Express + Prisma backend, React frontend, mock VSDC on 
 | Reports / dashboard | `ReportsPage.jsx` uses hardcoded mock data |
 | Mandatory codes cache | Offline codes store not complete |
 | Debit notes | Not implemented |
-| B2B TPIN on sales | Walk-in default customer; explicit TPIN field TBD |
+| B2B TPIN on sales | Optional `customerTpin` on checkout; walk-in hides TPIN on receipt |
 | Cancel / void flows | Limited |
 | 5-year audit retention | Policy not enforced |
 
@@ -110,11 +119,11 @@ docker compose ps
 # Numzlab
 ./scripts/compose-numzlab.sh ps
 
-# End-to-end (24 checks)
+# End-to-end (26 checks)
 docker exec smart-pos-backend node scripts/validate-system.js
 ```
 
-Expected: **24/24 PASS** against mock VSDC.
+Expected: **26/26 PASS** against mock VSDC.
 
 Health checks:
 

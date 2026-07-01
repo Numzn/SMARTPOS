@@ -35,6 +35,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@smartpos/receipt-engine": "1.0.0",
     "@prisma/client": "^6.11.1",
     "axios": "^1.10.0",
     "bcryptjs": "^3.0.2",

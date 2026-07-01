@@ -320,8 +320,8 @@ class ZRAInvoiceService {
    * Build VSDC invoice payload from a loaded Sale (with saleItems + product).
    */
   buildInvoiceDataFromSale(sale, options = {}) {
-    const customerName = options.customerName || 'Walk-in Customer';
-    const customerTpin = options.customerTpin || null;
+    const customerName = sale.customerName || options.customerName || 'Walk-in Customer';
+    const customerTpin = sale.customerTpin || options.customerTpin || null;
 
     const items = sale.saleItems.map((line) => {
       const product = line.product;

@@ -46,6 +46,7 @@
     "npm": ">=8.0.0"
   },
   "workspaces": [
+    "packages/receipt-engine",
     "smart-pos-frontend",
     "smart-pos-backend"
   ],
