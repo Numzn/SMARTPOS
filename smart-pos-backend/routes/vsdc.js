@@ -56,4 +56,22 @@ router.post('/stock/sync', authenticateToken, requirePermission('zra:sync'), asy
   }
 });
 
+/**
+ * POST /api/vsdc/codes/sync — sync ZRA codes + classifications via gateway
+ */
+router.post('/codes/sync', authenticateToken, requirePermission('zra:sync'), async (req, res) => {
+  try {
+    const vsdcGateway = require('../lib/vsdc-gateway');
+    const ready = await vsdcGateway.ensureReady();
+    if (!ready.success) {
+      return res.status(503).json({ error: ready.error || 'VSDC not initialized' });
+    }
+    const result = await vsdcGateway.syncCodes();
+    res.json({ message: 'Codes sync completed', ...result });
+  } catch (error) {
+    console.error('VSDC codes sync error:', error.message);
+    res.status(500).json({ error: error.message || 'Failed to sync codes' });
+  }
+});
+
 module.exports = router;

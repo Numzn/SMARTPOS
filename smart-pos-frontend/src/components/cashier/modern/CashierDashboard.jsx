@@ -12,6 +12,8 @@ import {
   mockProducts,
   mockCategories,
 } from '../../../api/cashierApi';
+import { fetchPrinterStatus } from '../../../api/printersApi';
+import { mapPrinterStatusLabel } from '../../../lib/printReceipt';
 import { calculateCartTotals } from '../../../utils/cartTotals';
 
 const CashierDashboard = () => {
@@ -29,7 +31,7 @@ const CashierDashboard = () => {
   const [discountValue, setDiscountValue] = useState('');
 
   const [zraStatus, setZraStatus] = useState('checking');
-  const [printerStatus] = useState('ready');
+  const [printerStatus, setPrinterStatus] = useState('unknown');
   const [networkStatus] = useState('connected');
   const [stockNotice, setStockNotice] = useState('');
 
@@ -63,6 +65,28 @@ const CashierDashboard = () => {
 
     loadVsdc();
     const interval = setInterval(loadVsdc, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadPrinter = async () => {
+      try {
+        const status = await fetchPrinterStatus();
+        if (!cancelled) {
+          setPrinterStatus(mapPrinterStatusLabel(status));
+        }
+      } catch {
+        if (!cancelled) setPrinterStatus('unknown');
+      }
+    };
+
+    loadPrinter();
+    const interval = setInterval(loadPrinter, 30000);
     return () => {
       cancelled = true;
       clearInterval(interval);

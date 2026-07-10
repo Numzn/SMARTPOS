@@ -8,6 +8,7 @@ import {
   BarChart2,
   Users,
   Settings,
+  Printer,
   Menu,
   X,
   Search,
@@ -27,7 +28,8 @@ const NAV_ITEMS = [
   { name: 'Inventory', href: '/inventory', icon: Warehouse, show: (p) => p.viewInventory },
   { name: 'Reports', href: '/reports', icon: BarChart2, show: (p) => p.viewReports },
   { name: 'Users', href: '/users', icon: Users, show: (p) => p.viewUsers },
-  { name: 'Settings', href: '/settings', icon: Settings, show: (p) => p.manageSettings },
+  { name: 'Settings', href: '/settings', icon: Settings, show: (p) => p.viewSettings || p.manageSettings },
+  { name: 'Printers', href: '/printers', icon: Printer, show: (p) => p.viewSettings || p.manageSettings },
 ];
 
 const MainLayout = () => {

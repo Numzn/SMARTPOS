@@ -4,6 +4,7 @@ import { RefreshCw, RotateCcw, Receipt, Search } from 'lucide-react';
 import { fetchSales, getSaleStatusBadge } from '../../api/salesApi';
 import { usePermissions } from '../../hooks/usePermissions';
 import RefundModal from './RefundModal';
+import ReceiptViewModal from '../receipt/ReceiptViewModal';
 
 function saleMatchesSearch(sale, term) {
   const q = term.trim().toLowerCase();
@@ -39,6 +40,7 @@ const SalesPage = () => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [localSearch, setLocalSearch] = useState('');
   const [refundSale, setRefundSale] = useState(null);
+  const [viewReceiptSale, setViewReceiptSale] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
 
   const loadSales = useCallback(async () => {
@@ -70,6 +72,9 @@ const SalesPage = () => {
     }
     return list;
   }, [sales, statusFilter, searchTerm]);
+
+  const canViewReceipt = (sale) =>
+    canAccess.viewSales && sale.rcptNo && ['COMPLETED', 'REFUNDED'].includes(sale.status);
 
   const canRefund = (sale) =>
     canAccess.refundSale &&
@@ -203,6 +208,16 @@ const SalesPage = () => {
                           >
                             {expanded ? 'Hide' : 'Items'}
                           </button>
+                          {canViewReceipt(sale) && (
+                            <button
+                              type="button"
+                              onClick={() => setViewReceiptSale(sale)}
+                              className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 font-medium"
+                            >
+                              <Receipt className="w-3.5 h-3.5" />
+                              Receipt
+                            </button>
+                          )}
                           {canRefund(sale) && (
                             <button
                               type="button"
@@ -252,6 +267,15 @@ const SalesPage = () => {
           onSuccess={() => {
             loadSales();
           }}
+        />
+      )}
+
+      {viewReceiptSale && (
+        <ReceiptViewModal
+          sourceType="sales"
+          sourceId={viewReceiptSale.id}
+          title={`Receipt ${viewReceiptSale.rcptNo}`}
+          onClose={() => setViewReceiptSale(null)}
         />
       )}
     </div>

@@ -1,13 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { buildSampleReceiptViewModel } from '@smartpos/receipt-engine';
+import { ReceiptRenderer } from '@smartpos/receipt-engine/react';
 import { fetchBusinessSettings, updateBusinessSettings } from '../api/receiptsApi';
 import { usePermissions } from '../hooks/usePermissions';
 
 export default function SettingsPage() {
-  const { manageSettings } = usePermissions();
+  const { canAccess } = usePermissions();
+  const { manageSettings } = canAccess;
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(false);
+  const [previewFormat, setPreviewFormat] = useState('thermal');
   const [form, setForm] = useState({
     tradingName: '',
     tpin: '',
@@ -45,9 +49,37 @@ export default function SettingsPage() {
     };
   }, []);
 
+  const previewVm = useMemo(
+    () =>
+      buildSampleReceiptViewModel({
+        tradingName: form.tradingName || 'NUMZPAY DEMO STORE',
+        tpin: form.tpin || '1000000000',
+        logoUrl: form.logoUrl || null,
+        footerLines: form.footerLines
+          .split('\n')
+          .map((l) => l.trim())
+          .filter(Boolean),
+        showPoweredBy: form.showPoweredBy,
+        receiptVersion: form.receiptVersion,
+      }),
+    [form]
+  );
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!manageSettings) return;
+    if (form.logoUrl.trim()) {
+      try {
+        const u = new URL(form.logoUrl.trim());
+        if (u.protocol !== 'https:' && u.protocol !== 'http:') {
+          setError('Logo URL must use http or https');
+          return;
+        }
+      } catch {
+        setError('Logo URL is not valid');
+        return;
+      }
+    }
     setSaving(true);
     setError(null);
     setSuccess(false);
@@ -68,6 +100,10 @@ export default function SettingsPage() {
     }
   };
 
+  const handlePrintPreview = () => {
+    window.print();
+  };
+
   if (loading) {
     return (
       <div className="p-6">
@@ -77,9 +113,11 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="p-6 max-w-2xl">
+    <div className="p-6 max-w-6xl">
       <h1 className="text-2xl font-bold text-gray-900 mb-1">Business settings</h1>
-      <p className="text-sm text-gray-500 mb-6">Receipt header, footer, and merchant profile.</p>
+      <p className="text-sm text-gray-500 mb-6">
+        Merchant profile, receipt footer, and live preview (thermal + A4).
+      </p>
 
       {!manageSettings && (
         <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-3 mb-4">
@@ -87,82 +125,134 @@ export default function SettingsPage() {
         </p>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <label className="block">
-          <span className="text-sm font-medium text-gray-700">Trading name</span>
-          <input
-            type="text"
-            value={form.tradingName}
-            onChange={(e) => setForm({ ...form, tradingName: e.target.value })}
-            disabled={!manageSettings}
-            className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-          />
-        </label>
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <label className="block">
+            <span className="text-sm font-medium text-gray-700">Trading name</span>
+            <input
+              type="text"
+              value={form.tradingName}
+              onChange={(e) => setForm({ ...form, tradingName: e.target.value })}
+              disabled={!manageSettings}
+              className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+            />
+          </label>
 
-        <label className="block">
-          <span className="text-sm font-medium text-gray-700">TPIN</span>
-          <input
-            type="text"
-            value={form.tpin}
-            onChange={(e) => setForm({ ...form, tpin: e.target.value })}
-            disabled={!manageSettings}
-            className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm font-mono"
-          />
-        </label>
+          <label className="block">
+            <span className="text-sm font-medium text-gray-700">TPIN</span>
+            <input
+              type="text"
+              value={form.tpin}
+              onChange={(e) => setForm({ ...form, tpin: e.target.value })}
+              disabled={!manageSettings}
+              className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm font-mono"
+            />
+          </label>
 
-        <label className="block">
-          <span className="text-sm font-medium text-gray-700">Logo URL</span>
-          <input
-            type="url"
-            value={form.logoUrl}
-            onChange={(e) => setForm({ ...form, logoUrl: e.target.value })}
-            disabled={!manageSettings}
-            placeholder="https://…"
-            className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-          />
-        </label>
+          <label className="block">
+            <span className="text-sm font-medium text-gray-700">Logo URL</span>
+            <input
+              type="url"
+              value={form.logoUrl}
+              onChange={(e) => setForm({ ...form, logoUrl: e.target.value })}
+              disabled={!manageSettings}
+              placeholder="https://…"
+              className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+            />
+            <span className="text-xs text-gray-500 mt-1 block">
+              Public HTTPS URL shown on receipts. File upload can be added later.
+            </span>
+          </label>
 
-        <label className="block">
-          <span className="text-sm font-medium text-gray-700">Receipt footer lines</span>
-          <textarea
-            rows={5}
-            value={form.footerLines}
-            onChange={(e) => setForm({ ...form, footerLines: e.target.value })}
-            disabled={!manageSettings}
-            placeholder="One line per row"
-            className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-          />
-        </label>
+          <label className="block">
+            <span className="text-sm font-medium text-gray-700">Receipt footer lines</span>
+            <textarea
+              rows={5}
+              value={form.footerLines}
+              onChange={(e) => setForm({ ...form, footerLines: e.target.value })}
+              disabled={!manageSettings}
+              placeholder="One line per row"
+              className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+            />
+          </label>
 
-        <label className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={form.showPoweredBy}
-            onChange={(e) => setForm({ ...form, showPoweredBy: e.target.checked })}
-            disabled={!manageSettings}
-          />
-          <span className="text-sm text-gray-700">Show &quot;Powered by NUMZPAY&quot; on receipts</span>
-        </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={form.showPoweredBy}
+              onChange={(e) => setForm({ ...form, showPoweredBy: e.target.checked })}
+              disabled={!manageSettings}
+            />
+            <span className="text-sm text-gray-700">Show &quot;Powered by NUMZPAY&quot; on receipts</span>
+          </label>
 
-        {error && (
-          <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-3">{error}</div>
-        )}
-        {success && (
-          <div className="text-sm text-green-700 bg-green-50 border border-green-200 rounded p-3">
-            Settings saved.
+          {error && (
+            <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-3">{error}</div>
+          )}
+          {success && (
+            <div className="text-sm text-green-700 bg-green-50 border border-green-200 rounded p-3">
+              Settings saved. New sales will use the updated profile; existing snapshots stay unchanged.
+            </div>
+          )}
+
+          {manageSettings && (
+            <button
+              type="submit"
+              disabled={saving}
+              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50"
+            >
+              {saving ? 'Saving…' : 'Save settings'}
+            </button>
+          )}
+        </form>
+
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-gray-900">Receipt preview</h2>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPreviewFormat('thermal')}
+                className={`px-2 py-1 text-xs rounded border ${
+                  previewFormat === 'thermal'
+                    ? 'bg-gray-900 text-white border-gray-900'
+                    : 'bg-white text-gray-700 border-gray-300'
+                }`}
+              >
+                80mm thermal
+              </button>
+              <button
+                type="button"
+                onClick={() => setPreviewFormat('a4')}
+                className={`px-2 py-1 text-xs rounded border ${
+                  previewFormat === 'a4'
+                    ? 'bg-gray-900 text-white border-gray-900'
+                    : 'bg-white text-gray-700 border-gray-300'
+                }`}
+              >
+                A4
+              </button>
+              <button
+                type="button"
+                onClick={handlePrintPreview}
+                className="px-2 py-1 text-xs rounded border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+              >
+                Print / PDF
+              </button>
+            </div>
           </div>
-        )}
-
-        {manageSettings && (
-          <button
-            type="submit"
-            disabled={saving}
-            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50"
+          <div
+            className={`border border-gray-200 rounded-lg bg-gray-50 overflow-auto ${
+              previewFormat === 'thermal' ? 'max-h-[70vh]' : 'max-h-[80vh]'
+            }`}
           >
-            {saving ? 'Saving…' : 'Save settings'}
-          </button>
-        )}
-      </form>
+            <ReceiptRenderer viewModel={previewVm} format={previewFormat} />
+          </div>
+          <p className="text-xs text-gray-500 mt-2">
+            Sample data for layout only. Completed sales use immutable snapshots from fiscal time.
+          </p>
+        </div>
+      </div>
     </div>
   );
 }

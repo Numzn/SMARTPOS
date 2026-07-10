@@ -566,28 +566,27 @@ class VSDCService {
    * Get device serial number
    * Uses system MAC address as unique identifier
    */
+  /**
+   * Stable device serial (Section 4.1).
+   * Priority: explicit DVC_SRL_NO env → deterministic hash of tpin+bhfId.
+   * Never random: a changing serial creates duplicate vsdc_devices rows and
+   * breaks initialization status.
+   */
   async getDeviceSerial() {
     if (process.env.DVC_SRL_NO) {
       return process.env.DVC_SRL_NO
     }
-    try {
-      const { networkInterfaces } = require('os')
-      const nets = networkInterfaces()
-      
-      for (const name of Object.keys(nets)) {
-        for (const net of nets[name]) {
-          if (net.family === 'IPv4' && !net.internal && net.mac !== '00:00:00:00:00:00') {
-            return net.mac.replace(/:/g, '').toUpperCase()
-          }
-        }
-      }
-      
-      // Fallback to random serial if no network interface found
-      return crypto.randomBytes(6).toString('hex').toUpperCase()
-    } catch (error) {
-      console.warn('⚠️ Could not get device serial, using random:', error.message)
-      return crypto.randomBytes(6).toString('hex').toUpperCase()
+    if (this._deviceSerial) {
+      return this._deviceSerial
     }
+    const seed = `${this.tpin || 'NOTPIN'}:${this.bhfId || '000'}`
+    this._deviceSerial = crypto
+      .createHash('sha256')
+      .update(seed)
+      .digest('hex')
+      .slice(0, 12)
+      .toUpperCase()
+    return this._deviceSerial
   }
 
   /**
@@ -652,21 +651,33 @@ class VSDCService {
   }
 
   async getDeviceStatus() {
-    const device = await prisma.vsdcDevice.findFirst({
-      where: { tpin: this.tpin, bhfId: this.bhfId },
+    const select = {
+      id: true,
+      tpin: true,
+      bhfId: true,
+      dvcSrlNo: true,
+      sdicId: true,
+      mrcNo: true,
+      initialized: true,
+      createdAt: true,
+      updatedAt: true,
+    }
+
+    // Prefer an initialized device; only fall back to newest (any state)
+    // so a half-finished login row never masks a ready device.
+    let device = await prisma.vsdcDevice.findFirst({
+      where: { tpin: this.tpin, bhfId: this.bhfId, initialized: true },
       orderBy: { updatedAt: 'desc' },
-      select: {
-        id: true,
-        tpin: true,
-        bhfId: true,
-        dvcSrlNo: true,
-        sdicId: true,
-        mrcNo: true,
-        initialized: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      select,
     })
+
+    if (!device) {
+      device = await prisma.vsdcDevice.findFirst({
+        where: { tpin: this.tpin, bhfId: this.bhfId },
+        orderBy: { updatedAt: 'desc' },
+        select,
+      })
+    }
 
     return {
       initialized: Boolean(device?.initialized),

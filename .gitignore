@@ -5,6 +5,7 @@ node_modules/
 .env
 .env.local
 .env.*.local
+.env.bak
 !.env.example
 !.env.docker.example
 
@@ -37,3 +38,7 @@ smart-pos-backend/node_modules/.prisma/
 
 # Qodo / local tooling
 .qodo/
+
+# Claude Code worktrees / scratch extraction dumps
+.claude/
+vsdc-extracted.txt

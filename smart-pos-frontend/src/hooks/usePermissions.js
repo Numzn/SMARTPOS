@@ -46,6 +46,7 @@ export const usePermissions = () => {
     viewUsers: hasPermission('users:read'),
     
     // Settings
+    viewSettings: hasPermission('settings:read'),
     manageSettings: hasPermission('settings:write'),
     
     // ZRA operations
