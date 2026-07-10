@@ -9,6 +9,7 @@ const {
 } = require('../lib/saleFiscal');
 const { refundSale, refundInclude } = require('../lib/saleRefund');
 const { authenticateToken, requirePermission } = require('../middleware/auth');
+const auditService = require('../services/auditService');
 
 // Get all sales (requires sales:read permission)
 router.get('/', authenticateToken, requirePermission('sales:read'), async (req, res) => {
@@ -81,6 +82,19 @@ router.post('/checkout', authenticateToken, requirePermission('sales:write'), as
       });
     }
 
+    auditService.safeLog(auditService.eventTypes.SALE_CREATE, {
+      ...auditService.contextFromReq(req),
+      entityType: 'SALE',
+      entityId: outcome.sale.id,
+      action: 'CHECKOUT',
+      newValues: {
+        total: outcome.sale.total,
+        status: outcome.sale.status,
+        rcptNo: outcome.fiscal?.rcptNo || null,
+      },
+      description: `Sale completed: ${outcome.sale.id} (rcptNo ${outcome.fiscal?.rcptNo || 'n/a'})`,
+    });
+
     res.status(201).json({
       sale: outcome.sale,
       fiscal: outcome.fiscal,
@@ -105,6 +119,20 @@ router.post('/:id/refund', authenticateToken, requirePermission('sales:refund'),
         fiscal: outcome.fiscal,
       });
     }
+
+    auditService.safeLog(auditService.eventTypes.REFUND_CREATE, {
+      ...auditService.contextFromReq(req),
+      entityType: 'REFUND',
+      entityId: outcome.refund.id,
+      action: 'CREDIT_NOTE',
+      newValues: {
+        originalSaleId: req.params.id,
+        total: outcome.refund.total,
+        status: outcome.refund.status,
+        rcptNo: outcome.fiscal?.rcptNo || null,
+      },
+      description: `Credit note issued for sale ${req.params.id}: ${outcome.refund.id}`,
+    });
 
     res.status(201).json({
       refund: outcome.refund,

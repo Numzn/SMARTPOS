@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
 const { authenticateToken, requirePermission, optionalAuth } = require('../middleware/auth');
+const auditService = require('../services/auditService');
 const { resolveProductStock, DEFAULT_BRANCH } = require('../lib/productStockView');
 const {
   registerProductWithVsdc,
@@ -280,6 +281,15 @@ router.post('/', authenticateToken, requirePermission('products:write'), async (
       include: { category: true, InventoryItem: true },
     });
 
+    auditService.safeLog(auditService.eventTypes.PRODUCT_CREATE, {
+      ...auditService.contextFromReq(req),
+      entityType: 'PRODUCT',
+      entityId: productWithReg.id,
+      action: 'CREATE',
+      newValues: { name: productWithReg.name, sku: productWithReg.sku, price: productWithReg.price },
+      description: `Product created: ${productWithReg.name} (${productWithReg.sku})`,
+    });
+
     res.status(201).json({
       product: productWithReg,
       inventory: result.inventory,
@@ -435,6 +445,16 @@ router.put('/:id', authenticateToken, requirePermission('products:write'), async
       include: { category: true, InventoryItem: true },
     });
 
+    auditService.safeLog(auditService.eventTypes.PRODUCT_UPDATE, {
+      ...auditService.contextFromReq(req),
+      entityType: 'PRODUCT',
+      entityId: productWithReg.id,
+      action: 'UPDATE',
+      oldValues: { name: existingProduct.name, price: existingProduct.price, sku: existingProduct.sku },
+      newValues: { name: productWithReg.name, price: productWithReg.price, sku: productWithReg.sku },
+      description: `Product updated: ${productWithReg.name} (${productWithReg.sku})`,
+    });
+
     res.json({
       ...productWithReg,
       registration,
@@ -527,6 +547,14 @@ router.delete('/:id', authenticateToken, requirePermission('products:delete'), a
     });
     
     console.log('✅ Product deleted successfully:', id);
+    auditService.safeLog(auditService.eventTypes.PRODUCT_DELETE, {
+      ...auditService.contextFromReq(req),
+      entityType: 'PRODUCT',
+      entityId: id,
+      action: 'DELETE',
+      oldValues: { name: product.name, sku: product.sku },
+      description: `Product deleted: ${product.name} (${product.sku})`,
+    });
     res.json({ message: 'Product deleted successfully' });
   } catch (error) {
     console.error('❌ Error deleting product:', error);

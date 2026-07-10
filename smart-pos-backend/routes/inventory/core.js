@@ -3,6 +3,7 @@ const router = express.Router();
 const prisma = require('../../lib/prisma');
 const { authenticateToken, requirePermission } = require('../../middleware/auth');
 const stockSyncService = require('../../services/stockSyncService');
+const auditService = require('../../services/auditService');
 
 // Get all inventory with product details and expiry tracking
 router.get('/', authenticateToken, requirePermission('inventory:read'), async (req, res) => {
@@ -290,6 +291,22 @@ router.post('/receive', authenticateToken, requirePermission('inventory:write'),
       inventory: result.updatedInventory,
       batch: result.inventoryBatch,
       movement: result.stockMovement
+    });
+
+    auditService.safeLog(auditService.eventTypes.STOCK_RECEIVE, {
+      ...auditService.contextFromReq(req),
+      entityType: 'PRODUCT',
+      entityId: productId,
+      action: 'RECEIVE',
+      newValues: {
+        branchId,
+        quantity: Math.abs(parseInt(quantity)),
+        unitCost: parseFloat(unitCost),
+        newStock: result.updatedInventory.currentStock,
+        batchNumber: result.inventoryBatch.batchNumber,
+        supplier: supplierInfo || 'Unknown',
+      },
+      description: `Stock received: ${Math.abs(parseInt(quantity))} of ${productId} @ ${branchId}`,
     });
 
     if (result.stockMovement?.id) {

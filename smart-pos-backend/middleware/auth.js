@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const prisma = require('../lib/prisma');
+const auditService = require('../services/auditService');
 
 /**
  * Enhanced Authentication & Authorization Middleware
@@ -17,7 +18,8 @@ const PERMISSIONS = {
     'receipts:read',
     'reports:read', 'reports:write',
     'settings:read', 'settings:write',
-    'zra:submit', 'zra:sync', 'zra:read'
+    'zra:submit', 'zra:sync', 'zra:read',
+    'audit:read'
   ],
   MANAGER: [
     'users:read',
@@ -27,7 +29,8 @@ const PERMISSIONS = {
     'sales:read', 'sales:write', 'sales:refund',
     'receipts:read',
     'reports:read',
-    'zra:submit', 'zra:sync', 'zra:read'
+    'zra:submit', 'zra:sync', 'zra:read',
+    'audit:read'
   ],
   CASHIER: [
     'products:read',
@@ -135,7 +138,15 @@ const authenticateToken = async (req, res, next) => {
     });
     
     if (!user || !user.isActive) {
-      return res.status(403).json({ 
+      auditService.safeLog(auditService.eventTypes.UNAUTHORIZED_ACCESS, {
+        userId: decoded.userId,
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+        description: 'Token valid but user account inactive or not found',
+        action: `${req.method} ${req.originalUrl}`,
+        success: false,
+      });
+      return res.status(403).json({
         error: 'User account is inactive or not found',
         code: 'USER_INACTIVE'
       });
@@ -157,7 +168,14 @@ const authenticateToken = async (req, res, next) => {
     }
     
     if (error.name === 'JsonWebTokenError') {
-      return res.status(403).json({ 
+      auditService.safeLog(auditService.eventTypes.UNAUTHORIZED_ACCESS, {
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+        description: 'Invalid JWT presented',
+        action: `${req.method} ${req.originalUrl}`,
+        success: false,
+      });
+      return res.status(403).json({
         error: 'Invalid token',
         code: 'TOKEN_INVALID'
       });
@@ -169,6 +187,21 @@ const authenticateToken = async (req, res, next) => {
       code: 'TOKEN_VALIDATION_ERROR'
     });
   }
+};
+
+/**
+ * Fire-and-forget PERMISSION_DENIED audit entry for a blocked request.
+ */
+const logPermissionDenied = (req, required) => {
+  auditService.safeLog(auditService.eventTypes.PERMISSION_DENIED, {
+    userId: req.user?.userId || req.user?.id || null,
+    userRole: req.user?.role || null,
+    ipAddress: req.ip,
+    userAgent: req.headers['user-agent'],
+    action: `${req.method} ${req.originalUrl}`,
+    description: `Access denied. Required: ${required}`,
+    success: false,
+  });
 };
 
 /**
@@ -184,7 +217,8 @@ const requireRole = (...allowedRoles) => {
     }
     
     if (!allowedRoles.includes(req.user.role)) {
-      return res.status(403).json({ 
+      logPermissionDenied(req, `role in [${allowedRoles.join(', ')}]`);
+      return res.status(403).json({
         error: `Access denied. Required roles: ${allowedRoles.join(', ')}`,
         code: 'INSUFFICIENT_ROLE',
         userRole: req.user.role,
@@ -209,7 +243,8 @@ const requirePermission = (permission) => {
     }
     
     if (!req.user.permissions.includes(permission)) {
-      return res.status(403).json({ 
+      logPermissionDenied(req, permission);
+      return res.status(403).json({
         error: `Access denied. Required permission: ${permission}`,
         code: 'INSUFFICIENT_PERMISSION',
         userPermissions: req.user.permissions,
@@ -238,7 +273,8 @@ const requireAllPermissions = (...permissions) => {
     );
     
     if (missingPermissions.length > 0) {
-      return res.status(403).json({ 
+      logPermissionDenied(req, `all of [${permissions.join(', ')}]`);
+      return res.status(403).json({
         error: `Access denied. Missing permissions: ${missingPermissions.join(', ')}`,
         code: 'INSUFFICIENT_PERMISSIONS',
         userPermissions: req.user.permissions,
@@ -268,7 +304,8 @@ const requireAnyPermission = (...permissions) => {
     );
     
     if (!hasPermission) {
-      return res.status(403).json({ 
+      logPermissionDenied(req, `one of [${permissions.join(', ')}]`);
+      return res.status(403).json({
         error: `Access denied. Required one of: ${permissions.join(', ')}`,
         code: 'INSUFFICIENT_PERMISSIONS',
         userPermissions: req.user.permissions,

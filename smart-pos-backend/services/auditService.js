@@ -25,24 +25,37 @@ class AuditService {
       SALE_CREATE: 'SALE_CREATE',
       SALE_UPDATE: 'SALE_UPDATE',
       SALE_CANCEL: 'SALE_CANCEL',
+      REFUND_CREATE: 'REFUND_CREATE',
       INVOICE_GENERATE: 'INVOICE_GENERATE',
       INVOICE_SUBMIT: 'INVOICE_SUBMIT',
       INVOICE_CANCEL: 'INVOICE_CANCEL',
       RECEIPT_REPRINT: 'RECEIPT_REPRINT',
-      
-      // Inventory events
+
+      // Catalog events
       PRODUCT_CREATE: 'PRODUCT_CREATE',
       PRODUCT_UPDATE: 'PRODUCT_UPDATE',
       PRODUCT_DELETE: 'PRODUCT_DELETE',
+      CATEGORY_CREATE: 'CATEGORY_CREATE',
+      CATEGORY_UPDATE: 'CATEGORY_UPDATE',
+      CATEGORY_DELETE: 'CATEGORY_DELETE',
+
+      // Inventory events
       STOCK_ADJUSTMENT: 'STOCK_ADJUSTMENT',
+      STOCK_RECEIVE: 'STOCK_RECEIVE',
       STOCK_SYNC: 'STOCK_SYNC',
-      
+
+      // Branch events
+      BRANCH_CREATE: 'BRANCH_CREATE',
+      BRANCH_UPDATE: 'BRANCH_UPDATE',
+      BRANCH_DELETE: 'BRANCH_DELETE',
+
       // System events
       SYSTEM_START: 'SYSTEM_START',
       SYSTEM_SHUTDOWN: 'SYSTEM_SHUTDOWN',
       BACKUP_CREATE: 'BACKUP_CREATE',
       DATA_EXPORT: 'DATA_EXPORT',
       CONFIG_CHANGE: 'CONFIG_CHANGE',
+      SETTINGS_UPDATE: 'SETTINGS_UPDATE',
       
       // ZRA/VSDC events
       VSDC_CONNECT: 'VSDC_CONNECT',
@@ -85,13 +98,13 @@ class AuditService {
         entityType: details.entityType || null,
         entityId: details.entityId || null,
         action: details.action || eventType,
-        oldValues: details.oldValues ? JSON.stringify(details.oldValues) : null,
-        newValues: details.newValues ? JSON.stringify(details.newValues) : null,
+        oldValues: details.oldValues ?? null,
+        newValues: details.newValues ?? null,
         description: details.description || '',
         riskLevel: this.determineRiskLevel(eventType, details),
         success: details.success !== false,
         errorMessage: details.errorMessage || null,
-        metadata: details.metadata ? JSON.stringify(details.metadata) : null,
+        metadata: details.metadata ?? null,
         hash: null // Will be calculated
       }
 
@@ -126,6 +139,30 @@ class AuditService {
         success: false,
         error: error.message
       }
+    }
+  }
+
+  /**
+   * Fire-and-forget audit log. Never throws, never blocks the caller's
+   * request path — logging failures must not break business operations.
+   */
+  safeLog(eventType, details = {}) {
+    Promise.resolve()
+      .then(() => this.logEvent(eventType, details))
+      .catch((err) => console.warn(`[audit] log skipped (${eventType}):`, err.message))
+  }
+
+  /**
+   * Extract request/actor context from an Express request for audit details.
+   */
+  contextFromReq(req = {}) {
+    const user = req.user || {}
+    return {
+      userId: user.userId || user.id || null,
+      userRole: user.role || null,
+      ipAddress: req.ip || (req.headers && req.headers['x-forwarded-for']) || null,
+      userAgent: req.headers && req.headers['user-agent'],
+      sessionId: req.headers && req.headers['x-session-id'],
     }
   }
 
@@ -230,46 +267,34 @@ class AuditService {
    */
   async getAuditTrail(entityType, entityId, options = {}) {
     try {
-      const limit = options.limit || 100
-      const offset = options.offset || 0
-      const startDate = options.startDate
-      const endDate = options.endDate
+      const take = Math.min(options.limit || 100, 1000)
+      const skip = options.offset || 0
 
-      let whereClause = 'WHERE entity_type = $1 AND entity_id = $2'
-      let params = [entityType, entityId]
-      let paramIndex = 3
-
-      if (startDate) {
-        whereClause += ` AND timestamp >= $${paramIndex}`
-        params.push(startDate)
-        paramIndex++
+      const where = {}
+      if (entityType) where.entityType = entityType
+      if (entityId) where.entityId = entityId
+      if (options.eventType) where.eventType = options.eventType
+      if (options.userId) where.userId = options.userId
+      if (options.startDate || options.endDate) {
+        where.timestamp = {}
+        if (options.startDate) where.timestamp.gte = new Date(options.startDate)
+        if (options.endDate) where.timestamp.lte = new Date(options.endDate)
       }
 
-      if (endDate) {
-        whereClause += ` AND timestamp <= $${paramIndex}`
-        params.push(endDate)
-        paramIndex++
-      }
-
-      const query = `
-        SELECT * FROM audit_trail 
-        ${whereClause}
-        ORDER BY timestamp DESC 
-        LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
-      `
-      params.push(limit, offset)
-
-      const auditEntries = await this.prisma.$queryRawUnsafe(query, ...params)
+      const [auditTrail, totalCount] = await Promise.all([
+        this.prisma.auditLog.findMany({
+          where,
+          orderBy: { timestamp: 'desc' },
+          take,
+          skip,
+        }),
+        this.prisma.auditLog.count({ where }),
+      ])
 
       return {
         success: true,
-        auditTrail: auditEntries.map(entry => ({
-          ...entry,
-          oldValues: entry.oldValues ? JSON.parse(entry.oldValues) : null,
-          newValues: entry.newValues ? JSON.parse(entry.newValues) : null,
-          metadata: entry.metadata ? JSON.parse(entry.metadata) : null
-        })),
-        totalCount: auditEntries.length
+        auditTrail,
+        totalCount,
       }
     } catch (error) {
       console.error('❌ Failed to get audit trail:', error.message)
@@ -293,23 +318,23 @@ class AuditService {
         this.eventTypes.UNAUTHORIZED_ACCESS
       ]
 
-      const limit = options.limit || 50
+      const take = Math.min(options.limit || 50, 1000)
       const hours = options.hours || 24
+      const since = new Date(Date.now() - hours * 60 * 60 * 1000)
 
-      const query = `
-        SELECT * FROM audit_trail 
-        WHERE event_type = ANY($1)
-        AND timestamp >= NOW() - INTERVAL '${hours} hours'
-        ORDER BY timestamp DESC 
-        LIMIT $2
-      `
-
-      const events = await this.prisma.$queryRawUnsafe(query, securityEventTypes, limit)
+      const events = await this.prisma.auditLog.findMany({
+        where: {
+          eventType: { in: securityEventTypes },
+          timestamp: { gte: since },
+        },
+        orderBy: { timestamp: 'desc' },
+        take,
+      })
 
       return {
         success: true,
         securityEvents: events,
-        alertCount: events.filter(e => e.riskLevel === this.riskLevels.HIGH || 
+        alertCount: events.filter(e => e.riskLevel === this.riskLevels.HIGH ||
                                       e.riskLevel === this.riskLevels.CRITICAL).length
       }
     } catch (error) {
@@ -328,16 +353,17 @@ class AuditService {
   async verifyIntegrity(startDate, endDate) {
     try {
       console.log('🔍 Verifying audit trail integrity...')
-      
-      const query = `
-        SELECT id, hash, timestamp, event_type, user_id, entity_type, entity_id
-        FROM audit_trail 
-        WHERE timestamp BETWEEN $1 AND $2
-        ORDER BY timestamp
-      `
 
-      const entries = await this.prisma.$queryRawUnsafe(query, startDate, endDate)
-      
+      const entries = await this.prisma.auditLog.findMany({
+        where: {
+          timestamp: {
+            gte: new Date(startDate),
+            lte: new Date(endDate),
+          },
+        },
+        orderBy: { timestamp: 'asc' },
+      })
+
       let verifiedCount = 0
       let corruptedEntries = []
 
@@ -351,7 +377,7 @@ class AuditService {
           corruptedEntries.push({
             id: entry.id,
             timestamp: entry.timestamp,
-            eventType: entry.event_type,
+            eventType: entry.eventType,
             expectedHash: entry.hash,
             calculatedHash
           })
@@ -382,86 +408,29 @@ class AuditService {
    * Save audit entry to database
    */
   async saveAuditEntry(auditEntry) {
-    try {
-      const query = `
-        INSERT INTO audit_trail (
-          id, event_type, timestamp, user_id, user_role, ip_address, 
-          user_agent, session_id, entity_type, entity_id, action,
-          old_values, new_values, description, risk_level, success,
-          error_message, metadata, hash
-        ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
-        )
-      `
-
-      await this.prisma.$executeRawUnsafe(query,
-        auditEntry.id, auditEntry.eventType, auditEntry.timestamp,
-        auditEntry.userId, auditEntry.userRole, auditEntry.ipAddress,
-        auditEntry.userAgent, auditEntry.sessionId, auditEntry.entityType,
-        auditEntry.entityId, auditEntry.action, auditEntry.oldValues,
-        auditEntry.newValues, auditEntry.description, auditEntry.riskLevel,
-        auditEntry.success, auditEntry.errorMessage, auditEntry.metadata,
-        auditEntry.hash
-      )
-    } catch (error) {
-      // If table doesn't exist, create it
-      if (error.message.includes('relation "audit_trail" does not exist')) {
-        await this.createAuditTable()
-        // Retry the insert
-        await this.saveAuditEntry(auditEntry)
-      } else {
-        throw error
-      }
-    }
-  }
-
-  /**
-   * Create audit trail table if it doesn't exist
-   */
-  async createAuditTable() {
-    // PostgreSQL prepared statements allow one command per $executeRawUnsafe call.
-    await this.prisma.$executeRawUnsafe(`
-      CREATE TABLE IF NOT EXISTS audit_trail (
-        id VARCHAR(50) PRIMARY KEY,
-        event_type VARCHAR(50) NOT NULL,
-        timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
-        user_id VARCHAR(50),
-        user_role VARCHAR(30),
-        ip_address VARCHAR(45),
-        user_agent TEXT,
-        session_id VARCHAR(100),
-        entity_type VARCHAR(50),
-        entity_id VARCHAR(50),
-        action VARCHAR(50),
-        old_values TEXT,
-        new_values TEXT,
-        description TEXT,
-        risk_level VARCHAR(10) DEFAULT 'LOW',
-        success BOOLEAN DEFAULT true,
-        error_message TEXT,
-        metadata TEXT,
-        hash VARCHAR(64) NOT NULL,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      )
-    `)
-
-    await this.prisma.$executeRawUnsafe(
-      `CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_trail(timestamp)`
-    )
-    await this.prisma.$executeRawUnsafe(
-      `CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_trail(user_id)`
-    )
-    await this.prisma.$executeRawUnsafe(
-      `CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_trail(entity_type, entity_id)`
-    )
-    await this.prisma.$executeRawUnsafe(
-      `CREATE INDEX IF NOT EXISTS idx_audit_event_type ON audit_trail(event_type)`
-    )
-    await this.prisma.$executeRawUnsafe(
-      `CREATE INDEX IF NOT EXISTS idx_audit_risk_level ON audit_trail(risk_level)`
-    )
-
-    console.log('✅ Audit trail table created')
+    await this.prisma.auditLog.create({
+      data: {
+        id: auditEntry.id,
+        eventType: auditEntry.eventType,
+        timestamp: auditEntry.timestamp,
+        userId: auditEntry.userId,
+        userRole: auditEntry.userRole,
+        ipAddress: auditEntry.ipAddress,
+        userAgent: auditEntry.userAgent,
+        sessionId: auditEntry.sessionId,
+        entityType: auditEntry.entityType,
+        entityId: auditEntry.entityId,
+        action: auditEntry.action,
+        oldValues: auditEntry.oldValues ?? undefined,
+        newValues: auditEntry.newValues ?? undefined,
+        description: auditEntry.description,
+        riskLevel: auditEntry.riskLevel,
+        success: auditEntry.success,
+        errorMessage: auditEntry.errorMessage,
+        metadata: auditEntry.metadata ?? undefined,
+        hash: auditEntry.hash,
+      },
+    })
   }
 
   /**
@@ -483,7 +452,10 @@ class AuditService {
       this.eventTypes.PERMISSION_DENIED,
       this.eventTypes.USER_DELETE,
       this.eventTypes.SALE_CANCEL,
-      this.eventTypes.CONFIG_CHANGE
+      this.eventTypes.REFUND_CREATE,
+      this.eventTypes.BRANCH_DELETE,
+      this.eventTypes.CONFIG_CHANGE,
+      this.eventTypes.SETTINGS_UPDATE
     ].includes(eventType)) {
       return this.riskLevels.HIGH
     }
@@ -493,6 +465,7 @@ class AuditService {
       this.eventTypes.USER_CREATE,
       this.eventTypes.USER_UPDATE,
       this.eventTypes.PRODUCT_DELETE,
+      this.eventTypes.CATEGORY_DELETE,
       this.eventTypes.STOCK_ADJUSTMENT
     ].includes(eventType)) {
       return this.riskLevels.MEDIUM

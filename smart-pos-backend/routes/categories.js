@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
 const { authenticateToken, requirePermission, optionalAuth } = require('../middleware/auth');
+const auditService = require('../services/auditService');
 
 // Get all categories (public with optional auth)
 router.get('/', optionalAuth, async (req, res) => {
@@ -64,6 +65,15 @@ router.post('/', authenticateToken, requirePermission('categories:write'), async
       }
     });
     
+    auditService.safeLog(auditService.eventTypes.CATEGORY_CREATE, {
+      ...auditService.contextFromReq(req),
+      entityType: 'CATEGORY',
+      entityId: category.id,
+      action: 'CREATE',
+      newValues: { name: category.name },
+      description: `Category created: ${category.name}`,
+    });
+
     res.status(201).json(category);
   } catch (error) {
     console.error('Error creating category:', error);
@@ -85,6 +95,15 @@ router.put('/:id', authenticateToken, requirePermission('categories:write'), asy
       }
     });
     
+    auditService.safeLog(auditService.eventTypes.CATEGORY_UPDATE, {
+      ...auditService.contextFromReq(req),
+      entityType: 'CATEGORY',
+      entityId: category.id,
+      action: 'UPDATE',
+      newValues: { name: category.name, description: category.description },
+      description: `Category updated: ${category.name}`,
+    });
+
     res.json(category);
   } catch (error) {
     console.error('Error updating category:', error);
@@ -110,7 +129,15 @@ router.delete('/:id', authenticateToken, requirePermission('categories:delete'),
     await prisma.category.delete({
       where: { id: req.params.id }
     });
-    
+
+    auditService.safeLog(auditService.eventTypes.CATEGORY_DELETE, {
+      ...auditService.contextFromReq(req),
+      entityType: 'CATEGORY',
+      entityId: req.params.id,
+      action: 'DELETE',
+      description: `Category deleted: ${req.params.id}`,
+    });
+
     res.json({ message: 'Category deleted successfully' });
   } catch (error) {
     console.error('Error deleting category:', error);

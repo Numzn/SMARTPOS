@@ -248,7 +248,7 @@ router.post('/', authenticateToken, requirePermission('settings:write'), async (
       }
     }
 
-    await safeAudit(auditService.eventTypes.USER_CREATE, {
+    await safeAudit(auditService.eventTypes.BRANCH_CREATE, {
       userId,
       entityType: 'BRANCH',
       entityId: branch.id,
@@ -291,7 +291,7 @@ router.put('/:id', authenticateToken, requirePermission('settings:write'), async
       zraUpdate = await registerBranchWithZRA(updatedBranch);
     }
 
-    await safeAudit(auditService.eventTypes.USER_UPDATE, {
+    await safeAudit(auditService.eventTypes.BRANCH_UPDATE, {
       userId: actorId(req),
       entityType: 'BRANCH',
       entityId: req.params.id,
@@ -388,7 +388,7 @@ router.delete('/:id', authenticateToken, requirePermission('settings:write'), as
       },
     });
 
-    await safeAudit(auditService.eventTypes.USER_DELETE, {
+    await safeAudit(auditService.eventTypes.BRANCH_DELETE, {
       userId: actorId(req),
       entityType: 'BRANCH',
       entityId: branch.id,

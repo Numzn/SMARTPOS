@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
 const { authenticateToken, requirePermission } = require('../middleware/auth');
+const auditService = require('../services/auditService');
 const { getBusinessProfile, ensureDefaultBusinessProfile } = require('../lib/ensureBusinessProfile');
 
 router.get('/business', authenticateToken, requirePermission('settings:read'), async (req, res) => {
@@ -38,6 +39,15 @@ router.patch('/business', authenticateToken, requirePermission('settings:write')
     const profile = await prisma.businessProfile.update({
       where: { id: 'default' },
       data,
+    });
+
+    auditService.safeLog(auditService.eventTypes.SETTINGS_UPDATE, {
+      ...auditService.contextFromReq(req),
+      entityType: 'BUSINESS_PROFILE',
+      entityId: profile.id,
+      action: 'UPDATE',
+      newValues: Object.keys(data),
+      description: `Business settings updated: ${Object.keys(data).join(', ')}`,
     });
 
     res.json(profile);

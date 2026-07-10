@@ -468,9 +468,48 @@ model ReceiptSnapshot {
   @@map("receipt_snapshots")
 }
 
+// Tamper-evident audit trail for ZRA compliance (5-year retention requirement).
+// Written by services/auditService.js; queried via routes/audit.js.
+model AuditLog {
+  id           String         @id
+  eventType    String
+  timestamp    DateTime       @default(now())
+  userId       String?
+  userRole     String?
+  ipAddress    String?
+  userAgent    String?
+  sessionId    String?
+  entityType   String?
+  entityId     String?
+  action       String?
+  oldValues    Json?
+  newValues    Json?
+  description  String?
+  riskLevel    AuditRiskLevel @default(LOW)
+  success      Boolean        @default(true)
+  errorMessage String?
+  metadata     Json?
+  hash         String
+  createdAt    DateTime       @default(now())
+
+  @@index([timestamp])
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([eventType])
+  @@index([riskLevel])
+  @@map("audit_logs")
+}
+
 enum ReceiptSourceType {
   SALE
   CREDIT_NOTE
+}
+
+enum AuditRiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
 }
 
 enum Role {

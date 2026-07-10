@@ -4,6 +4,14 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const prisma = require('../lib/prisma');
 const { authenticateToken, requireRole, requirePermission, sessionManager, PERMISSIONS } = require('../middleware/auth');
+const auditService = require('../services/auditService');
+
+// Fire-and-forget audit logging — must never block or fail the request path.
+const safeAuditAuth = (userId, success, details) => {
+  Promise.resolve()
+    .then(() => auditService.logUserAuth(userId, success, details))
+    .catch((err) => console.warn('[users] audit log skipped:', err.message));
+};
 
 // Get all users (protected route - Admin only)
 router.get('/', authenticateToken, requireRole('ADMIN'), async (req, res) => {
@@ -92,6 +100,15 @@ router.post('/register', authenticateToken, requireRole('ADMIN'), async (req, re
       }
     });
     
+    auditService.safeLog(auditService.eventTypes.USER_CREATE, {
+      ...auditService.contextFromReq(req),
+      entityType: 'USER',
+      entityId: user.id,
+      action: 'CREATE',
+      newValues: { email: user.email, name: user.name, role: user.role },
+      description: `User created: ${user.email} (${user.role})`,
+    });
+
     res.status(201).json({
       message: 'User created successfully',
       user
@@ -148,7 +165,12 @@ router.post('/login', async (req, res) => {
     
     if (!isMatch) {
       console.log('❌ Password mismatch');
-      return res.status(400).json({ 
+      safeAuditAuth(user.id, false, {
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+        errorMessage: 'Invalid password',
+      });
+      return res.status(400).json({
         error: 'Invalid email or password',
         code: 'INVALID_CREDENTIALS'
       });
@@ -179,7 +201,16 @@ router.post('/login', async (req, res) => {
       where: { id: user.id },
       data: { lastLoginAt: new Date() }
     });
-    
+
+    safeAuditAuth(user.id, true, {
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'],
+      sessionId,
+      userRole: user.role,
+      loginMethod: 'password',
+      rememberMe,
+    });
+
     res.json({
       message: 'Login successful',
       token,
@@ -222,6 +253,15 @@ router.put('/profile', authenticateToken, async (req, res) => {
       }
     });
     
+    auditService.safeLog(auditService.eventTypes.USER_UPDATE, {
+      ...auditService.contextFromReq(req),
+      entityType: 'USER',
+      entityId: user.id,
+      action: 'UPDATE_PROFILE',
+      newValues: { name: user.name, email: user.email },
+      description: `Profile updated: ${user.email}`,
+    });
+
     res.json({
       message: 'Profile updated successfully',
       user
@@ -263,6 +303,14 @@ router.put('/change-password', authenticateToken, async (req, res) => {
       }
     });
     
+    auditService.safeLog(auditService.eventTypes.USER_UPDATE, {
+      ...auditService.contextFromReq(req),
+      entityType: 'USER',
+      entityId: req.user.userId,
+      action: 'CHANGE_PASSWORD',
+      description: 'Password changed',
+    });
+
     res.json({ message: 'Password changed successfully' });
   } catch (error) {
     console.error('Error changing password:', error);
@@ -278,7 +326,12 @@ router.post('/logout', authenticateToken, async (req, res) => {
     if (sessionId) {
       sessionManager.removeSession(sessionId);
     }
-    
+
+    auditService.safeLog(auditService.eventTypes.USER_LOGOUT, {
+      ...auditService.contextFromReq(req),
+      description: 'User logged out',
+    });
+
     res.json({
       message: 'Logout successful',
       code: 'LOGOUT_SUCCESS'

@@ -15,6 +15,8 @@ const itemRoutes = require('./routes/items'); // Add items route for VSDC Sectio
 const stockAdjustmentRoutes = require('./routes/stock-adjustments'); // ZRA stock management compliance
 const receiptRoutes = require('./routes/receipts');
 const settingsRoutes = require('./routes/settings');
+const auditRoutes = require('./routes/audit');
+const auditService = require('./services/auditService');
 
 dotenv.config();
 
@@ -37,6 +39,7 @@ app.use('/api/items', itemRoutes); // VSDC Item Management endpoints (Section 6.
 app.use('/api/stock-adjustments', stockAdjustmentRoutes); // ZRA stock management compliance
 app.use('/api/receipts', receiptRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/audit', auditRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -84,6 +87,25 @@ app.listen(PORT, HOST, () => {
     setInterval(runReconcile, intervalMs);
     console.log(`🔄 Fiscal reconciliation scheduled every ${intervalMs / 1000}s`);
   }
+
+  auditService.safeLog(auditService.eventTypes.SYSTEM_START, {
+    description: `Smart POS backend started on ${HOST}:${PORT}`,
+  });
+});
+
+// Audit graceful shutdown (best-effort — awaited so the entry is flushed before exit).
+['SIGTERM', 'SIGINT'].forEach((signal) => {
+  process.on(signal, async () => {
+    try {
+      await auditService.logSystemEvent(
+        auditService.eventTypes.SYSTEM_SHUTDOWN,
+        `Smart POS backend received ${signal}`
+      );
+    } catch (err) {
+      console.warn('[audit] shutdown log skipped:', err.message);
+    }
+    process.exit(0);
+  });
 });
 
 module.exports = app;

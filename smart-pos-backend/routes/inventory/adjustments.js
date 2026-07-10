@@ -4,6 +4,7 @@ const prisma = require('../../lib/prisma');
 const { authenticateToken, requirePermission } = require('../../middleware/auth');
 const { deductBatchesFifo } = require('../../lib/inventoryStock');
 const stockSyncService = require('../../services/stockSyncService');
+const auditService = require('../../services/auditService');
 
 // Canonical stock adjustment endpoint.
 // Accepts both operational (IN/OUT) and ZRA-style adjustment types and writes:
@@ -183,6 +184,21 @@ router.post('/adjust', authenticateToken, requirePermission('inventory:write'), 
     res.json({
       message: 'Stock adjustment completed successfully',
       ...result,
+    });
+
+    auditService.safeLog(auditService.eventTypes.STOCK_ADJUSTMENT, {
+      ...auditService.contextFromReq(req),
+      entityType: 'PRODUCT',
+      entityId: productId,
+      action: auditType,
+      newValues: {
+        branchId,
+        previousStock: result.previousStock,
+        newStock: result.newStock,
+        adjustmentQuantity: result.adjustmentQuantity,
+        reason: reason || null,
+      },
+      description: `Stock ${auditType} on ${productId} @ ${branchId}: ${result.previousStock} → ${result.newStock}`,
     });
 
     if (result.stockMovement?.id) {
@@ -383,6 +399,20 @@ router.post('/bulk-adjust', authenticateToken, requirePermission('inventory:writ
       failed: errors.length,
       results,
       errors,
+    });
+
+    auditService.safeLog(auditService.eventTypes.STOCK_ADJUSTMENT, {
+      ...auditService.contextFromReq(req),
+      entityType: 'INVENTORY',
+      entityId: branchId,
+      action: 'BULK_ADJUSTMENT',
+      newValues: {
+        branchId,
+        successful: results.length,
+        failed: errors.length,
+        productIds: results.map((r) => r.productId),
+      },
+      description: `Bulk stock adjustment @ ${branchId}: ${results.length} ok, ${errors.length} failed`,
     });
 
     const movementIds = results.map((r) => r.stockMovementId).filter(Boolean);

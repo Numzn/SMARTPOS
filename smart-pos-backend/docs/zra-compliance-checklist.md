@@ -211,35 +211,20 @@ POST   /api/suppliers              // Manage suppliers
 
 ### **Phase 5: Security & Data Integrity**
 
-#### 9. ⏳ Audit Trail
-**Status:** Basic Logging, Enhancement Needed
+#### 9. 🟡 Audit Trail
+**Status:** Persistence + query + integrity DONE; full event coverage partial
 **Requirements:**
-- [ ] Log all actions (invoice creation, edits, user logins) (*Mandatory*)
-- [ ] Store logs for minimum 5 years (ZRA requirement)
-- [ ] Tamper-proof audit logs
-- [ ] Audit report generation
+- [x] Persisted, Prisma-managed audit store (`AuditLog` model, migration `20260709120000_audit_log`, table `audit_logs`)
+- [x] Tamper-evident integrity hash per entry, verifiable via `GET /api/audit/verify`
+- [x] Query API — `GET /api/audit`, `GET /api/audit/security` (guarded by `audit:read`)
+- [x] Log all mandated actions — auth (login/logout/failed), sales checkout, refunds/credit notes, invoice submit, product CRUD, category CRUD, stock adjust/bulk/receive/sync, branch CRUD, business-settings changes, permission-denied, unauthorized-access, system start/shutdown
+- [ ] Store logs for minimum 5 years (retention/archival policy — depends on Backup & Recovery #10)
+- [ ] Hash chaining (link each entry to previous) for stronger tamper evidence
 
-**Database Schema Needed:**
-```sql
-CREATE TABLE audit_logs (
-  id SERIAL PRIMARY KEY,
-  action VARCHAR(100) NOT NULL,
-  user_id INTEGER REFERENCES users(id),
-  entity_type VARCHAR(50),
-  entity_id INTEGER,
-  old_values JSONB,
-  new_values JSONB,
-  ip_address INET,
-  user_agent TEXT,
-  timestamp TIMESTAMP DEFAULT NOW(),
-  device_id VARCHAR(50),
-  branch_id VARCHAR(50)
-);
-```
-
-**Files to Create:**
-- `services/auditService.js`
-- `routes/audit.js`
+**Implemented:**
+- `services/auditService.js` — now persists via `prisma.auditLog.create`; previously wrote to an ad-hoc raw `audit_trail` table outside Prisma's migrations, and integrity verification always failed on a snake/camel-case field bug (both fixed). Adds `safeLog()` (fire-and-forget, never blocks the request path) + `contextFromReq()`.
+- Event wiring: `middleware/auth.js` (permission-denied, unauthorized), `routes/users.js`, `routes/sales.js`, `routes/products.js`, `routes/categories.js`, `routes/settings.js`, `routes/branches.js`, `routes/inventory/{adjustments,core}.js`, `index.js` (start/shutdown).
+- `routes/audit.js` — mounted at `/api/audit` in `index.js`.
 
 #### 10. ⏳ Backup & Recovery
 **Status:** Not Implemented
