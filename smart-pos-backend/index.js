@@ -16,6 +16,7 @@ const stockAdjustmentRoutes = require('./routes/stock-adjustments'); // ZRA stoc
 const receiptRoutes = require('./routes/receipts');
 const settingsRoutes = require('./routes/settings');
 const auditRoutes = require('./routes/audit');
+const reportRoutes = require('./routes/reports');
 const auditService = require('./services/auditService');
 
 dotenv.config();
@@ -40,6 +41,7 @@ app.use('/api/stock-adjustments', stockAdjustmentRoutes); // ZRA stock managemen
 app.use('/api/receipts', receiptRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/audit', auditRoutes);
+app.use('/api/reports', reportRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
