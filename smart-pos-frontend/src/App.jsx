@@ -12,6 +12,8 @@ import ReportsPage from './components/reports/ReportsPage';
 import SalesPage from './components/sales/SalesPage';
 import CashierPage from './pages/CashierPage';
 import SettingsPage from './pages/SettingsPage';
+import PrintersPage from './pages/PrintersPage';
+import UsersPage from './pages/UsersPage';
 
 function App() {
   return (
@@ -41,6 +43,7 @@ function App() {
                 <Route path="reports" element={<ReportsPage />} />
                 <Route path="users" element={<UsersPage />} />
                 <Route path="settings" element={<SettingsPage />} />
+                <Route path="printers" element={<PrintersPage />} />
               </Route>
 
               {/* Catch all redirect */}

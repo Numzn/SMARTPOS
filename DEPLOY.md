@@ -218,7 +218,41 @@ The frontend nginx container already proxies `/api/*` to the backend — no extr
 
 ---
 
-## 5. Local development (reference)
+## 5. Sandbox UAT (ZRA official VSDC)
+
+Use when you have **sandbox credentials from the ZRA portal** (TPIN, branch ID, device serial). **Never commit secrets** to the repository.
+
+### Prerequisites
+
+| Variable | Description |
+|----------|-------------|
+| `VSDC_MODE` | Set to `official` |
+| `VSDC_URL` | Sandbox base URL from ZRA |
+| `VSDC_BASE_PATH` | Optional path prefix (e.g. `/zrasandboxvsdc`) |
+| `TPIN` / `ZRA_TPIN` | Taxpayer PIN |
+| `BHF_ID` / `ZRA_BHF_ID` | Branch ID (3 digits) |
+| `DVC_SRL_NO` / `ZRA_DEVICE_SERIAL` | Device serial from portal |
+
+### Smoke test
+
+```bash
+cd smart-pos-backend
+VSDC_MODE=official \
+VSDC_URL=https://your-sandbox-host \
+VSDC_BASE_PATH=/zrasandboxvsdc \
+TPIN=your-tpin \
+BHF_ID=000 \
+DVC_SRL_NO=your-device-serial \
+node scripts/sandbox-smoke.js
+```
+
+Runs: initialize → codes → classifications → test item → `saveSales`; expects `resultCd === '000'` with `rcptNo` / QR.
+
+Keep `VSDC_MODE=mock` (default) for local dev and `validate-system.js` (26/26).
+
+---
+
+## 6. Local development (reference)
 
 ```bash
 # Full Docker stack

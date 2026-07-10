@@ -14,7 +14,8 @@ import {
 } from 'lucide-react';
 import { checkoutSale, submitToZRA, mapPaymentMethod } from '../api/cashierApi';
 import { fetchReceipt } from '../api/receiptsApi';
-import { ThermalRenderer } from '@smartpos/receipt-engine/react';
+import { routeReceiptPrint } from '../lib/printReceipt';
+import { ReceiptRenderer } from '@smartpos/receipt-engine/react';
 import { useAuth } from '../contexts/AuthContext';
 import { calculateCartTotals, formatZmw } from '../utils/cartTotals';
 
@@ -61,6 +62,7 @@ const CheckoutModal = ({
   const [saleId, setSaleId] = useState(null);
   const [receiptVm, setReceiptVm] = useState(null);
   const [receiptLoading, setReceiptLoading] = useState(false);
+  const [receiptFormat, setReceiptFormat] = useState('thermal');
 
   const detailRef = useRef(null);
 
@@ -154,7 +156,11 @@ const CheckoutModal = ({
     try {
       const vm = await fetchReceipt('sales', saleId, { reprint: true });
       setReceiptVm(vm);
-      setTimeout(() => window.print(), 100);
+      if (vm) {
+        await routeReceiptPrint(vm);
+      } else {
+        setTimeout(() => window.print(), 100);
+      }
     } catch (e) {
       console.error('Reprint failed:', e);
       window.print();
@@ -586,8 +592,34 @@ const CheckoutModal = ({
               )}
 
               {receiptVm && (
-                <div className="max-h-[50vh] overflow-y-auto border border-surface-border rounded bg-white">
-                  <ThermalRenderer viewModel={receiptVm} />
+                <div>
+                  <div className="flex justify-center gap-2 mb-2">
+                    <button
+                      type="button"
+                      onClick={() => setReceiptFormat('thermal')}
+                      className={`px-2 py-0.5 text-[10px] rounded border ${
+                        receiptFormat === 'thermal'
+                          ? 'bg-gray-900 text-white border-gray-900'
+                          : 'border-gray-300 text-gray-600'
+                      }`}
+                    >
+                      80mm
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setReceiptFormat('a4')}
+                      className={`px-2 py-0.5 text-[10px] rounded border ${
+                        receiptFormat === 'a4'
+                          ? 'bg-gray-900 text-white border-gray-900'
+                          : 'border-gray-300 text-gray-600'
+                      }`}
+                    >
+                      A4
+                    </button>
+                  </div>
+                  <div className="max-h-[50vh] overflow-y-auto border border-surface-border rounded bg-white">
+                    <ReceiptRenderer viewModel={receiptVm} format={receiptFormat} />
+                  </div>
                 </div>
               )}
 

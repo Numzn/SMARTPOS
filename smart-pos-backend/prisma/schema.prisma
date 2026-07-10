@@ -473,6 +473,55 @@ enum ReceiptSourceType {
   CREDIT_NOTE
 }
 
+enum PrinterType {
+  BROWSER
+  ESCPOS_NETWORK
+}
+
+model PrinterProfile {
+  id        String      @id @default(cuid())
+  name      String
+  type      PrinterType @default(BROWSER)
+  format    String      @default("thermal")
+  host      String?
+  port      Int         @default(9100)
+  isDefault Boolean     @default(false)
+  branchId  String?
+  lastTestAt     DateTime?
+  lastTestOk     Boolean?
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@map("printer_profiles")
+}
+
+model ZraCode {
+  id          String   @id @default(cuid())
+  codeClass   String
+  code        String
+  name        String
+  description String?
+  rate        Float?
+  raw         Json?
+  syncedAt    DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([codeClass, code])
+  @@map("zra_codes")
+}
+
+model ZraClassificationCode {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  level     Int?
+  raw       Json?
+  syncedAt  DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("zra_classification_codes")
+}
+
 enum Role {
   ADMIN
   MANAGER

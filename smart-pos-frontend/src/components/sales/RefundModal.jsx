@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { X, RotateCcw, Receipt } from 'lucide-react';
 import { fetchReceipt } from '../../api/receiptsApi';
+import { routeReceiptPrint } from '../../lib/printReceipt';
 import { fetchSaleRefunds, refundSale, REFUND_REASON_CODES } from '../../api/salesApi';
-import { ThermalRenderer } from '@smartpos/receipt-engine/react';
+import { ReceiptRenderer } from '@smartpos/receipt-engine/react';
 import { useAuth } from '../../contexts/AuthContext';
 
 function computeRemaining(sale, priorRefunds) {
@@ -33,6 +34,7 @@ const RefundModal = ({ sale, onClose, onSuccess }) => {
   const [result, setResult] = useState(null);
   const [receiptVm, setReceiptVm] = useState(null);
   const [receiptLoading, setReceiptLoading] = useState(false);
+  const [receiptFormat, setReceiptFormat] = useState('thermal');
 
   useEffect(() => {
     let cancelled = false;
@@ -126,7 +128,11 @@ const RefundModal = ({ sale, onClose, onSuccess }) => {
     try {
       const vm = await fetchReceipt('refunds', refundId, { reprint: true });
       setReceiptVm(vm);
-      setTimeout(() => window.print(), 100);
+      if (vm) {
+        await routeReceiptPrint(vm);
+      } else {
+        window.print();
+      }
     } catch (e) {
       console.error('Reprint failed:', e);
       window.print();
@@ -163,8 +169,34 @@ const RefundModal = ({ sale, onClose, onSuccess }) => {
                 <p className="text-sm text-gray-500">Loading credit note receipt…</p>
               )}
               {receiptVm && (
-                <div className="max-h-[50vh] overflow-y-auto border border-gray-200 rounded bg-white">
-                  <ThermalRenderer viewModel={receiptVm} />
+                <div>
+                  <div className="flex justify-center gap-2 mb-2">
+                    <button
+                      type="button"
+                      onClick={() => setReceiptFormat('thermal')}
+                      className={`px-2 py-0.5 text-xs rounded border ${
+                        receiptFormat === 'thermal'
+                          ? 'bg-gray-900 text-white border-gray-900'
+                          : 'border-gray-300 text-gray-600'
+                      }`}
+                    >
+                      80mm
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setReceiptFormat('a4')}
+                      className={`px-2 py-0.5 text-xs rounded border ${
+                        receiptFormat === 'a4'
+                          ? 'bg-gray-900 text-white border-gray-900'
+                          : 'border-gray-300 text-gray-600'
+                      }`}
+                    >
+                      A4
+                    </button>
+                  </div>
+                  <div className="max-h-[50vh] overflow-y-auto border border-gray-200 rounded bg-white">
+                    <ReceiptRenderer viewModel={receiptVm} format={receiptFormat} />
+                  </div>
                 </div>
               )}
             </div>

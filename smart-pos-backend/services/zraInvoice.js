@@ -1,6 +1,7 @@
 const vsdcService = require('./vsdcService')
 const auditService = require('./auditService')
 const prisma = require('../lib/prisma')
+const vsdcGateway = require('../lib/vsdc-gateway')
 const { getProductClassification } = require('../lib/productRegistration')
 const { allocateFiscalInvcNo, resolveOriginalInvcNo } = require('../lib/fiscalInvoiceNumber')
 
@@ -65,129 +66,58 @@ class ZRAInvoiceService {
         throw new Error('Invalid invoice data: Fiscal invoice number must be a positive integer')
       }
 
-      // Prepare VSDC compliant invoice data
-      const vsdcInvoiceData = {
-        tpin: vsdcService.tpin,
-        bhfId: vsdcService.bhfId,
-        invcNo: Math.floor(invcNo),
-        orgInvcNo: Number(invoiceData.originalInvoiceNumber) || 0,
-        custTpin: invoiceData.customerTpin || null,
-        custNm: invoiceData.customerName,
-        custBhfId: invoiceData.customerBranchId || '00',
-        salesTyCd: invoiceData.salesType || this.salesTypes.NORMAL,
-        rcptTyCd: invoiceData.receiptType || this.receiptTypes.SALE,
-        pmtTyCd: this.getPaymentType(invoiceData.paymentMethod),
-        salesSttsCd: invoiceData.salesStatus || this.salesStatus.APPROVED,
-        cfmDt: this.formatDateTime(invoiceData.confirmationDate || new Date()),
-        salesDt: this.formatDate(invoiceData.salesDate || new Date()),
-        stockRlsDt: invoiceData.stockReleaseDate ? this.formatDate(invoiceData.stockReleaseDate) : null,
-        cnclReqDt: invoiceData.cancellationRequestDate ? this.formatDate(invoiceData.cancellationRequestDate) : null,
-        cnclDt: invoiceData.cancellationDate ? this.formatDate(invoiceData.cancellationDate) : null,
-        rfdDt: invoiceData.refundDate ? this.formatDate(invoiceData.refundDate) : null,
-        rfdRsnCd: invoiceData.refundReasonCode || null,
-        totItemCnt: invoiceData.items.length,
-        totTaxblAmt: parseFloat(invoiceData.totalTaxableAmount),
-        totTaxAmt: parseFloat(invoiceData.totalTaxAmount),
-        totAmt: parseFloat(invoiceData.totalAmount),
-        prcOdr: invoiceData.priceOrder || null,
-        remark: invoiceData.remark || '',
-        regrId: invoiceData.registeredBy || 'SYSTEM',
-        regrNm: invoiceData.registeredByName || 'SYSTEM',
-        modrId: invoiceData.modifiedBy || 'SYSTEM',
-        modrNm: invoiceData.modifiedByName || 'SYSTEM',
-        
-        // Item list - VSDC compliant structure
-        itemList: invoiceData.items.map((item, index) => ({
-          itemSeq: index + 1,
-          itemCd: item.itemCode,
-          itemClsCd: item.itemClassification,
-          itemNm: item.itemName,
-          bcd: item.barcode || null,
-          pkgUnitCd: item.packageUnit || 'U',
-          pkg: parseInt(item.packageQuantity || 1),
-          qtyUnitCd: item.quantityUnit || 'U',
-          qty: parseFloat(item.quantity),
-          prc: parseFloat(item.unitPrice),
-          splyAmt: parseFloat(item.supplyAmount),
-          dcRt: parseFloat(item.discountRate || 0),
-          dcAmt: parseFloat(item.discountAmount || 0),
-          isrccCd: item.insuranceCode || null,
-          isrccNm: item.insuranceName || null,
-          isrcRt: parseFloat(item.insuranceRate || 0),
-          isrcAmt: parseFloat(item.insuranceAmount || 0),
-          taxTyCd: item.taxType,
-          taxblAmt: parseFloat(item.taxableAmount),
-          taxAmt: parseFloat(item.taxAmount),
-          totAmt: parseFloat(item.totalAmount)
-        }))
+      const gatewayResult = await vsdcGateway.submitInvoiceData({
+        ...invoiceData,
+        cisInvcNo: invoiceData.cisInvcNo || String(invoiceData.invoiceNumber),
+      })
+
+      if (!gatewayResult.success) {
+        throw new Error(gatewayResult.error || 'ZRA submission failed')
       }
 
-      // Submit to VSDC
-      const response = await vsdcService.makeAuthenticatedRequest(
-        'POST',
-        vsdcService.endpoints.invoiceSubmit,
-        vsdcInvoiceData
-      )
+      const invoiceResponse = gatewayResult.zraResponse
+      const vsdcInvoiceData = gatewayResult.payload
 
-      if (response.success && response.data.resultCd === '000') {
-        console.log(`✅ Invoice submitted to ZRA: ${invoiceData.invoiceNumber}`)
-        
-        // Save response data
-        const invoiceResponse = {
-          invcSdcId: response.data.invcSdcId,
-          invcNo: response.data.invcNo,
-          intrlData: response.data.intrlData,
-          rcptNo: response.data.rcptNo,
-          totRcptNo: response.data.totRcptNo,
-          vsdcRcptPbctDate: response.data.vsdcRcptPbctDate,
-          sdcId: response.data.sdcId,
-          mrcNo: response.data.mrcNo,
-          qrCode: response.data.qrCode
-        }
+      await this.updateLocalInvoice(invoiceData, invoiceResponse)
 
-        // Update local database
-        await this.updateLocalInvoice(invoiceData, invoiceResponse)
-        
-        // Log audit event
-        await auditService.logEvent(auditService.eventTypes.INVOICE_SUBMIT, {
-          entityType: 'INVOICE',
-          entityId: invoiceData.invoiceNumber,
-          action: 'ZRA_SUBMIT',
-          newValues: vsdcInvoiceData,
-          description: `Invoice submitted to ZRA: ${invoiceData.invoiceNumber}`,
-          metadata: {
-            invcSdcId: invoiceResponse.invcSdcId,
-            rcptNo: invoiceResponse.rcptNo,
-            qrCode: invoiceResponse.qrCode
-          }
-        })
+      await auditService.logEvent(auditService.eventTypes.INVOICE_SUBMIT, {
+        entityType: 'INVOICE',
+        entityId: invoiceData.invoiceNumber,
+        action: 'ZRA_SUBMIT',
+        newValues: vsdcInvoiceData,
+        description: `Invoice submitted to ZRA: ${invoiceData.invoiceNumber}`,
+        metadata: {
+          invcSdcId: invoiceResponse.invcSdcId,
+          rcptNo: invoiceResponse.rcptNo,
+          qrCode: invoiceResponse.qrCode,
+          vsdcMode: vsdcGateway.mode(),
+        },
+      })
 
-        return {
-          success: true,
-          invoiceNumber: invoiceData.invoiceNumber,
-          zraResponse: invoiceResponse,
-          message: 'Invoice successfully submitted to ZRA'
-        }
-      } else {
-        throw new Error(`ZRA invoice submission failed: ${response.data?.resultMsg || 'Unknown error'}`)
+      return {
+        success: true,
+        invoiceNumber: invoiceData.invoiceNumber,
+        zraResponse: invoiceResponse,
+        message: gatewayResult.message || 'Invoice successfully submitted to ZRA',
+        vsdcRequest: vsdcInvoiceData,
+        vsdcResponse: gatewayResult.raw,
       }
     } catch (error) {
       console.error('❌ ZRA invoice submission failed:', error.message)
-      
-      // Log failure
+
       await auditService.logEvent(auditService.eventTypes.INVOICE_SUBMIT, {
         entityType: 'INVOICE',
         entityId: invoiceData.invoiceNumber,
         action: 'ZRA_SUBMIT',
         success: false,
         errorMessage: error.message,
-        description: `Failed to submit invoice to ZRA: ${invoiceData.invoiceNumber}`
-      })
+        description: `Failed to submit invoice to ZRA: ${invoiceData.invoiceNumber}`,
+      }).catch(() => null)
 
       return {
         success: false,
         error: error.message,
-        code: 'ZRA_INVOICE_SUBMIT_FAILED'
+        code: 'ZRA_INVOICE_SUBMIT_FAILED',
       }
     }
   }

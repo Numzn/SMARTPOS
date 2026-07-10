@@ -27,6 +27,7 @@ const PERMISSIONS = {
     'sales:read', 'sales:write', 'sales:refund',
     'receipts:read',
     'reports:read',
+    'settings:read',
     'zra:submit', 'zra:sync', 'zra:read'
   ],
   CASHIER: [

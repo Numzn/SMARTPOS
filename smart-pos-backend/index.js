@@ -15,6 +15,7 @@ const itemRoutes = require('./routes/items'); // Add items route for VSDC Sectio
 const stockAdjustmentRoutes = require('./routes/stock-adjustments'); // ZRA stock management compliance
 const receiptRoutes = require('./routes/receipts');
 const settingsRoutes = require('./routes/settings');
+const printerRoutes = require('./routes/printers');
 
 dotenv.config();
 
@@ -37,6 +38,7 @@ app.use('/api/items', itemRoutes); // VSDC Item Management endpoints (Section 6.
 app.use('/api/stock-adjustments', stockAdjustmentRoutes); // ZRA stock management compliance
 app.use('/api/receipts', receiptRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/settings/printers', printerRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

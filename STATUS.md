@@ -1,150 +1,116 @@
 # SMARTPOS — Project Status
 
-**Last updated:** 2026-06-25  
-**Baseline commit:** `9915cb5` on `main`  
-**Release tag:** `v0.4.0-refunds-mock` (functional baseline; Phase 1 engineering commits are on `main` after that tag)
+**Last updated:** 2026-07-01  
+**Baseline:** Dual-track M3 (Receipt Platform) + M4 (VSDC Gateway) on `main`  
+**Release tags (suggested):** `v0.6.0-receipt-platform` (M3), `v0.7.0-vsdc-gateway` (M4 after sandbox smoke)
 
-**Positioning:** Mock-validated fiscal platform with known gaps for live ZRA.  
+**Positioning:** Mock-validated fiscal platform with receipt/print subsystem; VSDC gateway ready for sandbox UAT.  
 Do **not** claim "100% VSDC compliant" until live sandbox certification is complete.
 
 ---
 
-## Three-lens scorecard
+## Dual-track scorecard
 
-Use these lenses separately — do not mix them when reporting status.
-
-| Lens | Verdict | Evidence |
-|------|---------|----------|
-| **A — Mock E2E** | PASS | `validate-system.js` → **24/24** against mock VSDC |
-| **B — Engineering** | Strong | Phase 1 hardening: stock TOCTOU fix, fiscal reconciliation, gated `POST /api/sales`, branches API, `apiClient` consolidation |
-| **C — ZRA Live** | Not ready | Real sandbox URL untested; purchases §8 missing; dashboard/reports still mock UI |
+| Milestone | Lens | Verdict | Evidence |
+|-----------|------|---------|----------|
+| **M3 — Receipt & Printing** | UI + receipt VM + print | **Shippable (mock)** | `@smartpos/receipt-engine`, thermal/A4 renderers, Merchant Settings, Printer Management, ESC/POS proxy |
+| **M4 — ZRA Sandbox** | Official API paths + payloads | **Gateway ready; live UAT pending** | `lib/vsdc-gateway/`, mock dual paths, `sandbox-smoke.js` |
+| **Mock E2E** | Full POS fiscal flow | **PASS** | `validate-system.js` → **26/26** against mock VSDC |
+| **ZRA Live** | Sandbox certification | **Not ready** | Run `sandbox-smoke.js` with portal credentials |
 
 ```mermaid
 flowchart LR
-  subgraph lenses [Evaluation lenses]
-    A[Lens_A_Mock_E2E]
-    B[Lens_B_Engineering]
-    C[Lens_C_ZRA_Live]
+  subgraph m3 [M3_Receipt_Platform]
+    RE[ReceiptEngine]
+    PM[PrinterProfiles_ESC_POS]
+    MS[MerchantSettings]
   end
-  A -->|"validate-system 24/24"| passA[PASS]
-  B -->|"Phase_1_hardening"| strongB[Strong]
-  C -->|"sandbox_untested"| gapC[Not_ready]
+  subgraph m4 [M4_VSDC_Gateway]
+    GW[vsdc_gateway]
+    EA[endpointAdapter]
+    SM[sandbox_smoke]
+  end
+  Checkout --> RE
+  RE --> PM
+  saleFiscal --> GW --> EA
 ```
 
 ---
 
-## What's implemented
+## Milestone 3 — Receipt and Printing Platform
 
-### Fiscal checkout (primary POS path)
+| Deliverable | Status | Location |
+|-------------|--------|----------|
+| Receipt Engine package | Done | [`packages/receipt-engine/`](packages/receipt-engine/) |
+| ReceiptViewModel + thermal/A4 renderers | Done | `ThermalRenderer`, `A4Renderer`, `ReceiptRenderer` |
+| Merchant Settings (footer, logo URL, preview) | Done | [`SettingsPage.jsx`](smart-pos-frontend/src/pages/SettingsPage.jsx) |
+| Receipt API + immutable snapshots | Done | [`routes/receipts.js`](smart-pos-backend/routes/receipts.js) |
+| Checkout / Sales receipt UI | Done | [`CheckoutModal.jsx`](smart-pos-frontend/src/components/CheckoutModal.jsx), [`ReceiptViewModal.jsx`](smart-pos-frontend/src/components/receipt/ReceiptViewModal.jsx) |
+| ESC/POS byte builder | Done | [`buildEscPos.ts`](packages/receipt-engine/src/escpos/buildEscPos.ts) |
+| Printer profiles + API | Done | Prisma `PrinterProfile`, [`routes/printers.js`](smart-pos-backend/routes/printers.js) |
+| Printer Management UI | Done | [`PrintersPage.jsx`](smart-pos-frontend/src/pages/PrintersPage.jsx) |
+| StatusBar printer health | Done | [`CashierDashboard.jsx`](smart-pos-frontend/src/components/cashier/modern/CashierDashboard.jsx) polls `/api/settings/printers/status` |
 
-`POST /api/sales/checkout` via [`smart-pos-backend/lib/saleFiscal.js`](smart-pos-backend/lib/saleFiscal.js):
-
-1. Stock + product-registration gates
-2. Create `PENDING` sale
-3. Reserve stock (`reservedStock` + row locks in [`inventoryStock.js`](smart-pos-backend/lib/inventoryStock.js))
-4. Set status `FISCAL_SUBMITTING` → submit to VSDC
-5. On success: deduct stock, store `rcptNo` / `qrCode`
-6. On failure: release reservation, status `FISCAL_FAILED`
-
-Bare `POST /api/sales` creates a gated pending sale only (no VSDC). Prefer `/checkout`.
-
-### Refunds / credit notes
-
-[`smart-pos-backend/lib/saleRefund.js`](smart-pos-backend/lib/saleRefund.js) — partial refunds with prorated discount, stock restore, VSDC credit-note submission.
-
-### Fiscal reconciliation
-
-[`smart-pos-backend/lib/fiscalReconcile.js`](smart-pos-backend/lib/fiscalReconcile.js) — recovers sales/refunds stuck in `FISCAL_SUBMITTING`. Scheduler runs every 5 minutes from `index.js`.
-
-### Branches
-
-Prisma `Branch` model, migration `20260626120000_branches`, [`routes/branches.js`](smart-pos-backend/routes/branches.js), default branch via [`ensureDefaultBranch.js`](smart-pos-backend/lib/ensureDefaultBranch.js).
-
-### Sequential fiscal invoice numbers
-
-[`smart-pos-backend/lib/fiscalInvoiceNumber.js`](smart-pos-backend/lib/fiscalInvoiceNumber.js) — sequential `fiscalInvcNo` per branch.
-
-### Stock sync
-
-[`stockSyncService.js`](smart-pos-backend/services/stockSyncService.js) — bulk adjust and mark-expired paths call `syncAfterMovements()`.
-
-### Frontend API client
-
-Single `apiFetch` in [`smart-pos-frontend/src/lib/apiClient.js`](smart-pos-frontend/src/lib/apiClient.js); axios removed.
-
-### Auth & permissions
-
-JWT login, role-based permissions on `GET /users/profile`, permission guards on routes.
-
-### Receipt Engine (v1)
-
-`@smartpos/receipt-engine` workspace package — shared `ReceiptViewModel`, 80mm thermal renderer, immutable snapshots.
-
-- `GET /api/receipts/sales/:id` and `GET /api/receipts/refunds/:id`
-- `BusinessProfile` for merchant footer and trading name
-- Snapshots on fiscal completion; `?reprint=true` audits reprints
-- Checkout and refund modals render thermal receipts
-
-### Stack
-
-PostgreSQL (not SQLite), Express + Prisma backend, React frontend, mock VSDC on port 8090.
+**M3 exit:** Complete sale → on-screen receipt + browser or ESC/POS print; reprint audit; **no** changes to official `saveSales` in mock E2E.
 
 ---
 
-## Known gaps (Phase 2+)
+## Milestone 4 — ZRA Sandbox Readiness
 
-| Gap | Notes |
-|-----|-------|
-| Live ZRA sandbox | `VSDC_URL` points at mock; no certification run |
-| Purchases §8 | `routes/purchases.js` not implemented |
-| Reports / dashboard | `ReportsPage.jsx` uses hardcoded mock data |
-| Mandatory codes cache | Offline codes store not complete |
-| Debit notes | Not implemented |
-| B2B TPIN on sales | Optional `customerTpin` on checkout; walk-in hides TPIN on receipt |
-| Cancel / void flows | Limited |
-| 5-year audit retention | Policy not enforced |
+| Deliverable | Status | Location |
+|-------------|--------|----------|
+| VSDC Gateway layer | Done | [`lib/vsdc-gateway/`](smart-pos-backend/lib/vsdc-gateway/) |
+| Endpoint adapter (`VSDC_MODE=mock\|official`) | Done | `endpointAdapter.js` |
+| PDF-aligned `saveSales` builder + validator | Done | `payloadBuilders/saveSales.js`, `validators/saveSales.js` |
+| `zraInvoice` → gateway facade | Done | [`zraInvoice.js`](smart-pos-backend/services/zraInvoice.js) |
+| Codes sync (`/code/selectCodes`, `/itemClass/selectItemsClass`) | Done | `codesSync.js`, Prisma `ZraCode` / `ZraClassificationCode` |
+| Mock dual paths | Done | [`mock-vsdc-server.js`](smart-pos-backend/mock-vsdc-server.js) |
+| Admin codes sync | Done | `POST /api/vsdc/codes/sync` |
+| Sandbox smoke script | Done | [`scripts/sandbox-smoke.js`](smart-pos-backend/scripts/sandbox-smoke.js) |
 
-See [zra-compliance-checklist.md](smart-pos-backend/docs/zra-compliance-checklist.md) for requirement-level detail.
+**Explicitly deferred (post-M4):** Imports, commercial/provisional invoices, purchases §5.11.
+
+---
+
+## What's implemented (core)
+
+### Fiscal checkout
+
+`POST /api/sales/checkout` via [`saleFiscal.js`](smart-pos-backend/lib/saleFiscal.js): stock gates → reserve → VSDC submit via gateway → deduct stock → receipt snapshot.
+
+### Refunds / credit notes
+
+[`saleRefund.js`](smart-pos-backend/lib/saleRefund.js) — partial refunds, stock restore, gateway credit-note shape.
+
+### Stack
+
+PostgreSQL, Express + Prisma, React frontend, mock VSDC on port 8090.
 
 ---
 
 ## How to validate
 
-With containers running:
-
 ```bash
-# Local dev
 docker compose ps
-
-# Numzlab
-./scripts/compose-numzlab.sh ps
-
-# End-to-end (26 checks)
-docker exec smart-pos-backend node scripts/validate-system.js
+docker exec smart-pos-backend node scripts/validate-system.js   # expect 26/26 PASS (mock)
 ```
 
-Expected: **26/26 PASS** against mock VSDC.
-
-Health checks:
+Sandbox UAT (official credentials, not in repo):
 
 ```bash
-curl -s http://localhost:4000/api/health
-curl -s http://localhost:8090/health
+VSDC_MODE=official VSDC_URL=... TPIN=... BHF_ID=... node smart-pos-backend/scripts/sandbox-smoke.js
 ```
+
+See [DEPLOY.md](DEPLOY.md) § Sandbox UAT.
 
 ---
 
-## Roadmap
+## Roadmap (post dual-track)
 
-### Phase 2 (next)
-
-1. ZRA sandbox URL + first live test
-2. Purchases §8 (`routes/purchases.js`)
-3. Dashboard/reports wired to real APIs
-
-### Phase 3 (later)
-
-Debit notes, B2B TPIN, cancel/void, mandatory codes cache, 5-year audit, certification sign-off.
+1. Live sandbox certification (`sandbox-smoke.js` green on ZRA UAT)
+2. Item registration alignment (`/items/saveItem` hardening)
+3. Purchases §8, imports, commercial/provisional invoices
+4. Dashboard/reports wired to real APIs
 
 ---
 
@@ -153,20 +119,7 @@ Debit notes, B2B TPIN, cancel/void, mandatory codes cache, 5-year audit, certifi
 | Doc | Purpose |
 |-----|---------|
 | [README.md](README.md) | Numzlab deploy quick reference |
-| [DEPLOY.md](DEPLOY.md) | Full deployment guide |
+| [DEPLOY.md](DEPLOY.md) | Full deployment + sandbox prerequisites |
 | [DEV_GUIDE.md](DEV_GUIDE.md) | Local development workflow |
 | [ARCHITECTURE.md](smart-pos-backend/docs/ARCHITECTURE.md) | Backend flows and layering |
-| [DATABASE.md](smart-pos-backend/docs/DATABASE.md) | Postgres setup and migrations |
-| [zra-compliance-checklist.md](smart-pos-backend/docs/zra-compliance-checklist.md) | VSDC requirement checklist |
-| [implementation-summary.md](smart-pos-backend/docs/implementation-summary.md) | Module map (canonical code locations) |
-
----
-
-## Default login (seed users)
-
-| Email | Password | Role |
-|-------|----------|------|
-| admin@smartpos.com | admin123 | ADMIN |
-| cashier@smartpos.com | cashier123 | CASHIER |
-
-Change passwords after first deploy. See [DEPLOY.md](DEPLOY.md) for full credentials context.
+| [zra-compliance-checklist.md](smart-pos-backend/docs/zra-compliance-checklist.md) | Requirement-level ZRA status |
