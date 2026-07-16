@@ -92,6 +92,25 @@ app.listen(PORT, HOST, () => {
     console.log(`🔄 Fiscal reconciliation scheduled every ${intervalMs / 1000}s`);
   }
 
+  if (process.env.STOCK_RECONCILE_ENABLED !== 'false') {
+    const { reconcileReservedStock } = require('./lib/inventoryStock');
+    const intervalMs = parseInt(process.env.STOCK_RECONCILE_INTERVAL_MS || '300000', 10);
+    const runStockReconcile = () => {
+      reconcileReservedStock()
+        .then(({ corrected, orphansCleared }) => {
+          if (corrected || orphansCleared) {
+            console.log(`🔧 Stock reservation reconcile: corrected ${corrected}, cleared ${orphansCleared} orphaned reservation(s)`);
+          }
+        })
+        .catch((err) => {
+          console.error('[Stock Reconcile] Scheduled run failed:', err.message);
+        });
+    };
+    setTimeout(runStockReconcile, 45_000);
+    setInterval(runStockReconcile, intervalMs);
+    console.log(`🔧 Reserved-stock reconciliation scheduled every ${intervalMs / 1000}s`);
+  }
+
   auditService.safeLog(auditService.eventTypes.SYSTEM_START, {
     description: `Smart POS backend started on ${HOST}:${PORT}`,
   });

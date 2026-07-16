@@ -324,6 +324,57 @@ async function restoreStockForRefund(
   return updated;
 }
 
+/**
+ * Recompute reservedStock from actual reservation-holding sales (PENDING,
+ * FISCAL_SUBMITTING) and correct any drift.
+ *
+ * reservedStock is normally kept in lockstep by reserveStockForSale /
+ * deductStockForSale / releaseStockReservationForSale, but has no built-in
+ * floor: if a reservation-holding sale is ever removed or lost outside that
+ * lifecycle (crash between reserve and status update, manual data cleanup,
+ * orphaned test data), its reservation leaks permanently — reservedStock
+ * keeps counting stock as unavailable for a sale that no longer exists,
+ * silently diverging checkout availability from the displayed catalog stock.
+ * This is a self-healing correction, not a lifecycle step; safe to run
+ * repeatedly (idempotent) and safe to run standalone (only rewrites drifted
+ * rows).
+ */
+async function reconcileReservedStock(prismaClient = prisma) {
+  const corrected = await prismaClient.$queryRaw`
+    UPDATE inventory i
+    SET "reservedStock" = COALESCE(agg.total, 0)
+    FROM (
+      SELECT si."productId" AS "productId", s."branchId" AS "branchId", SUM(si.quantity)::int AS total
+      FROM sale_items si
+      JOIN sales s ON s.id = si."saleId"
+      WHERE s.status IN ('PENDING', 'FISCAL_SUBMITTING')
+      GROUP BY si."productId", s."branchId"
+    ) agg
+    WHERE i."productId" = agg."productId" AND i."branchId" = agg."branchId"
+      AND i."reservedStock" IS DISTINCT FROM agg.total
+    RETURNING i."productId", i."branchId"
+  `;
+
+  const orphansCleared = await prismaClient.$queryRaw`
+    UPDATE inventory i
+    SET "reservedStock" = 0
+    WHERE i."reservedStock" > 0
+      AND NOT EXISTS (
+        SELECT 1 FROM sale_items si
+        JOIN sales s ON s.id = si."saleId"
+        WHERE si."productId" = i."productId"
+          AND s."branchId" = i."branchId"
+          AND s.status IN ('PENDING', 'FISCAL_SUBMITTING')
+      )
+    RETURNING i."productId", i."branchId"
+  `;
+
+  return {
+    corrected: corrected.length,
+    orphansCleared: orphansCleared.length,
+  };
+}
+
 module.exports = {
   DEFAULT_BRANCH,
   availableUnits,
@@ -335,4 +386,5 @@ module.exports = {
   releaseStockReservationForSale,
   deductStockForSale,
   restoreStockForRefund,
+  reconcileReservedStock,
 };
