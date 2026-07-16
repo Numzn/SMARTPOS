@@ -26,6 +26,6 @@ services:
 
   mock-vsdc:
     build:
-      context: ./smart-pos-backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: smart-pos-backend/Dockerfile
       pull: false
