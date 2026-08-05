@@ -194,18 +194,67 @@ async function createPendingRefund(originalSaleId, body) {
   });
 }
 
-async function restoreStockForRefundRecord(refund, branchId = DEFAULT_BRANCH) {
-  await prisma.$transaction(async (tx) => {
-    for (const item of refund.refundItems) {
-      await restoreStockForRefund(tx, {
-        productId: item.productId,
-        quantity: item.quantity,
-        branchId,
-        userId: refund.userId,
-        refundId: refund.id,
-      });
+/**
+ * Complete a refund after confirmed VSDC credit-note success (used by checkout-time
+ * finalization and reconciliation). The status flip to COMPLETED (an irreversible,
+ * fiscally-signed credit note) and the stock restore it implies run in one
+ * transaction — see the equivalent note on saleFiscal.completeSaleAfterFiscalSuccess.
+ */
+async function completeRefundAfterFiscalSuccess(refundId, zra, fiscalPayload = {}, branchId = DEFAULT_BRANCH) {
+  const refund = await prisma.$transaction(async (tx) => {
+    const updated = await tx.refund.update({
+      where: { id: refundId },
+      data: {
+        status: 'COMPLETED',
+        rcptNo: zra.rcptNo,
+        rcptSign: zra.intrlData || zra.rcptSign,
+        qrCode: zra.qrCode,
+        vsdcTimestamp: new Date(),
+        vsdcRequest: fiscalPayload.vsdcRequest ?? undefined,
+        vsdcResponse: fiscalPayload.vsdcResponse ?? undefined,
+        fiscalError: null,
+      },
+      include: refundInclude,
+    });
+
+    const existingMovement = await tx.stockMovement.findFirst({
+      where: {
+        referenceType: 'REFUND',
+        referenceId: updated.id,
+        movementType: 'RETURN_IN',
+      },
+    });
+
+    if (!existingMovement) {
+      for (const item of updated.refundItems) {
+        await restoreStockForRefund(tx, {
+          productId: item.productId,
+          quantity: item.quantity,
+          branchId,
+          userId: updated.userId,
+          refundId: updated.id,
+        });
+      }
     }
+
+    return updated;
   });
+
+  const stockSyncService = require('../services/stockSyncService');
+  stockSyncService.syncRecentMovements({ referenceId: refund.id, branchId }).catch((err) => {
+    console.warn('[saleRefund] post-refund stock sync failed:', err.message);
+  });
+
+  await markSaleRefundedIfFully(refund.originalSaleId);
+
+  try {
+    const { createSnapshotFromSource } = require('./receipt/snapshot');
+    await createSnapshotFromSource('CREDIT_NOTE', refundId);
+  } catch (snapErr) {
+    console.warn('[saleRefund] receipt snapshot failed:', snapErr.message);
+  }
+
+  return refund;
 }
 
 async function markSaleRefundedIfFully(originalSaleId) {
@@ -292,36 +341,12 @@ async function finalizeRefundFiscally(refundId, { branchId = DEFAULT_BRANCH } = 
   }
 
   const zra = fiscalResult.zraResponse;
-  refund = await prisma.refund.update({
-    where: { id: refundId },
-    data: {
-      status: 'COMPLETED',
-      rcptNo: zra.rcptNo,
-      rcptSign: zra.intrlData || zra.rcptSign,
-      qrCode: zra.qrCode,
-      vsdcTimestamp: new Date(),
-      vsdcRequest: fiscalResult.vsdcRequest ?? undefined,
-      vsdcResponse: fiscalResult.vsdcResponse ?? undefined,
-      fiscalError: null,
-    },
-    include: refundInclude,
-  });
-
-  await restoreStockForRefundRecord(refund, branchId);
-
-  const stockSyncService = require('../services/stockSyncService');
-  stockSyncService.syncRecentMovements({ referenceId: refund.id, branchId }).catch((err) => {
-    console.warn('[saleRefund] post-refund stock sync failed:', err.message);
-  });
-
-  await markSaleRefundedIfFully(refund.originalSaleId);
-
-  try {
-    const { createSnapshotFromSource } = require('./receipt/snapshot');
-    await createSnapshotFromSource('CREDIT_NOTE', refundId);
-  } catch (snapErr) {
-    console.warn('[saleRefund] receipt snapshot failed:', snapErr.message);
-  }
+  refund = await completeRefundAfterFiscalSuccess(
+    refundId,
+    zra,
+    { vsdcRequest: fiscalResult.vsdcRequest, vsdcResponse: fiscalResult.vsdcResponse },
+    branchId
+  );
 
   return {
     success: true,
@@ -349,5 +374,5 @@ module.exports = {
   createPendingRefund,
   finalizeRefundFiscally,
   refundSale,
-  restoreStockForRefundRecord,
+  completeRefundAfterFiscalSuccess,
 };

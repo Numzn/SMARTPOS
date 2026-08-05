@@ -22,6 +22,9 @@ const auditService = require('./services/auditService');
 
 dotenv.config();
 
+const { assertRequiredEnv } = require('./lib/validateEnv');
+assertRequiredEnv();
+
 const app = express();
 
 // Middleware

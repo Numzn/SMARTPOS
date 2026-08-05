@@ -31,6 +31,11 @@ function cmd(...bytes: number[]): Uint8Array {
   return Uint8Array.from(bytes);
 }
 
+/** ESC p — pulse the cash drawer solenoid (pin 2, ~100ms on / ~1s off). */
+function cashDrawerKick(): Uint8Array {
+  return cmd(ESC, 0x70, 0x00, 0x19, 0xfa);
+}
+
 function line(text: string, enc: { encode(s: string): Uint8Array }): Uint8Array {
   return concat(enc.encode(text), cmd(LF));
 }
@@ -43,6 +48,35 @@ function center(text: string, enc: { encode(s: string): Uint8Array }): Uint8Arra
   return concat(cmd(ESC, 0x61, 1), line(text, enc), cmd(ESC, 0x61, 0));
 }
 
+/**
+ * ESC/POS 2D symbol ("GS ( k") commands to print a QR code on the printer
+ * itself — the printer's firmware does the QR encoding from raw data, no
+ * bitmap rasterization needed. This is the same data the screen/A4 renderer
+ * encodes into a QRCodeSVG (vm.fiscal.qrPayload), so the printed and
+ * on-screen receipts carry an identical, independently-scannable QR code —
+ * previously this path only printed "Scan QR on screen to verify" text,
+ * meaning a receipt from a real network thermal printer had no fiscal QR at all.
+ */
+function qrCode(
+  data: string,
+  enc: { encode(s: string): Uint8Array },
+  moduleSize = 6,
+  errorCorrection: 'L' | 'M' | 'Q' | 'H' = 'M'
+): Uint8Array {
+  const bytes = enc.encode(data);
+  const storeLen = bytes.length + 3; // "m" byte + data
+  const ecLevel = { L: 48, M: 49, Q: 50, H: 51 }[errorCorrection];
+
+  return concat(
+    cmd(GS, 0x28, 0x6b, 0x04, 0x00, 0x31, 0x41, 0x32, 0x00), // select model 2
+    cmd(GS, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x43, moduleSize), // module size
+    cmd(GS, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x45, ecLevel), // error correction level
+    cmd(GS, 0x28, 0x6b, storeLen & 0xff, (storeLen >> 8) & 0xff, 0x31, 0x50, 0x30), // store data
+    bytes,
+    cmd(GS, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x51, 0x30) // print stored symbol
+  );
+}
+
 /** Build ESC/POS command buffer for 80mm thermal printers from ReceiptViewModel. */
 export function buildEscPosCommands(viewModel: ReceiptViewModel): Uint8Array {
   const vm = viewModel;
@@ -50,6 +84,10 @@ export function buildEscPosCommands(viewModel: ReceiptViewModel): Uint8Array {
   const parts: Uint8Array[] = [];
 
   parts.push(cmd(ESC, 0x40)); // init
+
+  if (vm.payment.method.toUpperCase() === 'CASH') {
+    parts.push(cashDrawerKick());
+  }
 
   const copy = copyLabel(vm);
   if (copy) {
@@ -111,7 +149,8 @@ export function buildEscPosCommands(viewModel: ReceiptViewModel): Uint8Array {
     parts.push(line(`Signature: ${vm.fiscal.receiptSignature}`, enc));
   }
   if (vm.fiscal.qrPayload) {
-    parts.push(line('Scan QR on screen to verify', enc));
+    parts.push(center('Scan to verify on ZRA Smart Invoice', enc));
+    parts.push(qrCode(vm.fiscal.qrPayload, enc));
   }
 
   parts.push(divider('-'));

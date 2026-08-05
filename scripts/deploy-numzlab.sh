@@ -60,8 +60,17 @@ fi
 
 if [ ! -f .env ]; then
   if [ -f .env.docker.example ]; then
-    echo "[deploy] creating .env from .env.docker.example — edit secrets before production use!"
+    echo "[deploy] creating .env from .env.docker.example..."
     cp .env.docker.example .env
+    if command -v openssl >/dev/null 2>&1; then
+      generated_jwt_secret="$(openssl rand -hex 32)"
+      sed -i.bak "s/^JWT_SECRET=.*/JWT_SECRET=${generated_jwt_secret}/" .env
+      rm -f .env.bak
+      echo "[deploy] generated a random JWT_SECRET in .env"
+    else
+      echo "[deploy] WARNING: openssl not found — JWT_SECRET in .env is still the placeholder."
+      echo "[deploy] The backend will refuse to start until you set a real value (32+ chars)."
+    fi
   else
     echo "ERROR: no .env file. Copy .env.docker.example to .env and configure it."
     exit 1

@@ -45,11 +45,18 @@ jobs:
           DATABASE_URL: postgresql://smartpos:ci_test_password@localhost:5432/smartpos
         run: npx prisma migrate deploy
 
+      - name: Run backend tests (unit + integration)
+        working-directory: smart-pos-backend
+        env:
+          DATABASE_URL: postgresql://smartpos:ci_test_password@localhost:5432/smartpos
+          JWT_SECRET: ci-test-secret-do-not-use-in-production-1234
+        run: npm test
+
       - name: Validate backend build scripts
         working-directory: smart-pos-backend
         env:
           DATABASE_URL: postgresql://smartpos:ci_test_password@localhost:5432/smartpos
-          JWT_SECRET: ci-test-secret
+          JWT_SECRET: ci-test-secret-do-not-use-in-production-1234
         run: npm run build:validate
 
       - name: Build frontend
@@ -59,7 +66,7 @@ jobs:
         run: npm run build
 
       - name: Docker build (backend)
-        run: docker build -t smartpos-backend:ci ./smart-pos-backend
+        run: docker build -t smartpos-backend:ci -f smart-pos-backend/Dockerfile .
 
       - name: Docker build (frontend)
-        run: docker build -t smartpos-frontend:ci --build-arg VITE_API_URL=/api ./smart-pos-frontend
+        run: docker build -t smartpos-frontend:ci -f smart-pos-frontend/Dockerfile --build-arg VITE_API_URL=/api .

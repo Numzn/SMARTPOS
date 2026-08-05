@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const prisma = require('../lib/prisma');
 const { authenticateToken, requireRole, requirePermission, sessionManager, PERMISSIONS } = require('../middleware/auth');
+const { loginLimiter } = require('../middleware/rateLimit');
 const auditService = require('../services/auditService');
 
 // Fire-and-forget audit logging — must never block or fail the request path.
@@ -120,51 +121,42 @@ router.post('/register', authenticateToken, requireRole('ADMIN'), async (req, re
 });
 
 // Enhanced login with session management
-router.post('/login', async (req, res) => {
+router.post('/login', loginLimiter, async (req, res) => {
   try {
     const { email, password, rememberMe = false } = req.body;
-    
-    console.log('🔐 Login attempt:', { email, hasPassword: !!password });
-    
+
     // Validate input
     if (!email || !password) {
-      console.log('❌ Missing credentials');
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: 'Email and password are required',
         code: 'MISSING_CREDENTIALS'
       });
     }
-    
+
     // Find user
     const user = await prisma.user.findUnique({
       where: { email }
     });
-    
-    console.log('👤 User found:', !!user);
-    
+
     if (!user) {
-      console.log('❌ User not found for email:', email);
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: 'Invalid email or password',
         code: 'INVALID_CREDENTIALS'
       });
     }
-    
+
     // Check if user is active
     if (!user.isActive) {
-      console.log('❌ User account deactivated');
-      return res.status(403).json({ 
+      return res.status(403).json({
         error: 'Account is deactivated',
         code: 'ACCOUNT_DEACTIVATED'
       });
     }
-    
+
     // Check password
     const isMatch = await bcrypt.compare(password, user.password);
-    console.log('🔑 Password match:', isMatch);
-    
+
     if (!isMatch) {
-      console.log('❌ Password mismatch');
       safeAuditAuth(user.id, false, {
         ipAddress: req.ip,
         userAgent: req.headers['user-agent'],

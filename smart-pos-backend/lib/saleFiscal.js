@@ -38,6 +38,21 @@ function parseSalePayload(body) {
     throw err;
   }
 
+  for (const item of items) {
+    const qty = Number(item.quantity);
+    const price = Number(item.price);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      const err = new Error(`Invalid quantity for product ${item.productId}`);
+      err.status = 400;
+      throw err;
+    }
+    if (!Number.isFinite(price) || price < 0) {
+      const err = new Error(`Invalid price for product ${item.productId}`);
+      err.status = 400;
+      throw err;
+    }
+  }
+
   const subtotal = items.reduce((sum, item) => sum + item.quantity * item.price, 0);
   const taxAmount = tax || 0;
   const discountAmount = discount || 0;
@@ -146,20 +161,6 @@ async function reserveStockForSaleRecord(sale, branchId = DEFAULT_BRANCH) {
   });
 }
 
-async function deductStockForSaleRecord(sale, branchId = DEFAULT_BRANCH) {
-  await prisma.$transaction(async (tx) => {
-    for (const item of sale.saleItems) {
-      await deductStockForSale(tx, {
-        productId: item.productId,
-        quantity: item.quantity,
-        branchId,
-        userId: sale.userId,
-        saleId: sale.id,
-      });
-    }
-  });
-}
-
 function extractZraFromVsdcPayload(payload) {
   if (!payload || typeof payload !== 'object') return null;
   const data = payload.data && typeof payload.data === 'object' ? payload.data : payload;
@@ -174,34 +175,52 @@ function extractZraFromVsdcPayload(payload) {
 
 /**
  * Complete sale after confirmed VSDC success (used by checkout and reconciliation).
+ *
+ * The status flip to COMPLETED (an irreversible, fiscally-signed receipt) and the
+ * stock deduction it implies MUST commit or fail together — otherwise a crash
+ * between the two leaves a fiscally completed sale with stock never deducted,
+ * and no reconciliation path scans COMPLETED sales for that drift. Both writes
+ * therefore run against the same `tx`, inside one transaction.
  */
 async function completeSaleAfterFiscalSuccess(saleId, zra, fiscalPayload = {}, branchId = DEFAULT_BRANCH) {
-  let sale = await prisma.sale.update({
-    where: { id: saleId },
-    data: {
-      status: 'COMPLETED',
-      rcptNo: zra.rcptNo,
-      rcptSign: zra.intrlData || zra.rcptSign,
-      qrCode: zra.qrCode,
-      vsdcTimestamp: new Date(),
-      vsdcRequest: fiscalPayload.vsdcRequest ?? undefined,
-      vsdcResponse: fiscalPayload.vsdcResponse ?? undefined,
-      fiscalError: null,
-    },
-    include: saleInclude,
-  });
+  const sale = await prisma.$transaction(async (tx) => {
+    const updated = await tx.sale.update({
+      where: { id: saleId },
+      data: {
+        status: 'COMPLETED',
+        rcptNo: zra.rcptNo,
+        rcptSign: zra.intrlData || zra.rcptSign,
+        qrCode: zra.qrCode,
+        vsdcTimestamp: new Date(),
+        vsdcRequest: fiscalPayload.vsdcRequest ?? undefined,
+        vsdcResponse: fiscalPayload.vsdcResponse ?? undefined,
+        fiscalError: null,
+      },
+      include: saleInclude,
+    });
 
-  const existingMovement = await prisma.stockMovement.findFirst({
-    where: {
-      referenceType: 'SALE',
-      referenceId: sale.id,
-      movementType: 'SALE_OUT',
-    },
-  });
+    const existingMovement = await tx.stockMovement.findFirst({
+      where: {
+        referenceType: 'SALE',
+        referenceId: updated.id,
+        movementType: 'SALE_OUT',
+      },
+    });
 
-  if (!existingMovement) {
-    await deductStockForSaleRecord(sale, branchId);
-  }
+    if (!existingMovement) {
+      for (const item of updated.saleItems) {
+        await deductStockForSale(tx, {
+          productId: item.productId,
+          quantity: item.quantity,
+          branchId,
+          userId: updated.userId,
+          saleId: updated.id,
+        });
+      }
+    }
+
+    return updated;
+  });
 
   const stockSyncService = require('../services/stockSyncService');
   stockSyncService.syncAfterSale(sale.id, branchId);
@@ -389,5 +408,4 @@ module.exports = {
   saleInclude,
   reserveStockForSaleRecord,
   releaseStockReservationForSale,
-  deductStockForSaleRecord,
 };

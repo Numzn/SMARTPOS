@@ -6,7 +6,11 @@
     "start": "node index.js",
     "dev": "nodemon index.js",
     "dev:stack": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-dev.ps1",
-    "test": "node test-connection.js",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:watch": "vitest",
+    "test:db-connection": "node test-connection.js",
     "test-sale": "node create-test-sale.js",
     "mock-vsdc": "node mock-vsdc-server.js",
     "check-db": "node check-database.js",
@@ -35,19 +39,22 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@smartpos/receipt-engine": "1.0.0",
     "@prisma/client": "^6.11.1",
+    "@smartpos/receipt-engine": "1.0.0",
     "axios": "^1.10.0",
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
     "dotenv": "^17.1.0",
     "express": "^5.1.0",
+    "express-rate-limit": "^7.5.1",
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.16.3",
     "prisma": "^6.11.1"
   },
   "devDependencies": {
-    "nodemon": "^3.1.10"
+    "nodemon": "^3.1.10",
+    "supertest": "^7.2.2",
+    "vitest": "^2.1.9"
   },
   "prisma": {
     "seed": "node prisma/seed.js"

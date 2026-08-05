@@ -108,14 +108,8 @@ router.get('/:id', optionalAuth, async (req, res) => {
 // Create new product
 // Create new product (requires products:write permission)
 router.post('/', authenticateToken, requirePermission('products:write'), async (req, res) => {
-  console.log('🚀 POST /products route hit!');
-  console.log('🔐 User:', req.user);
-  console.log('🛍️ Request body:', JSON.stringify(req.body, null, 2));
-  
   try {
-    console.log('🛍️ Creating product with data:', JSON.stringify(req.body, null, 2));
-    
-    const { 
+    const {
       name, 
       description, 
       price, 

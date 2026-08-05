@@ -9,9 +9,10 @@ const {
   extractZraFromVsdcPayload,
   saleInclude,
   releaseStockReservationForSale,
+  finalizeSaleFiscally,
 } = require('./saleFiscal');
 const { DEFAULT_BRANCH } = require('./inventoryStock');
-const { refundInclude, restoreStockForRefundRecord } = require('./saleRefund');
+const { refundInclude, completeRefundAfterFiscalSuccess } = require('./saleRefund');
 
 const DEFAULT_WINDOW_MINUTES = 10;
 const DEFAULT_BATCH_SIZE = 50;
@@ -86,56 +87,28 @@ async function reconcileStuckSale(sale, { branchId = DEFAULT_BRANCH } = {}) {
 
 async function reconcileStuckRefund(refund, { branchId = DEFAULT_BRANCH } = {}) {
   if (refund.rcptNo) {
-    const updated = await prisma.refund.update({
-      where: { id: refund.id },
-      data: { status: 'COMPLETED', fiscalError: null },
-      include: refundInclude,
-    });
-
-    const existingMovement = await prisma.stockMovement.findFirst({
-      where: {
-        referenceType: 'REFUND',
-        referenceId: refund.id,
-        movementType: 'RETURN_IN',
+    await completeRefundAfterFiscalSuccess(
+      refund.id,
+      {
+        rcptNo: refund.rcptNo,
+        qrCode: refund.qrCode,
+        rcptSign: refund.rcptSign,
+        intrlData: refund.rcptSign,
       },
-    });
-
-    if (!existingMovement) {
-      await restoreStockForRefundRecord(updated, branchId);
-    }
-
+      { vsdcRequest: refund.vsdcRequest, vsdcResponse: refund.vsdcResponse },
+      branchId
+    );
     return { refundId: refund.id, action: 'completed_existing_rcpt' };
   }
 
   const fromResponse = extractZraFromVsdcPayload(refund.vsdcResponse);
   if (fromResponse?.rcptNo) {
-    const zra = fromResponse;
-    const updated = await prisma.refund.update({
-      where: { id: refund.id },
-      data: {
-        status: 'COMPLETED',
-        rcptNo: zra.rcptNo,
-        rcptSign: zra.intrlData || zra.rcptSign,
-        qrCode: zra.qrCode,
-        vsdcTimestamp: new Date(),
-        fiscalError: null,
-      },
-      include: refundInclude,
-    });
-
-    const existingMovement = await prisma.stockMovement.findFirst({
-      where: {
-        referenceType: 'REFUND',
-        referenceId: refund.id,
-        movementType: 'RETURN_IN',
-      },
-    });
-
-    if (!existingMovement) {
-      const { restoreStockForRefundRecord } = require('./saleRefund');
-      await restoreStockForRefundRecord(updated, branchId);
-    }
-
+    await completeRefundAfterFiscalSuccess(
+      refund.id,
+      fromResponse,
+      { vsdcResponse: refund.vsdcResponse },
+      branchId
+    );
     return { refundId: refund.id, action: 'completed_from_vsdcResponse' };
   }
 
@@ -144,32 +117,12 @@ async function reconcileStuckRefund(refund, { branchId = DEFAULT_BRANCH } = {}) 
     if (lookup.success) {
       const zra = extractZraFromVsdcPayload(lookup.data);
       if (zra?.rcptNo) {
-        const updated = await prisma.refund.update({
-          where: { id: refund.id },
-          data: {
-            status: 'COMPLETED',
-            rcptNo: zra.rcptNo,
-            rcptSign: zra.intrlData || zra.rcptSign,
-            qrCode: zra.qrCode,
-            vsdcTimestamp: new Date(),
-            vsdcResponse: lookup.data,
-            fiscalError: null,
-          },
-          include: refundInclude,
-        });
-
-        const existingMovement = await prisma.stockMovement.findFirst({
-          where: {
-            referenceType: 'REFUND',
-            referenceId: refund.id,
-            movementType: 'RETURN_IN',
-          },
-        });
-
-        if (!existingMovement) {
-          await restoreStockForRefundRecord(updated, branchId);
-        }
-
+        await completeRefundAfterFiscalSuccess(
+          refund.id,
+          zra,
+          { vsdcResponse: lookup.data },
+          branchId
+        );
         return { refundId: refund.id, action: 'completed_from_vsdcLookup' };
       }
     }
@@ -184,6 +137,38 @@ async function reconcileStuckRefund(refund, { branchId = DEFAULT_BRANCH } = {}) 
   });
 
   return { refundId: refund.id, action: 'marked_failed' };
+}
+
+/**
+ * Recover a sale stuck in PENDING past the reconciliation window — i.e. checkout
+ * created the sale row but never reached (or never finished) VSDC submission,
+ * typically because VSDC/network was unreachable and the checkout request died
+ * before ever reserving stock or calling submitFiscalForSale. Safe to retry
+ * outright (unlike FISCAL_SUBMITTING) because no VSDC submission was ever made.
+ *
+ * The row is claimed first (conditional update on status='PENDING') so an
+ * overlapping reconcile pass or a concurrent manual retry can't both call
+ * finalizeSaleFiscally on the same sale and double-submit it to VSDC.
+ */
+async function reconcileStuckPendingSale(sale, { branchId = DEFAULT_BRANCH } = {}) {
+  const claim = await prisma.sale.updateMany({
+    where: { id: sale.id, status: 'PENDING' },
+    data: { fiscalError: null },
+  });
+
+  if (claim.count === 0) {
+    return { saleId: sale.id, action: 'skipped_already_claimed' };
+  }
+
+  try {
+    const result = await finalizeSaleFiscally(sale.id, { branchId });
+    if (result.success) {
+      return { saleId: sale.id, action: 'retried_and_completed' };
+    }
+    return { saleId: sale.id, action: 'retried_and_failed', error: result.fiscal?.error };
+  } catch (err) {
+    return { saleId: sale.id, action: 'retry_deferred', error: err.message };
+  }
 }
 
 async function reconcileStuckFiscalRecords(options = {}) {
@@ -212,18 +197,29 @@ async function reconcileStuckFiscalRecords(options = {}) {
     orderBy: { updatedAt: 'asc' },
   });
 
+  const stuckPendingSales = await prisma.sale.findMany({
+    where: {
+      status: 'PENDING',
+      updatedAt: { lt: cutoff },
+    },
+    include: saleInclude,
+    take: batchSize,
+    orderBy: { updatedAt: 'asc' },
+  });
+
   const results = {
     salesChecked: stuckSales.length,
     refundsChecked: stuckRefunds.length,
+    pendingSalesChecked: stuckPendingSales.length,
     actions: [],
   };
 
-  if (stuckSales.length === 0 && stuckRefunds.length === 0) {
+  if (stuckSales.length === 0 && stuckRefunds.length === 0 && stuckPendingSales.length === 0) {
     return results;
   }
 
   console.log(
-    `[Fiscal Reconcile] ${stuckSales.length} sale(s), ${stuckRefunds.length} refund(s) older than ${windowMinutes}m`
+    `[Fiscal Reconcile] ${stuckSales.length} sale(s), ${stuckRefunds.length} refund(s), ${stuckPendingSales.length} orphaned pending sale(s) older than ${windowMinutes}m`
   );
 
   for (const sale of stuckSales) {
@@ -233,6 +229,17 @@ async function reconcileStuckFiscalRecords(options = {}) {
       console.log(`[Fiscal Reconcile] Sale ${sale.id}: ${action.action}`);
     } catch (err) {
       console.error(`[Fiscal Reconcile] Sale ${sale.id} failed:`, err.message);
+      results.actions.push({ saleId: sale.id, action: 'error', error: err.message });
+    }
+  }
+
+  for (const sale of stuckPendingSales) {
+    try {
+      const action = await reconcileStuckPendingSale(sale, { branchId });
+      results.actions.push(action);
+      console.log(`[Fiscal Reconcile] Pending sale ${sale.id}: ${action.action}`);
+    } catch (err) {
+      console.error(`[Fiscal Reconcile] Pending sale ${sale.id} failed:`, err.message);
       results.actions.push({ saleId: sale.id, action: 'error', error: err.message });
     }
   }
@@ -255,5 +262,6 @@ module.exports = {
   reconcileStuckFiscalRecords,
   reconcileStuckSale,
   reconcileStuckRefund,
+  reconcileStuckPendingSale,
   reconciliationCutoff,
 };

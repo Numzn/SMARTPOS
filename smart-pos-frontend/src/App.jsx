@@ -1,7 +1,6 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
-import { SalesProvider } from './contexts/SalesContext';
 import LoginForm from './components/auth/LoginForm';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 import MainLayout from './components/layout/MainLayout';
@@ -18,40 +17,38 @@ import UsersPage from './pages/UsersPage';
 function App() {
   return (
     <AuthProvider>
-      <SalesProvider>
-        <Router future={{ v7_relativeSplatPath: true }}>
-          <div className="min-h-screen bg-surface">
-            <Routes>
-              {/* Public Routes */}
-              <Route path="/login" element={<LoginForm />} />
-              
-              {/* Protected Routes */}
-              <Route
-                path="/"
-                element={
-                  <ProtectedRoute>
-                    <MainLayout />
-                  </ProtectedRoute>
-                }
-              >
-                <Route index element={<Navigate to="/dashboard" replace />} />
-                <Route path="dashboard" element={<Dashboard />} />
-                <Route path="sales" element={<SalesPage />} />
-                <Route path="cashier" element={<CashierPage />} />
-                <Route path="products" element={<ProductsPage />} />
-                <Route path="inventory" element={<InventoryPage />} />
-                <Route path="reports" element={<ReportsPage />} />
-                <Route path="users" element={<UsersPage />} />
-                <Route path="settings" element={<SettingsPage />} />
-                <Route path="printers" element={<PrintersPage />} />
-              </Route>
+      <Router future={{ v7_relativeSplatPath: true }}>
+        <div className="min-h-screen bg-surface">
+          <Routes>
+            {/* Public Routes */}
+            <Route path="/login" element={<LoginForm />} />
 
-              {/* Catch all redirect */}
-              <Route path="*" element={<Navigate to="/dashboard" replace />} />
-            </Routes>
-          </div>
-        </Router>
-      </SalesProvider>
+            {/* Protected Routes */}
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <MainLayout />
+                </ProtectedRoute>
+              }
+            >
+              <Route index element={<Navigate to="/dashboard" replace />} />
+              <Route path="dashboard" element={<Dashboard />} />
+              <Route path="sales" element={<SalesPage />} />
+              <Route path="cashier" element={<CashierPage />} />
+              <Route path="products" element={<ProductsPage />} />
+              <Route path="inventory" element={<InventoryPage />} />
+              <Route path="reports" element={<ReportsPage />} />
+              <Route path="users" element={<UsersPage />} />
+              <Route path="settings" element={<SettingsPage />} />
+              <Route path="printers" element={<PrintersPage />} />
+            </Route>
+
+            {/* Catch all redirect */}
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          </Routes>
+        </div>
+      </Router>
     </AuthProvider>
   );
 }

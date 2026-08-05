@@ -68,7 +68,7 @@ services:
       NODE_ENV: production
       PORT: 4000
       DATABASE_URL: postgresql://${POSTGRES_USER:-smartpos}:${POSTGRES_PASSWORD:-smartpos_dev_change_me}@postgres:5432/${POSTGRES_DB:-smartpos}
-      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      JWT_SECRET: "${JWT_SECRET:?JWT_SECRET must be set in .env (generate one with: openssl rand -hex 32)}"
       VSDC_URL: ${VSDC_URL:-http://mock-vsdc:8090}
       VSDC_USERNAME: ${VSDC_USERNAME:-dev-user}
       VSDC_PASSWORD: ${VSDC_PASSWORD:-dev-password}
