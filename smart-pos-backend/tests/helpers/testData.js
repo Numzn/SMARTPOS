@@ -94,7 +94,22 @@ async function createSellableProduct({ stock = 10 } = {}) {
   return product;
 }
 
-async function createTestSale({ userId, productId, quantity = 1, price = 100, status = 'PENDING', branchId = DEFAULT_BRANCH_CODE }) {
+async function createTestShift({ userId, branchId = DEFAULT_BRANCH_CODE, openingFloat = 0, status = 'OPEN' }) {
+  return prisma.shift.create({
+    data: { userId, branchId, openingFloat, status },
+  });
+}
+
+async function createTestSale({
+  userId,
+  productId,
+  quantity = 1,
+  price = 100,
+  status = 'PENDING',
+  branchId = DEFAULT_BRANCH_CODE,
+  shiftId = null,
+  paymentMethod = 'CASH',
+}) {
   const itemTotal = quantity * price;
   const taxAmt = itemTotal * 0.16;
   return prisma.sale.create({
@@ -105,8 +120,9 @@ async function createTestSale({ userId, productId, quantity = 1, price = 100, st
       subtotal: itemTotal,
       tax: taxAmt,
       discount: 0,
-      paymentMethod: 'CASH',
+      paymentMethod,
       status,
+      shiftId,
       saleItems: {
         create: [
           {
@@ -147,6 +163,9 @@ async function cleanupTestData() {
   await prisma.inventory.deleteMany({ where: { product: { sku: { startsWith: 'TEST-SKU-' } } } });
   await prisma.product.deleteMany({ where: { sku: { startsWith: 'TEST-SKU-' } } });
   await prisma.category.deleteMany({ where: { name: { startsWith: 'Test Category ' } } });
+  // Shift deletion cascades to shift_cash_movements; must happen before the
+  // user delete below (Shift.userId is onDelete: Restrict).
+  await prisma.shift.deleteMany({ where: { user: { email: { contains: '@smartpos.test' } } } });
   await prisma.user.deleteMany({ where: { email: { contains: '@smartpos.test' } } });
 }
 
@@ -160,6 +179,7 @@ module.exports = {
   createTestBatch,
   createSellableProduct,
   createTestSale,
+  createTestShift,
   cleanupTestData,
   DEFAULT_BRANCH_CODE,
 };

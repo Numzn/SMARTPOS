@@ -29,9 +29,12 @@ model User {
   refunds          Refund[]
   stockAdjustments StockAdjustment[]
   stockMovements   StockMovement[]
+  shifts           Shift[]
+  shiftCashMovements ShiftCashMovement[]
+  discountApprovals Sale[] @relation("SaleDiscountApprovals")
   branchId         String?
   branch           Branch?   @relation(fields: [branchId], references: [code])
-  
+
   @@map("users")
 }
 
@@ -132,12 +135,23 @@ model Sale {
   amountPaid     Float?
   changeAmount   Float?
   
+  // Cash register attribution — the shift open when this sale was created, if any.
+  shiftId        String?
+
+  // Manager sign-off recorded when a line or order discount exceeded the
+  // approval threshold (Product.maxDiscount, or the default policy floor).
+  discountApprovedByUserId String?
+
   // Relations
   user        User       @relation(fields: [userId], references: [id])
   branch      Branch     @relation(fields: [branchId], references: [code])
   saleItems   SaleItem[]
   refunds     Refund[]   @relation("SaleRefunds")
-  
+  shift       Shift?     @relation(fields: [shiftId], references: [id])
+  discountApprovedBy User? @relation("SaleDiscountApprovals", fields: [discountApprovedByUserId], references: [id])
+
+  @@index([shiftId])
+  @@index([discountApprovedByUserId])
   @@map("sales")
 }
 
@@ -164,13 +178,19 @@ model Refund {
 
   fiscalInvcNo   Int?       // Sequential VSDC credit-note invoice number
 
+  // Cash register attribution — the shift open when this refund was created, if any.
+  shiftId        String?
+
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
   originalSale   Sale         @relation("SaleRefunds", fields: [originalSaleId], references: [id])
   user           User         @relation(fields: [userId], references: [id])
   refundItems    RefundItem[]
+  shift          Shift?       @relation(fields: [shiftId], references: [id])
 
+  @@index([originalSaleId])
+  @@index([shiftId])
   @@map("refunds")
 }
 
@@ -203,7 +223,14 @@ model SaleItem {
   total     Float
   saleId    String
   productId String
-  
+
+  // Line-item discount amount — informational/audit only. Folded into the
+  // order-level Sale.discount for fiscal total math (see lib/saleFiscal.js);
+  // does not alter this line's own tax calculation, so it doesn't touch the
+  // existing splyAmt/taxblAmt/taxAmt/totAmt contract refunds/VSDC rely on.
+  discount  Float   @default(0)
+
+
   // VSDC Required fields for 100% compliance
   pkg       Int?     // Package Quantity - ZRA requirement
   qty       Int      // Quantity (same as quantity but ZRA specific)
@@ -416,8 +443,61 @@ model Branch {
 
   users                 User[]
   sales                 Sale[]
+  shifts                Shift[]
 
   @@map("branches")
+}
+
+// Cash register / till session — the "trust boundary" for a cashier's cash
+// drawer over a shift: opening float, cash movements, and a final count
+// reconciled against what sales/refunds during the shift say should be there.
+model Shift {
+  id             String      @id @default(cuid())
+  branchId       String      @default("main")
+  userId         String      // cashier who opened the shift
+  status         ShiftStatus @default(OPEN)
+
+  openingFloat   Float       @default(0)
+  openedAt       DateTime    @default(now())
+  openingNotes   String?
+
+  closedAt       DateTime?
+  closedByUserId String?
+  countedCash    Float?      // physical cash counted at close
+  expectedCash   Float?      // computed at close: float + cash sales - cash refunds + cashIn - cashOut - paidOut
+  variance       Float?      // countedCash - expectedCash (negative = short, positive = over)
+  closingNotes   String?
+
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  user           User                @relation(fields: [userId], references: [id])
+  branch         Branch              @relation(fields: [branchId], references: [code])
+  cashMovements  ShiftCashMovement[]
+  sales          Sale[]
+  refunds        Refund[]
+
+  @@index([branchId, status])
+  @@index([userId, status])
+  @@map("shifts")
+}
+
+// Cash in / cash out / paid out entries recorded against an open shift —
+// the audit trail behind a Z-report's expected-cash figure.
+model ShiftCashMovement {
+  id        String            @id @default(cuid())
+  shiftId   String
+  type      CashMovementType
+  amount    Float
+  reason    String?
+  userId    String            // who recorded the movement (may differ from shift owner)
+  createdAt DateTime          @default(now())
+
+  shift     Shift @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  user      User  @relation(fields: [userId], references: [id])
+
+  @@index([shiftId])
+  @@map("shift_cash_movements")
 }
 
 model VsdcDevice {
@@ -620,6 +700,17 @@ enum ZraRegistrationStatus {
   PENDING
   REGISTERED
   FAILED
+}
+
+enum ShiftStatus {
+  OPEN
+  CLOSED
+}
+
+enum CashMovementType {
+  CASH_IN
+  CASH_OUT
+  PAID_OUT
 }
 
 enum StockMovementType {

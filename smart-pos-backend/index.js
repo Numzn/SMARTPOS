@@ -18,6 +18,7 @@ const settingsRoutes = require('./routes/settings');
 const auditRoutes = require('./routes/audit');
 const reportRoutes = require('./routes/reports');
 const printerRoutes = require('./routes/printers');
+const shiftRoutes = require('./routes/shifts');
 const auditService = require('./services/auditService');
 
 dotenv.config();
@@ -47,6 +48,7 @@ app.use('/api/settings', settingsRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/settings/printers', printerRoutes);
+app.use('/api/shifts', shiftRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

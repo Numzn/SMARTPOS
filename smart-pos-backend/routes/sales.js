@@ -90,10 +90,26 @@ router.post('/checkout', authenticateToken, requirePermission('sales:write'), as
       newValues: {
         total: outcome.sale.total,
         status: outcome.sale.status,
+        discount: outcome.sale.discount,
         rcptNo: outcome.fiscal?.rcptNo || null,
       },
       description: `Sale completed: ${outcome.sale.id} (rcptNo ${outcome.fiscal?.rcptNo || 'n/a'})`,
     });
+
+    if (outcome.sale.discountApprovedByUserId) {
+      auditService.safeLog(auditService.eventTypes.DISCOUNT_APPROVAL, {
+        ...auditService.contextFromReq(req),
+        entityType: 'SALE',
+        entityId: outcome.sale.id,
+        action: 'APPROVE_DISCOUNT',
+        newValues: {
+          discount: outcome.sale.discount,
+          approvedByUserId: outcome.sale.discountApprovedByUserId,
+        },
+        description: `Discount of ${outcome.sale.discount} on sale ${outcome.sale.id} approved by ${outcome.sale.discountApprovedByUserId}`,
+        riskLevel: 'MEDIUM',
+      });
+    }
 
     res.status(201).json({
       sale: outcome.sale,

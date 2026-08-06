@@ -18,6 +18,7 @@ const PERMISSIONS = {
     'receipts:read',
     'reports:read', 'reports:write',
     'settings:read', 'settings:write',
+    'shifts:read', 'shifts:write',
     'zra:submit', 'zra:sync', 'zra:read',
     'audit:read'
   ],
@@ -30,6 +31,7 @@ const PERMISSIONS = {
     'receipts:read',
     'reports:read',
     'settings:read',
+    'shifts:read', 'shifts:write',
     'zra:submit', 'zra:sync', 'zra:read',
     'audit:read'
   ],
@@ -39,13 +41,15 @@ const PERMISSIONS = {
     'inventory:read',
     'sales:read', 'sales:write',
     'receipts:read',
+    'shifts:write',
   ],
   VIEWER: [
     'products:read',
     'categories:read',
     'inventory:read',
     'sales:read',
-    'reports:read'
+    'reports:read',
+    'shifts:read',
   ]
 };
 

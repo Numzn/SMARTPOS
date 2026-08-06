@@ -3,6 +3,7 @@
  * Reference: NUMZPAY GRC FP-001 (fiscal lock).
  */
 
+const bcrypt = require('bcryptjs');
 const prisma = require('./prisma');
 const {
   deductStockForSale,
@@ -19,6 +20,62 @@ const saleInclude = {
   user: { select: { id: true, name: true, email: true } },
   saleItems: { include: { product: true } },
 };
+
+// Applied when a product has no maxDiscount set — a line discount above this
+// percentage still requires manager approval rather than being unbounded.
+const DEFAULT_DISCOUNT_APPROVAL_THRESHOLD_PERCENT = 10;
+
+/**
+ * Resolve a line's requested discount (either a flat amount or a percent of
+ * that line's subtotal) to a clamped currency amount, and whether it exceeds
+ * the product's approval threshold.
+ */
+function resolveLineDiscount(item, product, itemTotal) {
+  const rawDiscount =
+    item.discountAmount != null
+      ? Number(item.discountAmount)
+      : item.discountPercent != null
+        ? (Number(item.discountPercent) / 100) * itemTotal
+        : 0;
+
+  const discount = Math.max(0, Math.min(Number.isFinite(rawDiscount) ? rawDiscount : 0, itemTotal));
+  const effectivePercent = itemTotal > 0 ? (discount / itemTotal) * 100 : 0;
+  const threshold =
+    product.maxDiscount > 0 ? product.maxDiscount : DEFAULT_DISCOUNT_APPROVAL_THRESHOLD_PERCENT;
+
+  return { discount, requiresApproval: discount > 0 && effectivePercent > threshold };
+}
+
+/**
+ * A discount above the per-product (or default) threshold needs a manager/
+ * admin to sign off with their own password — reuses existing credentials
+ * rather than introducing a separate PIN system.
+ */
+async function verifyDiscountApproval(tx, approverUserId, approverPassword) {
+  if (!approverUserId || !approverPassword) {
+    const err = new Error(
+      'This discount requires manager approval — provide approverUserId and approverPassword'
+    );
+    err.status = 403;
+    throw err;
+  }
+
+  const approver = await tx.user.findUnique({ where: { id: approverUserId } });
+  if (!approver || !approver.isActive || !['ADMIN', 'MANAGER'].includes(approver.role)) {
+    const err = new Error('Approver must be an active manager or admin');
+    err.status = 403;
+    throw err;
+  }
+
+  const passwordOk = await bcrypt.compare(approverPassword, approver.password);
+  if (!passwordOk) {
+    const err = new Error('Approver password is incorrect');
+    err.status = 403;
+    throw err;
+  }
+
+  return approver;
+}
 
 function parseSalePayload(body) {
   const {
@@ -92,22 +149,17 @@ async function createPendingSale(body) {
   const parsed = parseSalePayload(body);
 
   return prisma.$transaction(async (tx) => {
-    const newSale = await tx.sale.create({
-      data: {
-        userId: parsed.userId,
-        total: parseFloat(parsed.total),
-        subtotal: parseFloat(parsed.subtotal),
-        tax: parseFloat(parsed.taxAmount),
-        discount: parseFloat(parsed.discountAmount),
-        paymentMethod: parsed.paymentMethod,
-        status: 'PENDING',
-        branchId: parsed.branchId || DEFAULT_BRANCH,
-        customerName: parsed.customerName,
-        customerTpin: parsed.customerTpin,
-        amountPaid: parsed.amountPaid,
-        changeAmount: parsed.changeAmount,
-      },
+    const branchId = parsed.branchId || DEFAULT_BRANCH;
+    const openShift = await tx.shift.findFirst({
+      where: { userId: parsed.userId, branchId, status: 'OPEN' },
     });
+
+    // Resolve each line's discount and whether any of them (or the
+    // order-level discount) crosses the approval threshold, before creating
+    // any rows — an approval failure must not leave a half-written sale.
+    const lineResolutions = [];
+    let totalLineDiscount = 0;
+    let approvalRequired = false;
 
     for (const item of parsed.items) {
       const product = await tx.product.findUnique({ where: { id: item.productId } });
@@ -118,6 +170,42 @@ async function createPendingSale(body) {
       const quantity = parseInt(item.quantity, 10);
       const unitPrice = parseFloat(item.price);
       const itemTotal = quantity * unitPrice;
+      const { discount: lineDiscount, requiresApproval } = resolveLineDiscount(item, product, itemTotal);
+
+      if (requiresApproval) approvalRequired = true;
+      totalLineDiscount += lineDiscount;
+      lineResolutions.push({ item, product, quantity, unitPrice, itemTotal, lineDiscount });
+    }
+
+    const orderLevelDiscount = parseFloat(parsed.discountAmount) || 0;
+    const combinedDiscount = totalLineDiscount + orderLevelDiscount;
+
+    let approvedByUserId = null;
+    if (approvalRequired) {
+      const approver = await verifyDiscountApproval(tx, body.approverUserId, body.approverPassword);
+      approvedByUserId = approver.id;
+    }
+
+    const newSale = await tx.sale.create({
+      data: {
+        userId: parsed.userId,
+        total: parseFloat(parsed.subtotal) + parseFloat(parsed.taxAmount) - combinedDiscount,
+        subtotal: parseFloat(parsed.subtotal),
+        tax: parseFloat(parsed.taxAmount),
+        discount: combinedDiscount,
+        discountApprovedByUserId: approvedByUserId,
+        paymentMethod: parsed.paymentMethod,
+        status: 'PENDING',
+        shiftId: openShift?.id,
+        branchId,
+        customerName: parsed.customerName,
+        customerTpin: parsed.customerTpin,
+        amountPaid: parsed.amountPaid,
+        changeAmount: parsed.changeAmount,
+      },
+    });
+
+    for (const { item, product, quantity, unitPrice, itemTotal, lineDiscount } of lineResolutions) {
       const taxRate = (product.taxRate ?? 16) / 100;
       const splyAmt = itemTotal;
       const taxblAmt = splyAmt;
@@ -131,6 +219,7 @@ async function createPendingSale(body) {
           quantity,
           price: unitPrice,
           total: itemTotal,
+          discount: lineDiscount,
           pkg: 1,
           qty: quantity,
           prc: unitPrice,

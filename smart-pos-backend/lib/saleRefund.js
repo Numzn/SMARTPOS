@@ -108,7 +108,7 @@ function prorateSaleDiscount(originalSale, refundSubtotal) {
 }
 
 async function createPendingRefund(originalSaleId, body) {
-  const { userId, reasonCode = '01', reason, items: bodyItems } = body;
+  const { userId, reasonCode = '01', reason, items: bodyItems, branchId = DEFAULT_BRANCH } = body;
 
   if (!userId) {
     const err = new Error('userId is required');
@@ -176,6 +176,10 @@ async function createPendingRefund(originalSaleId, body) {
   const proratedDiscount = prorateSaleDiscount(originalSale, subtotal);
   const total = subtotal + taxTotal - proratedDiscount;
 
+  const openShift = await prisma.shift.findFirst({
+    where: { userId, branchId, status: 'OPEN' },
+  });
+
   return prisma.refund.create({
     data: {
       originalSaleId,
@@ -188,6 +192,7 @@ async function createPendingRefund(originalSaleId, body) {
       discount: proratedDiscount,
       total,
       paymentMethod: originalSale.paymentMethod,
+      shiftId: openShift?.id,
       refundItems: { create: refundItemRows },
     },
     include: refundInclude,

@@ -5,5 +5,6 @@ const router = express.Router();
 router.use('/', require('./core'));
 router.use('/', require('./expiry'));
 router.use('/', require('./adjustments'));
+router.use('/', require('./reports'));
 
 module.exports = router;

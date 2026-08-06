@@ -2,10 +2,18 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const prisma = require('../lib/prisma');
 const { authenticateToken, requireRole, requirePermission, sessionManager, PERMISSIONS } = require('../middleware/auth');
 const { loginLimiter } = require('../middleware/rateLimit');
 const auditService = require('../services/auditService');
+
+const MIN_PASSWORD_LENGTH = 8;
+const VALID_ROLES = ['ADMIN', 'MANAGER', 'CASHIER', 'VIEWER'];
+
+function generateTempPassword() {
+  return crypto.randomBytes(9).toString('base64url'); // ~12 chars, URL-safe
+}
 
 // Fire-and-forget audit logging — must never block or fail the request path.
 const safeAuditAuth = (userId, success, details) => {
@@ -71,7 +79,15 @@ router.post('/register', authenticateToken, requireRole('ADMIN'), async (req, re
     if (!email || !name || !password) {
       return res.status(400).json({ error: 'Email, name, and password are required' });
     }
-    
+
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      return res.status(400).json({ error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` });
+    }
+
+    if (role && !VALID_ROLES.includes(role)) {
+      return res.status(400).json({ error: `Invalid role: ${role}` });
+    }
+
     // Check if user already exists
     const existingUser = await prisma.user.findUnique({
       where: { email }
@@ -272,7 +288,11 @@ router.put('/change-password', authenticateToken, async (req, res) => {
     if (!currentPassword || !newPassword) {
       return res.status(400).json({ error: 'Current password and new password are required' });
     }
-    
+
+    if (newPassword.length < MIN_PASSWORD_LENGTH) {
+      return res.status(400).json({ error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` });
+    }
+
     // Get current user
     const user = await prisma.user.findUnique({
       where: { id: req.user.userId }
@@ -439,6 +459,139 @@ router.get('/permissions', authenticateToken, (req, res) => {
     role: req.user.role,
     permissions: req.user.permissions || []
   });
+});
+
+// Get a specific user (Admin only) — placed after all fixed-path routes above
+// so this wildcard segment can never shadow /profile, /sessions, etc.
+router.get('/:id', authenticateToken, requireRole('ADMIN'), async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.params.id },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        isActive: true,
+        lastLoginAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json(user);
+  } catch (error) {
+    console.error('Error fetching user:', error);
+    res.status(500).json({ error: 'Failed to fetch user' });
+  }
+});
+
+// Admin: update another user's role, active status, or name — the
+// disable/activate and permission-management (role-based) lifecycle.
+router.put('/:id', authenticateToken, requireRole('ADMIN'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { role, isActive, name } = req.body;
+
+    if (role !== undefined && !VALID_ROLES.includes(role)) {
+      return res.status(400).json({ error: `Invalid role: ${role}` });
+    }
+
+    const existing = await prisma.user.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (id === req.user.userId && isActive === false) {
+      return res.status(400).json({ error: 'You cannot deactivate your own account' });
+    }
+
+    const data = {};
+    if (role !== undefined) data.role = role;
+    if (isActive !== undefined) data.isActive = isActive;
+    if (name !== undefined) data.name = name;
+
+    const user = await prisma.user.update({
+      where: { id },
+      data,
+      select: { id: true, email: true, name: true, role: true, isActive: true, updatedAt: true },
+    });
+
+    if (isActive === false) {
+      // authenticateToken already blocks a deactivated user on their next
+      // request via the isActive DB check — this just keeps the in-memory
+      // sessions list from showing stale "active" entries for them.
+      for (const s of sessionManager.getUserSessions(id)) {
+        sessionManager.removeSession(s.sessionId);
+      }
+    }
+
+    auditService.safeLog(auditService.eventTypes.USER_UPDATE, {
+      ...auditService.contextFromReq(req),
+      entityType: 'USER',
+      entityId: user.id,
+      action: 'ADMIN_UPDATE',
+      oldValues: { role: existing.role, isActive: existing.isActive, name: existing.name },
+      newValues: { role: user.role, isActive: user.isActive, name: user.name },
+      description: `User ${user.email} updated by admin (role=${user.role}, isActive=${user.isActive})`,
+      riskLevel: isActive === false ? 'MEDIUM' : 'LOW',
+    });
+
+    res.json({ message: 'User updated successfully', user });
+  } catch (error) {
+    console.error('Error updating user:', error);
+    res.status(500).json({ error: 'Failed to update user' });
+  }
+});
+
+// Admin: reset another user's password — generates a one-time temporary
+// password when the admin doesn't supply one, and invalidates their
+// existing sessions so the reset actually forces re-authentication.
+router.post('/:id/reset-password', authenticateToken, requireRole('ADMIN'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await prisma.user.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const suppliedPassword = req.body.newPassword;
+    const newPassword = suppliedPassword || generateTempPassword();
+
+    if (newPassword.length < MIN_PASSWORD_LENGTH) {
+      return res.status(400).json({ error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` });
+    }
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+    await prisma.user.update({ where: { id }, data: { password: hashed } });
+
+    for (const s of sessionManager.getUserSessions(id)) {
+      sessionManager.removeSession(s.sessionId);
+    }
+
+    auditService.safeLog(auditService.eventTypes.USER_UPDATE, {
+      ...auditService.contextFromReq(req),
+      entityType: 'USER',
+      entityId: id,
+      action: 'ADMIN_RESET_PASSWORD',
+      description: `Password reset for ${existing.email} by admin`,
+      riskLevel: 'MEDIUM',
+    });
+
+    res.json({
+      message: 'Password reset successfully',
+      // Only handed back when the admin didn't supply their own value —
+      // this is the one and only time it's readable; give it to the user now.
+      temporaryPassword: suppliedPassword ? undefined : newPassword,
+    });
+  } catch (error) {
+    console.error('Error resetting password:', error);
+    res.status(500).json({ error: 'Failed to reset password' });
+  }
 });
 
 module.exports = router;
