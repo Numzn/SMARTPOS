@@ -11,7 +11,12 @@
 		file_server
 	}
 
+	# index.html must always be revalidated. The hashed asset filenames change
+	# every build, so a cached index.html would keep pointing browsers at the
+	# previous bundle — which /assets/* has told them to keep for 30 days —
+	# and a deploy would silently never reach the user.
 	handle {
+		header Cache-Control "no-cache, must-revalidate"
 		try_files {path} /index.html
 		file_server
 	}
