@@ -115,7 +115,7 @@ class AuditService {
         userAgent: details.userAgent || 'SmartPOS-Backend',
         sessionId: details.sessionId || null,
         entityType: details.entityType || null,
-        entityId: details.entityId || null,
+        entityId: details.entityId == null ? null : String(details.entityId),
         action: details.action || eventType,
         oldValues: details.oldValues ?? null,
         newValues: details.newValues ?? null,

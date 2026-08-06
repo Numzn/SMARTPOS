@@ -26,6 +26,11 @@ const CashRegisterPage = () => {
   const [showCloseModal, setShowCloseModal] = useState(false);
   const [movementType, setMovementType] = useState(null);
   const [historyReport, setHistoryReport] = useState(null);
+  // Held after a close so the cashier actually sees their Z-report. Without
+  // this the shift stops being "current" the moment it closes and the final
+  // reconciliation would vanish off the screen — and a cashier without
+  // shifts:read has no history table to find it in again.
+  const [closedReport, setClosedReport] = useState(null);
 
   const loadCurrent = useCallback(async () => {
     if (!canOperate) return null;
@@ -86,8 +91,13 @@ const CashRegisterPage = () => {
 
   const handleCloseShift = ({ countedCash, notes }) =>
     runAction(async () => {
-      await shiftApi.closeShift(currentShift.id, { countedCash, notes });
+      const shiftId = currentShift.id;
+      await shiftApi.closeShift(shiftId, { countedCash, notes });
       setShowCloseModal(false);
+      // Fetch the Z-report before the shift stops being "current", and show
+      // the server's own figures — the variance stored on close is computed
+      // backend-side, so it is authoritative over the modal's preview.
+      setClosedReport(await shiftApi.fetchShiftReport(shiftId));
     }, 'Error closing shift');
 
   const openHistoryReport = async (shift) => {
@@ -120,6 +130,23 @@ const CashRegisterPage = () => {
             Retry
           </button>
         </div>
+      )}
+
+      {closedReport && (
+        <section className="space-y-3">
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center justify-between gap-3">
+            <p className="text-sm text-green-800">
+              Shift closed. Review the Z-report below — this is the final reconciliation.
+            </p>
+            <button
+              onClick={() => setClosedReport(null)}
+              className="px-3 py-1.5 border border-green-300 rounded-md text-sm font-medium text-green-800 hover:bg-green-100 shrink-0"
+            >
+              Dismiss
+            </button>
+          </div>
+          <ShiftReportPanel report={closedReport} onPrint={() => window.print()} />
+        </section>
       )}
 
       {canOperate && (
