@@ -56,6 +56,10 @@ export const usePermissions = () => {
     // Purchasing (purchase orders, GRNs, supplier returns)
     managePurchasing: hasPermission('purchasing:write'),
     viewPurchasing: hasPermission('purchasing:read'),
+
+    // Cash register / shifts
+    operateShift: hasPermission('shifts:write'),
+    viewShifts: hasPermission('shifts:read'),
     
     // Settings
     viewSettings: hasPermission('settings:read'),

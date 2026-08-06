@@ -19,6 +19,7 @@ import {
   Contact,
   Truck,
   ShoppingCart,
+  Wallet,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -27,6 +28,7 @@ const NAV_ITEMS = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, show: () => true },
   { name: 'Cashier', href: '/cashier', icon: CreditCard, show: (p, u) => p.createSale || p.viewSales || u?.role === 'CASHIER' },
   { name: 'Sales', href: '/sales', icon: Receipt, show: (p) => p.viewSales || p.refundSale },
+  { name: 'Cash Register', href: '/cash-register', icon: Wallet, show: (p) => p.operateShift || p.viewShifts },
   { name: 'Products', href: '/products', icon: Package, show: (p) => p.viewProducts },
   { name: 'Inventory', href: '/inventory', icon: Warehouse, show: (p) => p.viewInventory },
   { name: 'Customers', href: '/customers', icon: Contact, show: (p) => p.viewCustomers },

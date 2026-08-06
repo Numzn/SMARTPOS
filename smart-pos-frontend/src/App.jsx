@@ -13,6 +13,7 @@ import CashierPage from './pages/CashierPage';
 import SettingsPage from './pages/SettingsPage';
 import PrintersPage from './pages/PrintersPage';
 import UsersPage from './pages/UsersPage';
+import CashRegisterPage from './pages/CashRegisterPage';
 import CustomersPage from './pages/CustomersPage';
 import SuppliersPage from './pages/SuppliersPage';
 import PurchaseOrdersPage from './pages/PurchaseOrdersPage';
@@ -39,6 +40,7 @@ function App() {
               <Route path="dashboard" element={<Dashboard />} />
               <Route path="sales" element={<SalesPage />} />
               <Route path="cashier" element={<CashierPage />} />
+              <Route path="cash-register" element={<CashRegisterPage />} />
               <Route path="products" element={<ProductsPage />} />
               <Route path="inventory" element={<InventoryPage />} />
               <Route path="customers" element={<CustomersPage />} />
