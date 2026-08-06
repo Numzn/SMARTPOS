@@ -44,6 +44,18 @@ export const usePermissions = () => {
     // User management
     manageUsers: hasPermission('users:write'),
     viewUsers: hasPermission('users:read'),
+
+    // Customers
+    manageCustomers: hasPermission('customers:write'),
+    viewCustomers: hasPermission('customers:read'),
+
+    // Suppliers
+    manageSuppliers: hasPermission('suppliers:write'),
+    viewSuppliers: hasPermission('suppliers:read'),
+
+    // Purchasing (purchase orders, GRNs, supplier returns)
+    managePurchasing: hasPermission('purchasing:write'),
+    viewPurchasing: hasPermission('purchasing:read'),
     
     // Settings
     viewSettings: hasPermission('settings:read'),

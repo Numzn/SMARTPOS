@@ -19,6 +19,11 @@ const auditRoutes = require('./routes/audit');
 const reportRoutes = require('./routes/reports');
 const printerRoutes = require('./routes/printers');
 const shiftRoutes = require('./routes/shifts');
+const customerRoutes = require('./routes/customers');
+const supplierRoutes = require('./routes/suppliers');
+const purchaseOrderRoutes = require('./routes/purchaseOrders');
+const goodsReceivedNoteRoutes = require('./routes/goodsReceivedNotes');
+const supplierReturnRoutes = require('./routes/supplierReturns');
 const auditService = require('./services/auditService');
 
 dotenv.config();
@@ -49,6 +54,11 @@ app.use('/api/audit', auditRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/settings/printers', printerRoutes);
 app.use('/api/shifts', shiftRoutes);
+app.use('/api/customers', customerRoutes);
+app.use('/api/suppliers', supplierRoutes);
+app.use('/api/purchase-orders', purchaseOrderRoutes);
+app.use('/api/goods-received-notes', goodsReceivedNoteRoutes);
+app.use('/api/supplier-returns', supplierReturnRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

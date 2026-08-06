@@ -13,6 +13,9 @@ import CashierPage from './pages/CashierPage';
 import SettingsPage from './pages/SettingsPage';
 import PrintersPage from './pages/PrintersPage';
 import UsersPage from './pages/UsersPage';
+import CustomersPage from './pages/CustomersPage';
+import SuppliersPage from './pages/SuppliersPage';
+import PurchaseOrdersPage from './pages/PurchaseOrdersPage';
 
 function App() {
   return (
@@ -38,6 +41,9 @@ function App() {
               <Route path="cashier" element={<CashierPage />} />
               <Route path="products" element={<ProductsPage />} />
               <Route path="inventory" element={<InventoryPage />} />
+              <Route path="customers" element={<CustomersPage />} />
+              <Route path="suppliers" element={<SuppliersPage />} />
+              <Route path="purchasing" element={<PurchaseOrdersPage />} />
               <Route path="reports" element={<ReportsPage />} />
               <Route path="users" element={<UsersPage />} />
               <Route path="settings" element={<SettingsPage />} />

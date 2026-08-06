@@ -94,6 +94,51 @@ async function createSellableProduct({ stock = 10 } = {}) {
   return product;
 }
 
+async function createTestCustomer(overrides = {}) {
+  const suffix = uniqueSuffix();
+  return prisma.customer.create({
+    data: {
+      name: `TEST-Customer-${suffix}`,
+      phone: `26097${suffix}`.slice(0, 12),
+      ...overrides,
+    },
+  });
+}
+
+async function createTestSupplier(overrides = {}) {
+  const suffix = uniqueSuffix();
+  return prisma.supplier.create({
+    data: {
+      name: `TEST-Supplier-${suffix}`,
+      ...overrides,
+    },
+  });
+}
+
+async function createTestPurchaseOrder({ supplierId, branchId = DEFAULT_BRANCH_CODE, items, status = 'DRAFT' }) {
+  const suffix = uniqueSuffix();
+  const subtotal = items.reduce((sum, item) => sum + item.quantity * item.unitCost, 0);
+  return prisma.purchaseOrder.create({
+    data: {
+      poNumber: `TEST-PO-${suffix}`,
+      supplierId,
+      branchId,
+      status,
+      subtotal,
+      total: subtotal,
+      items: {
+        create: items.map((item) => ({
+          productId: item.productId,
+          quantityOrdered: item.quantity,
+          unitCost: item.unitCost,
+          total: item.quantity * item.unitCost,
+        })),
+      },
+    },
+    include: { items: true },
+  });
+}
+
 async function createTestShift({ userId, branchId = DEFAULT_BRANCH_CODE, openingFloat = 0, status = 'OPEN' }) {
   return prisma.shift.create({
     data: { userId, branchId, openingFloat, status },
@@ -157,6 +202,40 @@ async function cleanupTestData() {
   await prisma.refund.deleteMany({ where: { originalSale: { user: { email: { contains: '@smartpos.test' } } } } });
   await prisma.saleItem.deleteMany({ where: { product: { sku: { startsWith: 'TEST-SKU-' } } } });
   await prisma.sale.deleteMany({ where: { user: { email: { contains: '@smartpos.test' } } } });
+
+  // Phase 3: business-management line items reference Product with the
+  // default Restrict onDelete — must be gone before the product/supplier
+  // deletes below. Scoped by EITHER marker since a fixture might only set
+  // one (e.g. a supplier return against a product not itself named TEST-SKU-
+  // in some future test), covering both is cheap insurance against drift.
+  await prisma.supplierReturnItem.deleteMany({
+    where: {
+      OR: [
+        { product: { sku: { startsWith: 'TEST-SKU-' } } },
+        { supplierReturn: { supplier: { name: { startsWith: 'TEST-Supplier-' } } } },
+      ],
+    },
+  });
+  await prisma.supplierReturn.deleteMany({ where: { supplier: { name: { startsWith: 'TEST-Supplier-' } } } });
+  await prisma.goodsReceivedNoteItem.deleteMany({
+    where: {
+      OR: [
+        { product: { sku: { startsWith: 'TEST-SKU-' } } },
+        { goodsReceivedNote: { supplier: { name: { startsWith: 'TEST-Supplier-' } } } },
+      ],
+    },
+  });
+  await prisma.goodsReceivedNote.deleteMany({ where: { supplier: { name: { startsWith: 'TEST-Supplier-' } } } });
+  await prisma.purchaseOrderItem.deleteMany({
+    where: {
+      OR: [
+        { product: { sku: { startsWith: 'TEST-SKU-' } } },
+        { purchaseOrder: { supplier: { name: { startsWith: 'TEST-Supplier-' } } } },
+      ],
+    },
+  });
+  await prisma.purchaseOrder.deleteMany({ where: { supplier: { name: { startsWith: 'TEST-Supplier-' } } } });
+
   // Matched by product, not just batchNumber prefix — restoreStockForRefund
   // creates its own "RFD-..." batches on refund, not "TEST-BATCH-" ones.
   await prisma.inventoryBatch.deleteMany({ where: { product: { sku: { startsWith: 'TEST-SKU-' } } } });
@@ -167,6 +246,9 @@ async function cleanupTestData() {
   // user delete below (Shift.userId is onDelete: Restrict).
   await prisma.shift.deleteMany({ where: { user: { email: { contains: '@smartpos.test' } } } });
   await prisma.user.deleteMany({ where: { email: { contains: '@smartpos.test' } } });
+
+  await prisma.customer.deleteMany({ where: { name: { startsWith: 'TEST-Customer-' } } });
+  await prisma.supplier.deleteMany({ where: { name: { startsWith: 'TEST-Supplier-' } } });
 }
 
 module.exports = {
@@ -180,6 +262,9 @@ module.exports = {
   createSellableProduct,
   createTestSale,
   createTestShift,
+  createTestCustomer,
+  createTestSupplier,
+  createTestPurchaseOrder,
   cleanupTestData,
   DEFAULT_BRANCH_CODE,
 };

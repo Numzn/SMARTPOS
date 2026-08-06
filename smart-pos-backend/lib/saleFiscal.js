@@ -86,6 +86,7 @@ function parseSalePayload(body) {
     discount,
     branchId = DEFAULT_BRANCH,
     customerInfo,
+    customerId,
     paymentDetails,
   } = body;
 
@@ -140,6 +141,7 @@ function parseSalePayload(body) {
     total,
     customerName,
     customerTpin,
+    customerId: customerId || null,
     amountPaid: Number.isFinite(amountPaid) ? amountPaid : null,
     changeAmount: Number.isFinite(changeAmount) ? changeAmount : null,
   };
@@ -153,6 +155,24 @@ async function createPendingSale(body) {
     const openShift = await tx.shift.findFirst({
       where: { userId: parsed.userId, branchId, status: 'OPEN' },
     });
+
+    // A registered customer is optional and explicitly selected — walk-in
+    // sales (no customerId) are completely unaffected. When present, its
+    // name/tpin only fill in what customerInfo didn't already override, and
+    // the sale snapshots them at creation time (same "don't live-join"
+    // principle as ReceiptSnapshot — a later edit to the Customer record
+    // never retroactively changes a past receipt).
+    let customer = null;
+    if (parsed.customerId) {
+      customer = await tx.customer.findUnique({ where: { id: parsed.customerId } });
+      if (!customer || !customer.isActive) {
+        const err = new Error('Selected customer not found or inactive');
+        err.status = 400;
+        throw err;
+      }
+    }
+    const resolvedCustomerName = parsed.customerName || customer?.name || null;
+    const resolvedCustomerTpin = parsed.customerTpin || customer?.tpin || null;
 
     // Resolve each line's discount and whether any of them (or the
     // order-level discount) crosses the approval threshold, before creating
@@ -198,8 +218,9 @@ async function createPendingSale(body) {
         status: 'PENDING',
         shiftId: openShift?.id,
         branchId,
-        customerName: parsed.customerName,
-        customerTpin: parsed.customerTpin,
+        customerName: resolvedCustomerName,
+        customerTpin: resolvedCustomerTpin,
+        customerId: parsed.customerId,
         amountPaid: parsed.amountPaid,
         changeAmount: parsed.changeAmount,
       },

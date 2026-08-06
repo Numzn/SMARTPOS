@@ -102,6 +102,9 @@ model Product {
   stockAdjustments      StockAdjustment[]
   stockMovements        StockMovement[]
   InventoryItem         InventoryBatch[] @relation("ProductBatches") // Use InventoryBatch for consistency
+  purchaseOrderItems    PurchaseOrderItem[]
+  goodsReceivedNoteItems GoodsReceivedNoteItem[]
+  supplierReturnItems   SupplierReturnItem[]
   
   @@map("products")
 }
@@ -142,6 +145,9 @@ model Sale {
   // approval threshold (Product.maxDiscount, or the default policy floor).
   discountApprovedByUserId String?
 
+  // Registered customer attached at checkout, if any (walk-in sales leave this null).
+  customerId String?
+
   // Relations
   user        User       @relation(fields: [userId], references: [id])
   branch      Branch     @relation(fields: [branchId], references: [code])
@@ -149,9 +155,11 @@ model Sale {
   refunds     Refund[]   @relation("SaleRefunds")
   shift       Shift?     @relation(fields: [shiftId], references: [id])
   discountApprovedBy User? @relation("SaleDiscountApprovals", fields: [discountApprovedByUserId], references: [id])
+  customer    Customer?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
 
   @@index([shiftId])
   @@index([discountApprovedByUserId])
+  @@index([customerId])
   @@map("sales")
 }
 
@@ -364,11 +372,20 @@ model InventoryBatch {
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
   
+  // Optional link to a real Supplier record — the pre-existing `supplier`/
+  // `supplierInfo` free-text fields above stay untouched for the legacy
+  // receiving path; this is additive, populated only via GRN receiving.
+  supplierId        String?
+
   // Relations
   inventory         Inventory? @relation(fields: [inventoryId], references: [id])
   product           Product    @relation("ProductBatches", fields: [productId], references: [id])
   movements         StockMovement[]
-  
+  supplierRecord    Supplier?  @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  grnItems          GoodsReceivedNoteItem[]
+  supplierReturnItems SupplierReturnItem[]
+
+  @@index([supplierId])
   @@map("inventory_batches")
 }
 
@@ -444,6 +461,9 @@ model Branch {
   users                 User[]
   sales                 Sale[]
   shifts                Shift[]
+  purchaseOrders        PurchaseOrder[]
+  goodsReceivedNotes    GoodsReceivedNote[]
+  supplierReturns       SupplierReturn[]
 
   @@map("branches")
 }
@@ -725,4 +745,204 @@ enum StockMovementType {
   RECOUNT           // Physical stock count adjustment
   PRODUCTION_IN     // Manufactured/assembled items
   PRODUCTION_OUT    // Raw materials used in production
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  SENT
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CANCELLED
+}
+
+enum SupplierReturnStatus {
+  COMPLETED
+  CANCELLED
+}
+
+model Customer {
+  id            String    @id @default(cuid())
+  name          String
+  phone         String?
+  email         String?
+  tpin          String?
+  address       String?
+  notes         String?
+  isActive      Boolean   @default(true)
+  createdBy     String?
+  updatedBy     String?
+  deactivatedAt DateTime?
+  deactivatedBy String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  sales         Sale[]
+
+  @@index([phone])
+  @@index([tpin])
+  @@index([name])
+  @@map("customers")
+}
+
+model Supplier {
+  id            String    @id @default(cuid())
+  name          String
+  contactPerson String?
+  phone         String?
+  email         String?
+  tpin          String?
+  address       String?
+  notes         String?
+  isActive      Boolean   @default(true)
+  createdBy     String?
+  updatedBy     String?
+  deactivatedAt DateTime?
+  deactivatedBy String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  purchaseOrders     PurchaseOrder[]
+  goodsReceivedNotes GoodsReceivedNote[]
+  supplierReturns    SupplierReturn[]
+  inventoryBatches   InventoryBatch[]
+
+  @@index([name])
+  @@map("suppliers")
+}
+
+// Non-fiscal business document — a request to buy stock from a Supplier.
+// Receiving against it produces one or more GoodsReceivedNote records.
+model PurchaseOrder {
+  id           String              @id @default(cuid())
+  poNumber     String              @unique
+  supplierId   String
+  branchId     String              @default("main")
+  status       PurchaseOrderStatus @default(DRAFT)
+  orderDate    DateTime            @default(now())
+  expectedDate DateTime?
+  notes        String?
+  subtotal     Float               @default(0)
+  total        Float               @default(0)
+  createdBy    String?
+  updatedBy    String?
+  cancelledAt  DateTime?
+  cancelledBy  String?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  supplier           Supplier            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  branch             Branch              @relation(fields: [branchId], references: [code])
+  items              PurchaseOrderItem[]
+  goodsReceivedNotes GoodsReceivedNote[]
+
+  @@index([supplierId])
+  @@index([branchId, status])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+  id               String @id @default(cuid())
+  purchaseOrderId  String
+  productId        String
+  quantityOrdered  Int
+  quantityReceived Int    @default(0)
+  unitCost         Float
+  total            Float
+
+  purchaseOrder PurchaseOrder           @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  product       Product                 @relation(fields: [productId], references: [id])
+  grnLines      GoodsReceivedNoteItem[]
+
+  @@index([purchaseOrderId])
+  @@index([productId])
+  @@map("purchase_order_items")
+}
+
+// A physical delivery record — created only via PurchaseOrder receiving
+// (routes/purchaseOrders.js POST /:id/receive), never directly.
+model GoodsReceivedNote {
+  id              String   @id @default(cuid())
+  grnNumber       String   @unique
+  purchaseOrderId String?
+  supplierId      String
+  branchId        String   @default("main")
+  receivedDate    DateTime @default(now())
+  notes           String?
+  receivedBy      String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  purchaseOrder PurchaseOrder?          @relation(fields: [purchaseOrderId], references: [id])
+  supplier      Supplier                @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  branch        Branch                  @relation(fields: [branchId], references: [code])
+  items         GoodsReceivedNoteItem[]
+
+  @@index([purchaseOrderId])
+  @@index([supplierId])
+  @@index([branchId])
+  @@map("goods_received_notes")
+}
+
+model GoodsReceivedNoteItem {
+  id                  String  @id @default(cuid())
+  goodsReceivedNoteId String
+  purchaseOrderItemId String?
+  productId           String
+  quantityReceived    Int
+  unitCost            Float
+  batchId             String?
+
+  goodsReceivedNote GoodsReceivedNote  @relation(fields: [goodsReceivedNoteId], references: [id], onDelete: Cascade)
+  purchaseOrderItem PurchaseOrderItem? @relation(fields: [purchaseOrderItemId], references: [id])
+  product           Product            @relation(fields: [productId], references: [id])
+  batch             InventoryBatch?    @relation(fields: [batchId], references: [id])
+
+  @@index([goodsReceivedNoteId])
+  @@index([purchaseOrderItemId])
+  @@index([productId])
+  @@index([batchId])
+  @@map("goods_received_note_items")
+}
+
+// Stock sent back to a supplier — single-step, non-fiscal. Decrements stock
+// via the same FIFO batch consumption sales use, writes a RETURN_OUT movement.
+model SupplierReturn {
+  id           String               @id @default(cuid())
+  returnNumber String               @unique
+  supplierId   String
+  branchId     String               @default("main")
+  status       SupplierReturnStatus @default(COMPLETED)
+  reason       String?
+  returnDate   DateTime             @default(now())
+  subtotal     Float                @default(0)
+  createdBy    String?
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  supplier Supplier             @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  branch   Branch               @relation(fields: [branchId], references: [code])
+  items    SupplierReturnItem[]
+
+  @@index([supplierId])
+  @@index([branchId])
+  @@map("supplier_returns")
+}
+
+model SupplierReturnItem {
+  id               String  @id @default(cuid())
+  supplierReturnId String
+  productId        String
+  batchId          String?
+  quantity         Int
+  unitCost         Float
+  total            Float
+
+  supplierReturn SupplierReturn  @relation(fields: [supplierReturnId], references: [id], onDelete: Cascade)
+  product        Product         @relation(fields: [productId], references: [id])
+  batch          InventoryBatch? @relation(fields: [batchId], references: [id])
+
+  @@index([supplierReturnId])
+  @@index([productId])
+  @@index([batchId])
+  @@map("supplier_return_items")
 }

@@ -16,6 +16,9 @@ import {
   LogOut,
   ChevronDown,
   Receipt,
+  Contact,
+  Truck,
+  ShoppingCart,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -26,6 +29,9 @@ const NAV_ITEMS = [
   { name: 'Sales', href: '/sales', icon: Receipt, show: (p) => p.viewSales || p.refundSale },
   { name: 'Products', href: '/products', icon: Package, show: (p) => p.viewProducts },
   { name: 'Inventory', href: '/inventory', icon: Warehouse, show: (p) => p.viewInventory },
+  { name: 'Customers', href: '/customers', icon: Contact, show: (p) => p.viewCustomers },
+  { name: 'Suppliers', href: '/suppliers', icon: Truck, show: (p) => p.viewSuppliers },
+  { name: 'Purchasing', href: '/purchasing', icon: ShoppingCart, show: (p) => p.viewPurchasing },
   { name: 'Reports', href: '/reports', icon: BarChart2, show: (p) => p.viewReports },
   { name: 'Users', href: '/users', icon: Users, show: (p) => p.viewUsers },
   { name: 'Settings', href: '/settings', icon: Settings, show: (p) => p.viewSettings || p.manageSettings },

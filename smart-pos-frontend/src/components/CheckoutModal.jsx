@@ -18,6 +18,7 @@ import { routeReceiptPrint } from '../lib/printReceipt';
 import { ReceiptRenderer } from '@smartpos/receipt-engine/react';
 import { useAuth } from '../contexts/AuthContext';
 import { calculateCartTotals, formatZmw } from '../utils/cartTotals';
+import { customerApi } from '../services/customerService';
 
 const PAYMENT_METHODS = [
   { id: 'cash', label: 'Cash', shortcut: '1', icon: Banknote, hint: 'Physical cash payment' },
@@ -55,6 +56,10 @@ const CheckoutModal = ({
   const [cardLast4, setCardLast4] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
   const [customerInfo, setCustomerInfo] = useState({ name: '', phone: '', tpin: '' });
+  const [customerId, setCustomerId] = useState(null);
+  const [customerQuery, setCustomerQuery] = useState('');
+  const [customerResults, setCustomerResults] = useState([]);
+  const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
   const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [zraState, setZraState] = useState('idle'); // idle | submitting | submitted | failed
@@ -109,6 +114,37 @@ const CheckoutModal = ({
       detailRef.current.focus();
     }
   }, [step]);
+
+  // Debounced customer search — only queries while the picker is open and
+  // there's a non-empty term; selecting a result closes it (see selectCustomer).
+  useEffect(() => {
+    if (!customerSearchOpen || !customerQuery.trim()) {
+      setCustomerResults([]);
+      return;
+    }
+    const timeout = setTimeout(async () => {
+      try {
+        const results = await customerApi.fetchCustomers(customerQuery.trim());
+        setCustomerResults(results);
+      } catch (e) {
+        console.error('Customer search failed:', e);
+      }
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [customerQuery, customerSearchOpen]);
+
+  const selectCustomer = (customer) => {
+    setCustomerId(customer.id);
+    setCustomerInfo({ name: customer.name, phone: customer.phone || '', tpin: customer.tpin || '' });
+    setCustomerQuery(customer.name);
+    setCustomerSearchOpen(false);
+    setCustomerResults([]);
+  };
+
+  const clearSelectedCustomer = () => {
+    setCustomerId(null);
+    setCustomerQuery('');
+  };
 
   const goNext = () => {
     setError(null);
@@ -185,6 +221,7 @@ const CheckoutModal = ({
         paymentMethod: mapPaymentMethod(paymentMethod),
         tax: totals.vat,
         discount: totals.discount,
+        customerId,
         customerInfo,
         paymentDetails: {
           method: paymentMethod,
@@ -365,6 +402,49 @@ const CheckoutModal = ({
 
               <div>
                 <div className="label-sys">Customer (optional)</div>
+                <div className="relative mb-2">
+                  {customerId ? (
+                    <div className="flex items-center justify-between input-sys bg-gray-50">
+                      <span className="text-sm text-gray-800">{customerInfo.name} — on file</span>
+                      <button
+                        type="button"
+                        onClick={clearSelectedCustomer}
+                        className="text-gray-400 hover:text-gray-600 text-xs"
+                        aria-label="Clear selected customer"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <input
+                      type="text"
+                      placeholder="Search existing customer..."
+                      value={customerQuery}
+                      onChange={(e) => {
+                        setCustomerQuery(e.target.value);
+                        setCustomerSearchOpen(true);
+                      }}
+                      onFocus={() => setCustomerSearchOpen(true)}
+                      onBlur={() => setTimeout(() => setCustomerSearchOpen(false), 150)}
+                      className="input-sys"
+                    />
+                  )}
+                  {customerSearchOpen && customerResults.length > 0 && (
+                    <div className="absolute z-10 mt-1 w-full bg-white border border-surface-border rounded shadow-lg max-h-40 overflow-y-auto">
+                      {customerResults.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onMouseDown={() => selectCustomer(c)}
+                          className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex justify-between"
+                        >
+                          <span className="text-gray-900">{c.name}</span>
+                          <span className="text-gray-400">{c.phone || c.tpin || ''}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <div className="grid grid-cols-2 gap-2">
                   <input
                     type="text"

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const prisma = require('../../lib/prisma');
 const { authenticateToken, requirePermission } = require('../../middleware/auth');
+const { receiveStock } = require('../../lib/receiving');
 const stockSyncService = require('../../services/stockSyncService');
 const auditService = require('../../services/auditService');
 
@@ -197,94 +198,19 @@ router.post('/receive', authenticateToken, requirePermission('inventory:write'),
       return res.status(400).json({ error: 'Missing required fields: productId, quantity, unitCost' });
     }
 
-    const result = await prisma.$transaction(async (tx) => {
-      // Get or create inventory record
-      let inventory = await tx.inventory.findUnique({
-        where: {
-          productId_branchId: {
-            productId,
-            branchId
-          }
-        }
-      });
-
-      if (!inventory) {
-        inventory = await tx.inventory.create({
-          data: {
-            productId,
-            branchId,
-            currentStock: 0,
-            averageCost: 0
-          }
-        });
-      }
-
-      const previousStock = inventory.currentStock;
-      const newStock = previousStock + Math.abs(parseInt(quantity));
-      
-      // Calculate new average cost (weighted average)
-      const totalCurrentValue = previousStock * inventory.averageCost;
-      const newValue = Math.abs(parseInt(quantity)) * parseFloat(unitCost);
-      const newAverageCost = (totalCurrentValue + newValue) / newStock;
-
-      // Update inventory
-      const updatedInventory = await tx.inventory.update({
-        where: {
-          productId_branchId: {
-            productId,
-            branchId
-          }
-        },
-        data: {
-          currentStock: newStock,
-          averageCost: newAverageCost,
-          totalValue: newStock * newAverageCost,
-          lastCost: parseFloat(unitCost),
-          lastStockedDate: new Date(),
-          lowStockAlert: newStock <= inventory.reorderPoint,
-          excessStockAlert: newStock >= inventory.maximumStock
-        }
-      });
-
-      // Create inventory batch record
-      const inventoryBatch = await tx.inventoryBatch.create({
-        data: {
-          inventoryId: inventory.id,
-          productId,
-          quantity: Math.abs(parseInt(quantity)),
-          unitCost: parseFloat(unitCost),
-          totalCost: Math.abs(parseInt(quantity)) * parseFloat(unitCost),
-          costPrice: parseFloat(unitCost),
-          sellingPrice: parseFloat(unitCost) * 1.2, // Default markup
-          supplier: supplierInfo || 'Unknown',
-          batchNumber: batchNumber || `BATCH-${Date.now()}`,
-          expiryDate: expiryDate ? new Date(expiryDate) : null,
-          receivedDate: new Date(receivedDate),
-          status: 'ACTIVE'
-        }
-      });
-
-      // Create stock movement record
-      const stockMovement = await tx.stockMovement.create({
-        data: {
-          productId,
-          branchId,
-          movementType: 'PURCHASE_IN',
-          quantity: Math.abs(parseInt(quantity)),
-          previousStock,
-          newStock,
-          unitCost: parseFloat(unitCost),
-          totalCost: Math.abs(parseInt(quantity)) * parseFloat(unitCost),
-          referenceType: 'PURCHASE',
-          supplierInfo,
-          batchNumber,
-          expiryDate: expiryDate ? new Date(expiryDate) : null,
-          userId
-        }
-      });
-
-      return { updatedInventory, inventoryBatch, stockMovement };
-    });
+    const result = await prisma.$transaction((tx) =>
+      receiveStock(tx, {
+        productId,
+        quantity,
+        unitCost,
+        branchId,
+        supplierInfo,
+        batchNumber,
+        expiryDate,
+        receivedDate,
+        userId,
+      })
+    );
 
     res.json({
       message: 'Stock received successfully',

@@ -19,6 +19,9 @@ const PERMISSIONS = {
     'reports:read', 'reports:write',
     'settings:read', 'settings:write',
     'shifts:read', 'shifts:write',
+    'customers:read', 'customers:write', 'customers:delete',
+    'suppliers:read', 'suppliers:write', 'suppliers:delete',
+    'purchasing:read', 'purchasing:write',
     'zra:submit', 'zra:sync', 'zra:read',
     'audit:read'
   ],
@@ -32,6 +35,9 @@ const PERMISSIONS = {
     'reports:read',
     'settings:read',
     'shifts:read', 'shifts:write',
+    'customers:read', 'customers:write', 'customers:delete',
+    'suppliers:read', 'suppliers:write', 'suppliers:delete',
+    'purchasing:read', 'purchasing:write',
     'zra:submit', 'zra:sync', 'zra:read',
     'audit:read'
   ],
@@ -42,6 +48,7 @@ const PERMISSIONS = {
     'sales:read', 'sales:write',
     'receipts:read',
     'shifts:write',
+    'customers:read', 'customers:write',
   ],
   VIEWER: [
     'products:read',
@@ -50,6 +57,9 @@ const PERMISSIONS = {
     'sales:read',
     'reports:read',
     'shifts:read',
+    'customers:read',
+    'suppliers:read',
+    'purchasing:read',
   ]
 };
 
