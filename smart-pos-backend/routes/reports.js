@@ -3,6 +3,7 @@ const router = express.Router();
 const prisma = require('../lib/prisma');
 const { authenticateToken, requirePermission } = require('../middleware/auth');
 const auditService = require('../services/auditService');
+const reportsLib = require('../lib/reports');
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -194,5 +195,109 @@ router.get('/transactions', authenticateToken, requirePermission('reports:read')
     res.status(500).json({ error: 'Failed to build transactions report' });
   }
 });
+
+/* ------------------------------------------------------------------ *
+ * Phase 4 reports — aggregation lives in lib/reports.js; these handlers
+ * only parse query params, pick JSON vs CSV, and audit the export.
+ * ------------------------------------------------------------------ */
+
+/**
+ * Wires one report function to a route: JSON by default, CSV on ?format=csv.
+ * Only the CSV branch is audit-logged — an export leaves the system, a page
+ * view doesn't, and logging every view would bury the real signal.
+ */
+function reportHandler({ permission, name, build, buildCsv, filenamePrefix, csvSource }) {
+  return [
+    authenticateToken,
+    requirePermission(permission),
+    async (req, res) => {
+      try {
+        const params = {
+          startDate: req.query.startDate,
+          endDate: req.query.endDate,
+          userId: req.query.userId,
+          supplierId: req.query.supplierId,
+          status: req.query.status,
+        };
+
+        const report = await build(params);
+
+        if (req.query.format === 'csv') {
+          const source = csvSource ? await csvSource(params) : report;
+          const csv = buildCsv(source);
+          const stamp = new Date().toISOString().slice(0, 10);
+          const filename = `${filenamePrefix}_${stamp}.csv`;
+
+          auditService.safeLog(auditService.eventTypes.DATA_EXPORT, {
+            ...auditService.contextFromReq(req),
+            entityType: 'REPORT',
+            action: `EXPORT_${name}_CSV`,
+            description: `Exported ${name.toLowerCase().replace(/_/g, ' ')} report to CSV (${filename})`,
+          });
+
+          res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+          res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+          return res.send(csv);
+        }
+
+        return res.json(report);
+      } catch (error) {
+        console.error(`[reports] ${name.toLowerCase()} failed:`, error.message);
+        return res.status(error.status || 500).json({ error: `Failed to build ${name.toLowerCase().replace(/_/g, ' ')} report` });
+      }
+    },
+  ];
+}
+
+/** GET /api/reports/tax — VAT liability by category. */
+router.get('/tax', ...reportHandler({
+  permission: 'reports:read',
+  name: 'TAX',
+  build: reportsLib.getTaxReport,
+  buildCsv: reportsLib.taxReportCsv,
+  filenamePrefix: 'tax_report',
+}));
+
+/** GET /api/reports/profit — revenue vs COGS from SALE_OUT movements. */
+router.get('/profit', ...reportHandler({
+  permission: 'reports:read',
+  name: 'PROFIT',
+  build: reportsLib.getProfitReport,
+  buildCsv: reportsLib.profitReportCsv,
+  filenamePrefix: 'profit_report',
+}));
+
+/** GET /api/reports/shifts — combined cash reconciliation + shift history. */
+router.get('/shifts', ...reportHandler({
+  permission: 'reports:read',
+  name: 'SHIFTS',
+  build: reportsLib.getShiftHistoryReport,
+  buildCsv: reportsLib.shiftHistoryCsv,
+  filenamePrefix: 'shift_report',
+}));
+
+/** GET /api/reports/purchases — supplier spend, ordered vs received. */
+router.get('/purchases', ...reportHandler({
+  permission: 'reports:read',
+  name: 'PURCHASES',
+  build: reportsLib.getPurchaseReport,
+  buildCsv: reportsLib.purchaseReportCsv,
+  filenamePrefix: 'purchase_report',
+}));
+
+/**
+ * GET /api/reports/user-activity — audit-trail summary.
+ * Gated on audit:read, not reports:read: a VIEWER can see business numbers
+ * but has no business reading who did what. The CSV exports the raw event
+ * list rather than the summary, capped in lib/reports.js.
+ */
+router.get('/user-activity', ...reportHandler({
+  permission: 'audit:read',
+  name: 'USER_ACTIVITY',
+  build: reportsLib.getUserActivityReport,
+  buildCsv: reportsLib.userActivityCsv,
+  csvSource: reportsLib.getUserActivityEvents,
+  filenamePrefix: 'user_activity',
+}));
 
 module.exports = router;
