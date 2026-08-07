@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import CashierHeader from './CashierHeader';
 import CashierTabs from './CashierTabs';
 import ProductGrid from './ProductGrid';
@@ -34,6 +34,13 @@ const CashierDashboard = () => {
   const [printerStatus, setPrinterStatus] = useState('unknown');
   const [networkStatus] = useState('connected');
   const [stockNotice, setStockNotice] = useState('');
+
+  // Silent refresh plumbing. Refs rather than state: these only coordinate
+  // the polling loop and must never themselves trigger a re-render, which on
+  // a till would mean the grid twitching under the cashier's finger.
+  const refreshInFlight = useRef(false);
+  const showCheckoutRef = useRef(false);
+  showCheckoutRef.current = showCheckout;
 
   const cartTotals = useMemo(
     () => calculateCartTotals(cart, { discountType, discountValue }),
@@ -113,6 +120,54 @@ const CashierDashboard = () => {
     }
   };
 
+  /**
+   * Refresh product stock without disturbing the screen.
+   *
+   * Deliberately not fetchInitialData(): that flips isLoading, which makes
+   * ProductGrid swap the whole grid for a loading state — unusable mid-service.
+   * It also falls back to mock products on failure, so a momentary network
+   * blip would silently replace the real catalogue with demo data. A refresh
+   * keeps the last good data instead and simply tries again next tick.
+   */
+  const refreshProductsSilently = useCallback(async () => {
+    if (refreshInFlight.current) return;
+    refreshInFlight.current = true;
+    try {
+      const productsData = await fetchProducts();
+      if (Array.isArray(productsData) && productsData.length > 0) {
+        setProducts(productsData);
+        setUsingMockData(false);
+      }
+    } catch {
+      // Intentionally silent: stale stock for one tick is far better than an
+      // error toast interrupting a queue, and the next tick will recover.
+    } finally {
+      refreshInFlight.current = false;
+    }
+  }, []);
+
+  // Keep the till live. Paused while the tab is hidden (a till is often left
+  // open all day) and while checkout is open, so stock can't shift under a
+  // transaction that is already being confirmed.
+  useEffect(() => {
+    const POLL_MS = 20000;
+    const tick = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (showCheckoutRef.current) return;
+      refreshProductsSilently();
+    };
+    const interval = setInterval(tick, POLL_MS);
+    // Catch up immediately when the cashier returns to the tab.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refreshProductsSilently();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [refreshProductsSilently]);
+
   const getAvailableStock = (productId) =>
     products.find((product) => product.id === productId)?.stock ?? 0;
 
@@ -182,6 +237,9 @@ const CashierDashboard = () => {
   const handleCheckoutSuccess = () => {
     setShowCheckout(false);
     clearCart();
+    // The sale just consumed stock; pull the new figures immediately rather
+    // than leaving the next customer to be served against pre-sale numbers.
+    refreshProductsSilently();
   };
 
   const handleCheckoutClose = () => {
