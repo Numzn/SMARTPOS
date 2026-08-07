@@ -4,6 +4,7 @@ import CashMovementModal from '../components/shifts/CashMovementModal';
 import CloseShiftModal from '../components/shifts/CloseShiftModal';
 import ShiftReportPanel from '../components/shifts/ShiftReportPanel';
 import ShiftsTable from '../components/shifts/ShiftsTable';
+import ShiftTransactionJournal from '../components/shifts/ShiftTransactionJournal';
 import { shiftApi } from '../services/shiftService';
 import { usePermissions } from '../hooks/usePermissions';
 
@@ -31,6 +32,8 @@ const CashRegisterPage = () => {
   // reconciliation would vanish off the screen — and a cashier without
   // shifts:read has no history table to find it in again.
   const [closedReport, setClosedReport] = useState(null);
+  // Shift whose transaction journal is open, if any.
+  const [journalShiftId, setJournalShiftId] = useState(null);
 
   const loadCurrent = useCallback(async () => {
     if (!canOperate) return null;
@@ -145,7 +148,7 @@ const CashRegisterPage = () => {
               Dismiss
             </button>
           </div>
-          <ShiftReportPanel report={closedReport} onPrint={() => window.print()} />
+          <ShiftReportPanel report={closedReport} onViewTransactions={(s) => setJournalShiftId(s.id)} />
         </section>
       )}
 
@@ -206,7 +209,7 @@ const CashRegisterPage = () => {
                 </div>
               </div>
 
-              <ShiftReportPanel report={currentReport} onPrint={() => window.print()} />
+              <ShiftReportPanel report={currentReport} onViewTransactions={(s) => setJournalShiftId(s.id)} />
             </>
           )}
         </section>
@@ -260,9 +263,16 @@ const CashRegisterPage = () => {
                 Close
               </button>
             </div>
-            <ShiftReportPanel report={historyReport} />
+            <ShiftReportPanel report={historyReport} onViewTransactions={(s) => setJournalShiftId(s.id)} />
           </div>
         </div>
+      )}
+
+      {journalShiftId && (
+        <ShiftTransactionJournal
+          shiftId={journalShiftId}
+          onClose={() => setJournalShiftId(null)}
+        />
       )}
     </div>
   );

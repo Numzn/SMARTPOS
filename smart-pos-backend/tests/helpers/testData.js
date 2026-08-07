@@ -139,9 +139,24 @@ async function createTestPurchaseOrder({ supplierId, branchId = DEFAULT_BRANCH_C
   });
 }
 
-async function createTestShift({ userId, branchId = DEFAULT_BRANCH_CODE, openingFloat = 0, status = 'OPEN' }) {
+async function createTestShift({
+  userId,
+  branchId = DEFAULT_BRANCH_CODE,
+  openingFloat = 0,
+  status = 'OPEN',
+  shiftNumber,
+}) {
   return prisma.shift.create({
-    data: { userId, branchId, openingFloat, status },
+    data: {
+      userId,
+      branchId,
+      openingFloat,
+      status,
+      // shiftNumber is unique and required; tests create shifts directly
+      // rather than through openShift(), so generate a collision-proof one
+      // here instead of running the sequential scan.
+      shiftNumber: shiftNumber || `TEST-SHIFT-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    },
   });
 }
 

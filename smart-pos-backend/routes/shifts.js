@@ -8,6 +8,7 @@ const {
   recordCashMovement,
   closeShift,
   getShiftReport,
+  getShiftTransactions,
 } = require('../lib/shift');
 const { authenticateToken, requirePermission, requireAnyPermission } = require('../middleware/auth');
 const { DEFAULT_BRANCH } = require('../lib/inventoryStock');
@@ -130,6 +131,41 @@ router.get(
     } catch (error) {
       console.error('Error building shift report:', error);
       res.status(error.status || 500).json({ error: error.message || 'Failed to build shift report' });
+    }
+  }
+);
+
+/**
+ * GET /api/shifts/:id/transactions — the Shift Transaction Journal: every
+ * sale, refund, cancellation and cash movement in the shift, chronologically.
+ * Same access rule as the report: a cashier may inspect their own shift,
+ * shifts:read sees any.
+ */
+router.get(
+  '/:id/transactions',
+  authenticateToken,
+  requireAnyPermission('shifts:read', 'shifts:write'),
+  async (req, res) => {
+    try {
+      const shift = await prisma.shift.findUnique({ where: { id: req.params.id } });
+      if (!shift) {
+        return res.status(404).json({ error: 'Shift not found' });
+      }
+      if (!req.user.permissions.includes('shifts:read') && shift.userId !== req.user.userId) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      const journal = await getShiftTransactions(req.params.id, {
+        search: req.query.search,
+        type: req.query.type,
+        sort: req.query.sort,
+        page: req.query.page,
+        limit: req.query.limit,
+      });
+      res.json(journal);
+    } catch (error) {
+      console.error('Error building shift transaction journal:', error);
+      res.status(error.status || 500).json({ error: error.message || 'Failed to build transaction journal' });
     }
   }
 );

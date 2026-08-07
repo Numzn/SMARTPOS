@@ -41,6 +41,16 @@ export const shiftApi = {
     });
   },
 
+  /** Shift Transaction Journal — the drill-down behind the X/Z summary. */
+  fetchShiftTransactions: (id, params = {}) => {
+    const search = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null && v !== '') search.set(k, v);
+    }
+    const qs = search.toString();
+    return apiFetch(`/shifts/${id}/transactions${qs ? `?${qs}` : ''}`);
+  },
+
   closeShift: (id, { countedCash, notes }) =>
     apiFetch(`/shifts/${id}/close`, {
       method: 'POST',

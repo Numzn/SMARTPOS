@@ -473,6 +473,7 @@ model Branch {
 // reconciled against what sales/refunds during the shift say should be there.
 model Shift {
   id             String      @id @default(cuid())
+  shiftNumber    String      @unique // human-readable reference on X/Z reports
   branchId       String      @default("main")
   userId         String      // cashier who opened the shift
   status         ShiftStatus @default(OPEN)
