@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useId } from 'react';
 
 export const money = (n) => `K${Number(n || 0).toFixed(2)}`;
 export const pct = (n) => `${Number(n || 0).toFixed(1)}%`;
@@ -40,11 +40,18 @@ export const StatTiles = ({ tiles }) => (
  * tab-specific dropdown (cashier, supplier, status) so each tab doesn't have
  * to rebuild the surrounding layout.
  */
-export const ReportFilterBar = ({ range, setRange, onApply, onExport, exporting, children }) => (
+export const ReportFilterBar = ({ range, setRange, onApply, onExport, exporting, children }) => {
+  // Generated rather than fixed: this bar is reused across every report tab,
+  // and hardcoded ids would collide if two ever rendered at once.
+  const fromId = useId();
+  const toId = useId();
+
+  return (
   <div className="bg-white rounded-lg shadow-sm p-4 flex flex-wrap items-end gap-3">
     <div>
-      <label className="block text-xs font-medium text-gray-600 mb-1">From</label>
+      <label htmlFor={fromId} className="block text-xs font-medium text-gray-600 mb-1">From</label>
       <input
+        id={fromId}
         type="date"
         value={range.startDate}
         onChange={(e) => setRange({ ...range, startDate: e.target.value })}
@@ -52,8 +59,9 @@ export const ReportFilterBar = ({ range, setRange, onApply, onExport, exporting,
       />
     </div>
     <div>
-      <label className="block text-xs font-medium text-gray-600 mb-1">To</label>
+      <label htmlFor={toId} className="block text-xs font-medium text-gray-600 mb-1">To</label>
       <input
+        id={toId}
         type="date"
         value={range.endDate}
         onChange={(e) => setRange({ ...range, endDate: e.target.value })}
@@ -77,7 +85,8 @@ export const ReportFilterBar = ({ range, setRange, onApply, onExport, exporting,
       </button>
     )}
   </div>
-);
+  );
+};
 
 /**
  * Table with a title. `columns` entries are {key, label, align?, render?}.

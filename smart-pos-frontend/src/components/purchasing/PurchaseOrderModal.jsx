@@ -69,8 +69,8 @@ const PurchaseOrderModal = ({
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
           <div>
-            <label className="block text-sm font-medium mb-1">Supplier *</label>
-            <select
+            <label className="block text-sm font-medium mb-1" htmlFor="purchaseordermodal-f1">Supplier *</label>
+            <select id="purchaseordermodal-f1"
               value={poData.supplierId}
               onChange={(e) => setPoData({ ...poData, supplierId: e.target.value })}
               className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
@@ -87,8 +87,8 @@ const PurchaseOrderModal = ({
             {errors?.supplierId && <p className="text-red-500 text-xs mt-1">{errors.supplierId}</p>}
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">Expected Date</label>
-            <input
+            <label className="block text-sm font-medium mb-1" htmlFor="purchaseordermodal-f2">Expected Date</label>
+            <input id="purchaseordermodal-f2"
               type="date"
               value={poData.expectedDate || ''}
               onChange={(e) => setPoData({ ...poData, expectedDate: e.target.value })}
@@ -98,8 +98,8 @@ const PurchaseOrderModal = ({
         </div>
 
         <div className="mb-4">
-          <label className="block text-sm font-medium mb-1">Notes</label>
-          <textarea
+          <label className="block text-sm font-medium mb-1" htmlFor="purchaseordermodal-f3">Notes</label>
+          <textarea id="purchaseordermodal-f3"
             value={poData.notes || ''}
             onChange={(e) => setPoData({ ...poData, notes: e.target.value })}
             rows={2}

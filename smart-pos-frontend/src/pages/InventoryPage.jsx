@@ -396,8 +396,8 @@ const InventoryPage = () => {
             <h3 className="text-lg font-semibold mb-4">Adjust Stock</h3>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1">Direction</label>
-                <select
+                <label className="block text-sm font-medium mb-1" htmlFor="inventorypage-f1">Direction</label>
+                <select id="inventorypage-f1"
                   value={adjustmentData.adjustmentType}
                   onChange={(e) =>
                     setAdjustmentData({ ...adjustmentData, adjustmentType: e.target.value })
@@ -409,8 +409,8 @@ const InventoryPage = () => {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Quantity</label>
-                <input
+                <label className="block text-sm font-medium mb-1" htmlFor="inventorypage-f2">Quantity</label>
+                <input id="inventorypage-f2"
                   type="number"
                   min="1"
                   placeholder="Units"
@@ -422,8 +422,8 @@ const InventoryPage = () => {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Reason</label>
-                <select
+                <label className="block text-sm font-medium mb-1" htmlFor="inventorypage-f3">Reason</label>
+                <select id="inventorypage-f3"
                   value={adjustmentData.reason}
                   onChange={(e) => setAdjustmentData({
                     ...adjustmentData,
@@ -467,8 +467,8 @@ const InventoryPage = () => {
             <h3 className="text-lg font-semibold mb-4">Receive Stock</h3>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1">Quantity Received</label>
-                <input
+                <label className="block text-sm font-medium mb-1" htmlFor="inventorypage-f4">Quantity Received</label>
+                <input id="inventorypage-f4"
                   type="number"
                   placeholder="Enter quantity"
                   value={receiveData.quantity}
@@ -480,8 +480,8 @@ const InventoryPage = () => {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Unit Cost</label>
-                <input
+                <label className="block text-sm font-medium mb-1" htmlFor="inventorypage-f5">Unit Cost</label>
+                <input id="inventorypage-f5"
                   type="number"
                   step="0.01"
                   placeholder="Enter unit cost"
@@ -494,8 +494,8 @@ const InventoryPage = () => {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Supplier Info</label>
-                <input
+                <label className="block text-sm font-medium mb-1" htmlFor="inventorypage-f6">Supplier Info</label>
+                <input id="inventorypage-f6"
                   type="text"
                   placeholder="Supplier name or info"
                   value={receiveData.supplierInfo}
@@ -507,8 +507,8 @@ const InventoryPage = () => {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Batch Number (Optional)</label>
-                <input
+                <label className="block text-sm font-medium mb-1" htmlFor="inventorypage-f7">Batch Number (Optional)</label>
+                <input id="inventorypage-f7"
                   type="text"
                   placeholder="Batch or lot number"
                   value={receiveData.batchNumber}
@@ -520,8 +520,8 @@ const InventoryPage = () => {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Expiry Date (Optional)</label>
-                <input
+                <label className="block text-sm font-medium mb-1" htmlFor="inventorypage-f8">Expiry Date (Optional)</label>
+                <input id="inventorypage-f8"
                   type="date"
                   value={receiveData.expiryDate}
                   onChange={(e) => setReceiveData({

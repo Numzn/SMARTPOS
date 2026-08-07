@@ -62,8 +62,8 @@ const SupplierReturnModal = ({
     >
 
         <div className="mb-4">
-          <label className="block text-sm font-medium mb-1">Supplier *</label>
-          <select
+          <label className="block text-sm font-medium mb-1" htmlFor="supplierreturnmodal-f1">Supplier *</label>
+          <select id="supplierreturnmodal-f1"
             value={returnData.supplierId}
             onChange={(e) => setReturnData({ ...returnData, supplierId: e.target.value })}
             className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
@@ -81,8 +81,8 @@ const SupplierReturnModal = ({
         </div>
 
         <div className="mb-4">
-          <label className="block text-sm font-medium mb-1">Reason</label>
-          <textarea
+          <label className="block text-sm font-medium mb-1" htmlFor="supplierreturnmodal-f2">Reason</label>
+          <textarea id="supplierreturnmodal-f2"
             value={returnData.reason || ''}
             onChange={(e) => setReturnData({ ...returnData, reason: e.target.value })}
             rows={2}

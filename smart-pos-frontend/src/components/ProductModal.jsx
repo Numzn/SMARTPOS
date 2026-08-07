@@ -76,8 +76,8 @@ const ProductModal = ({
           </div>
           
           <div>
-            <label className="block text-sm font-medium mb-1">Product Name *</label>
-            <input
+            <label className="block text-sm font-medium mb-1" htmlFor="productmodal-f1">Product Name *</label>
+            <input id="productmodal-f1"
               type="text"
               placeholder="Enter product name"
               value={productData.name}
@@ -90,8 +90,8 @@ const ProductModal = ({
           </div>
           
           <div>
-            <label className="block text-sm font-medium mb-1">SKU *</label>
-            <input
+            <label className="block text-sm font-medium mb-1" htmlFor="productmodal-f2">SKU *</label>
+            <input id="productmodal-f2"
               type="text"
               placeholder="Enter SKU"
               value={productData.sku}
@@ -104,8 +104,8 @@ const ProductModal = ({
           </div>
           
           <div>
-            <label className="block text-sm font-medium mb-1">Selling Price (K) *</label>
-            <input
+            <label className="block text-sm font-medium mb-1" htmlFor="productmodal-f3">Selling Price (K) *</label>
+            <input id="productmodal-f3"
               type="number"
               step="0.01"
               placeholder="Enter price"
@@ -119,8 +119,8 @@ const ProductModal = ({
           </div>
           
           <div>
-            <label className="block text-sm font-medium mb-1">Cost Price (K)</label>
-            <input
+            <label className="block text-sm font-medium mb-1" htmlFor="productmodal-f4">Cost Price (K)</label>
+            <input id="productmodal-f4"
               type="number"
               step="0.01"
               placeholder="Enter cost"
@@ -131,8 +131,8 @@ const ProductModal = ({
           </div>
           
           <div>
-            <label className="block text-sm font-medium mb-1">Category *</label>
-            <select
+            <label className="block text-sm font-medium mb-1" htmlFor="productmodal-f5">Category *</label>
+            <select id="productmodal-f5"
               value={productData.categoryId}
               onChange={(e) => setProductData({ ...productData, categoryId: e.target.value })}
               className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
@@ -155,8 +155,8 @@ const ProductModal = ({
           </div>
           
           <div>
-            <label className="block text-sm font-medium mb-1">Tax Rate (%)</label>
-            <input
+            <label className="block text-sm font-medium mb-1" htmlFor="productmodal-f6">Tax Rate (%)</label>
+            <input id="productmodal-f6"
               type="number"
               step="0.01"
               value={productData.taxRate}
@@ -166,8 +166,8 @@ const ProductModal = ({
           </div>
           
           <div className="md:col-span-2">
-            <label className="block text-sm font-medium mb-1">Description</label>
-            <textarea
+            <label className="block text-sm font-medium mb-1" htmlFor="productmodal-f7">Description</label>
+            <textarea id="productmodal-f7"
               placeholder="Enter product description"
               value={productData.description}
               onChange={(e) => setProductData({ ...productData, description: e.target.value })}
@@ -182,8 +182,8 @@ const ProductModal = ({
           </div>
           
           <div>
-            <label className="block text-sm font-medium mb-1">VAT Category</label>
-            <select
+            <label className="block text-sm font-medium mb-1" htmlFor="productmodal-f8">VAT Category</label>
+            <select id="productmodal-f8"
               value={productData.vatCategoryCode}
               onChange={(e) => setProductData({ ...productData, vatCategoryCode: e.target.value })}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -195,8 +195,8 @@ const ProductModal = ({
           </div>
           
           <div>
-            <label className="block text-sm font-medium mb-1">ZRA Classification Code</label>
-            <input
+            <label className="block text-sm font-medium mb-1" htmlFor="productmodal-f9">ZRA Classification Code</label>
+            <input id="productmodal-f9"
               type="text"
               placeholder="Enter ZRA classification code"
               value={productData.zraClassificationCode}
@@ -206,8 +206,8 @@ const ProductModal = ({
           </div>
           
           <div>
-            <label className="block text-sm font-medium mb-1">Excise Tax Code</label>
-            <input
+            <label className="block text-sm font-medium mb-1" htmlFor="productmodal-f10">Excise Tax Code</label>
+            <input id="productmodal-f10"
               type="text"
               placeholder="Enter excise tax code (if applicable)"
               value={productData.exciseTaxCode}
@@ -231,8 +231,8 @@ const ProductModal = ({
 
           {productData.hasExpiry && (
             <div>
-              <label className="block text-sm font-medium mb-1">Shelf Life (Days) *</label>
-              <input
+              <label className="block text-sm font-medium mb-1" htmlFor="productmodal-f11">Shelf Life (Days) *</label>
+              <input id="productmodal-f11"
                 type="number"
                 placeholder="Enter shelf life in days"
                 value={productData.shelfLifeDays}
@@ -254,8 +254,8 @@ const ProductModal = ({
               </div>
               
               <div>
-                <label className="block text-sm font-medium mb-1">Initial Quantity</label>
-                <input
+                <label className="block text-sm font-medium mb-1" htmlFor="productmodal-f12">Initial Quantity</label>
+                <input id="productmodal-f12"
                   type="number"
                   placeholder="Enter initial stock quantity"
                   value={productData.initialQuantity || ''}
@@ -265,8 +265,8 @@ const ProductModal = ({
               </div>
               
               <div>
-                <label className="block text-sm font-medium mb-1">Minimum Stock Level</label>
-                <input
+                <label className="block text-sm font-medium mb-1" htmlFor="productmodal-f13">Minimum Stock Level</label>
+                <input id="productmodal-f13"
                   type="number"
                   placeholder="Enter minimum stock alert level"
                   value={productData.minStockLevel || ''}

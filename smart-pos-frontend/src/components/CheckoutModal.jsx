@@ -492,8 +492,8 @@ const CheckoutModal = ({
               {paymentMethod === 'cash' && (
                 <div className="space-y-3">
                   <div>
-                    <label className="label-sys">Cash received</label>
-                    <input
+                    <label className="label-sys" htmlFor="checkoutmodal-f1">Cash received</label>
+                    <input id="checkoutmodal-f1"
                       ref={detailRef}
                       type="number"
                       step="0.01"
@@ -519,8 +519,8 @@ const CheckoutModal = ({
 
               {paymentMethod === 'card' && (
                 <div>
-                  <label className="label-sys">Card last 4 digits</label>
-                  <input
+                  <label className="label-sys" htmlFor="checkoutmodal-f2">Card last 4 digits</label>
+                  <input id="checkoutmodal-f2"
                     ref={detailRef}
                     type="text"
                     inputMode="numeric"
@@ -538,8 +538,8 @@ const CheckoutModal = ({
 
               {paymentMethod === 'mobile' && (
                 <div>
-                  <label className="label-sys">Mobile money number</label>
-                  <input
+                  <label className="label-sys" htmlFor="checkoutmodal-f3">Mobile money number</label>
+                  <input id="checkoutmodal-f3"
                     ref={detailRef}
                     type="tel"
                     placeholder="0976 123 456"

@@ -143,8 +143,8 @@ const ShiftTransactionJournal = ({ shiftId, onClose }) => {
 
         <div className="flex flex-wrap gap-3 items-end">
           <div className="flex-1 min-w-[200px]">
-            <label className="block text-xs font-medium text-gray-600 mb-1">Search</label>
-            <input
+            <label className="block text-xs font-medium text-gray-600 mb-1" htmlFor="shifttransactionjournal-f1">Search</label>
+            <input id="shifttransactionjournal-f1"
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -153,8 +153,8 @@ const ShiftTransactionJournal = ({ shiftId, onClose }) => {
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Type</label>
-            <select
+            <label className="block text-xs font-medium text-gray-600 mb-1" htmlFor="shifttransactionjournal-f2">Type</label>
+            <select id="shifttransactionjournal-f2"
               value={type}
               onChange={(e) => setType(e.target.value)}
               className="px-3 py-2 border border-gray-300 rounded-md text-sm"
@@ -165,8 +165,8 @@ const ShiftTransactionJournal = ({ shiftId, onClose }) => {
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Sort</label>
-            <select
+            <label className="block text-xs font-medium text-gray-600 mb-1" htmlFor="shifttransactionjournal-f3">Sort</label>
+            <select id="shifttransactionjournal-f3"
               value={sort}
               onChange={(e) => setSort(e.target.value)}
               className="px-3 py-2 border border-gray-300 rounded-md text-sm"

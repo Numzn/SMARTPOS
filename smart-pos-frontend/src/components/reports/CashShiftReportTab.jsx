@@ -46,8 +46,8 @@ const CashShiftReportTab = () => {
         exporting={exporting}
       >
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Status</label>
-          <select
+          <label className="block text-xs font-medium text-gray-600 mb-1" htmlFor="cashshiftreporttab-f1">Status</label>
+          <select id="cashshiftreporttab-f1"
             value={status}
             onChange={(e) => setStatus(e.target.value)}
             className="px-3 py-2 border border-gray-300 rounded-md text-sm"
