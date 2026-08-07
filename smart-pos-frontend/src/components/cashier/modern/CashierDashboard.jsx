@@ -65,8 +65,13 @@ const CashierDashboard = () => {
         if (!cancelled) {
           setZraStatus(status.initialized ? 'connected' : 'not initialized');
         }
-      } catch {
-        if (!cancelled) setZraStatus('offline');
+      } catch (err) {
+        if (cancelled) return;
+        // Distinguish "we aren't allowed to look" from "the fiscal service is
+        // down". Reporting a 401/403 as offline told cashiers ZRA had failed
+        // when it was healthy — the kind of message that stops someone
+        // trading for no reason.
+        setZraStatus(err?.status === 403 || err?.status === 401 ? 'status unavailable' : 'offline');
       }
     };
 

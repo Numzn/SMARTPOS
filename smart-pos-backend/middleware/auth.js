@@ -49,6 +49,13 @@ const PERMISSIONS = {
     'receipts:read',
     'shifts:write',
     'customers:read', 'customers:write',
+    // Read-only fiscal device status. A cashier has to be able to tell whether
+    // ZRA submission is working — it decides whether they keep trading — and
+    // without this the till's status call 403s and the UI reports the fiscal
+    // service as offline when it is perfectly healthy. The payload is device
+    // identity (TPIN, branch, device serial) that already prints on every
+    // receipt they handle, so this grants no visibility they lacked.
+    'zra:read',
   ],
   VIEWER: [
     'products:read',
