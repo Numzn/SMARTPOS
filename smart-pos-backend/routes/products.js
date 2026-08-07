@@ -22,11 +22,38 @@ async function registerAfterSave(productId) {
 }
 
 // Get all products with category info (public endpoint with optional auth for enhanced features)
+/**
+ * Search and pagination are opt-in.
+ *
+ * The cashier grid fetches the whole catalogue once and filters client-side,
+ * which is right for a till you browse. Paginating by default would silently
+ * truncate it to the first page mid-service, so `?q=`, `?page=` and `?limit=`
+ * only take effect when explicitly asked for, and the response stays a plain
+ * array either way. Callers that need server-side search can adopt it without
+ * anything else changing.
+ */
 router.get('/', optionalAuth, async (req, res) => {
   try {
     const branchId = req.query.branchId || DEFAULT_BRANCH;
 
+    const where = { };
+    if (req.query.q) {
+      const q = String(req.query.q);
+      where.OR = [
+        { name: { contains: q, mode: 'insensitive' } },
+        { sku: { contains: q, mode: 'insensitive' } },
+        { barcode: { contains: q } },
+        { brand: { contains: q, mode: 'insensitive' } },
+      ];
+    }
+
+    // Only paginate when asked. No default limit — see the note above.
+    const hasPaging = req.query.page != null || req.query.limit != null;
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(500, Math.max(1, parseInt(req.query.limit, 10) || 50));
+
     const products = await prisma.product.findMany({
+      where,
       include: {
         category: true,
         inventory: { where: { branchId } },
@@ -40,7 +67,14 @@ router.get('/', optionalAuth, async (req, res) => {
       orderBy: {
         createdAt: 'desc',
       },
+      ...(hasPaging ? { skip: (page - 1) * limit, take: limit } : {}),
     });
+
+    if (hasPaging) {
+      // Surfaced in a header rather than wrapping the body, so the response
+      // stays the same array shape every existing caller already expects.
+      res.setHeader('X-Total-Count', String(await prisma.product.count({ where })));
+    }
 
     const productsWithInventory = products.map((product) => {
       const stockView = resolveProductStock(product, branchId);
@@ -48,6 +82,12 @@ router.get('/', optionalAuth, async (req, res) => {
         ...product,
         totalQuantity: stockView.totalQuantity,
         stock: stockView.stock,
+        // On-hand and reserved alongside the sellable figure, so inventory
+        // screens can show "12 on hand, 9 reserved, 3 sellable" rather than a
+        // single number that means different things in different places.
+        currentStock: stockView.currentStock,
+        reservedStock: stockView.reservedStock,
+        availableStock: stockView.availableStock,
         hasExpiredItems: stockView.hasExpiredItems,
         hasNearExpiryItems: stockView.hasNearExpiryItems,
         lowStockAlert: stockView.lowStockAlert,
@@ -93,6 +133,9 @@ router.get('/:id', optionalAuth, async (req, res) => {
       ...product,
       totalQuantity: stockView.totalQuantity,
       stock: stockView.stock,
+      currentStock: stockView.currentStock,
+      reservedStock: stockView.reservedStock,
+      availableStock: stockView.availableStock,
       hasExpiredItems: stockView.hasExpiredItems,
       hasNearExpiryItems: stockView.hasNearExpiryItems,
       lowStockAlert: stockView.lowStockAlert,

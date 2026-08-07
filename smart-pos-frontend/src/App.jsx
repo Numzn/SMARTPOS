@@ -1,22 +1,36 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import LoginForm from './components/auth/LoginForm';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 import MainLayout from './components/layout/MainLayout';
-import Dashboard from './components/dashboard/Dashboard';
-import ProductsPage from './pages/ProductsPage';
-import InventoryPage from './pages/InventoryPage';
-import ReportsPage from './components/reports/ReportsPage';
-import SalesPage from './components/sales/SalesPage';
+
+// Eager: the till and the landing screen. A cashier must never wait on a chunk
+// fetch mid-queue, and on a shaky connection a lazy Cashier route could fail to
+// load at exactly the wrong moment.
 import CashierPage from './pages/CashierPage';
-import SettingsPage from './pages/SettingsPage';
-import PrintersPage from './pages/PrintersPage';
-import UsersPage from './pages/UsersPage';
-import CashRegisterPage from './pages/CashRegisterPage';
-import CustomersPage from './pages/CustomersPage';
-import SuppliersPage from './pages/SuppliersPage';
-import PurchaseOrdersPage from './pages/PurchaseOrdersPage';
+import Dashboard from './components/dashboard/Dashboard';
+
+// Lazy: back-office screens most users never open in a given session. These
+// carry the bulk of the bundle (report tabs, purchasing, admin) and are always
+// reached by deliberate navigation, where a brief load is acceptable.
+const ProductsPage = lazy(() => import('./pages/ProductsPage'));
+const InventoryPage = lazy(() => import('./pages/InventoryPage'));
+const ReportsPage = lazy(() => import('./components/reports/ReportsPage'));
+const SalesPage = lazy(() => import('./components/sales/SalesPage'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const PrintersPage = lazy(() => import('./pages/PrintersPage'));
+const UsersPage = lazy(() => import('./pages/UsersPage'));
+const CashRegisterPage = lazy(() => import('./pages/CashRegisterPage'));
+const CustomersPage = lazy(() => import('./pages/CustomersPage'));
+const SuppliersPage = lazy(() => import('./pages/SuppliersPage'));
+const PurchaseOrdersPage = lazy(() => import('./pages/PurchaseOrdersPage'));
+
+const RouteFallback = () => (
+  <div className="p-10 text-center text-gray-500" role="status" aria-live="polite">
+    Loading…
+  </div>
+);
 
 function App() {
   return (
@@ -32,7 +46,9 @@ function App() {
               path="/"
               element={
                 <ProtectedRoute>
-                  <MainLayout />
+                  <Suspense fallback={<RouteFallback />}>
+                    <MainLayout />
+                  </Suspense>
                 </ProtectedRoute>
               }
             >
