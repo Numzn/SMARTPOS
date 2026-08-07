@@ -31,9 +31,15 @@ router.get('/', authenticateToken, requireRole('ADMIN'), async (req, res) => {
         email: true,
         name: true,
         role: true,
+        // isActive and lastLoginAt were missing, which made the list unable to
+        // show who is deactivated even though PUT /:id can set it — an admin
+        // could disable an account and see no evidence of it afterwards.
+        isActive: true,
+        lastLoginAt: true,
         createdAt: true,
         updatedAt: true
-      }
+      },
+      orderBy: [{ isActive: 'desc' }, { createdAt: 'desc' }]
     });
     res.json(users);
   } catch (error) {
