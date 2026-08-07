@@ -210,10 +210,22 @@ async function deductStockForSale(
   }
 
   const inv = await lockInventoryRow(tx, productId, branchId);
-  const available = availableUnits(inv);
 
-  if (qty > available) {
-    await insufficientStockError(productId, qty, available, tx);
+  // Check against physical stock, NOT availableUnits().
+  //
+  // By the time a sale is being completed it already holds a reservation for
+  // these exact units (createPendingSale -> reserveStockForSale), and the
+  // release of that reservation is the `nextReserved` line below. Checking
+  // availableUnits() here subtracts the sale's own reservation from the stock
+  // it is about to consume, so a sale for more than half the stock could never
+  // complete: 12 on hand, 9 reserved by this sale, available reads 3, and
+  // "requested 9, available 3" fails forever while the reconciler retries.
+  //
+  // The physical count is the real constraint — the reserved units belong to
+  // this sale. This also stays correct if the reservation is missing (a
+  // reconciled or legacy record): currentStock still can't be oversold.
+  if (qty > inv.currentStock) {
+    await insufficientStockError(productId, qty, inv.currentStock, tx);
   }
 
   const inventory = await tx.inventory.findUnique({
