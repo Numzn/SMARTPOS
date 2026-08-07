@@ -451,14 +451,22 @@ async function getShiftTransactions(shiftId, { search, type, sort = 'time_desc',
   const pageSize = Math.min(500, Math.max(1, parseInt(limit, 10) || 100));
   const paged = filtered.slice((pageNum - 1) * pageSize, pageNum * pageSize);
 
+  const countOf = (...types) => rows.filter((r) => types.includes(r.type)).length;
+
   return {
     shift: { id: shift.id, shiftNumber: shift.shiftNumber, status: shift.status },
+    // Summary always describes the whole shift, never the active filter — it
+    // is the shift's shape, and having some counts respond to the filter while
+    // others didn't made "2 transactions" sit next to "Sales: 2" while
+    // filtered to cash movements. filteredCount is the one that tracks the
+    // current view.
     summary: {
-      total: filtered.length,
-      sales: rows.filter((r) => r.type === 'SALE').length,
-      refunds: rows.filter((r) => r.type === 'REFUND').length,
-      cancelled: rows.filter((r) => r.type === 'CANCELLED').length,
-      cashMovements: rows.filter((r) => ['CASH_IN', 'CASH_OUT', 'PAID_OUT'].includes(r.type)).length,
+      total: rows.length,
+      filteredCount: filtered.length,
+      sales: countOf('SALE'),
+      refunds: countOf('REFUND'),
+      cancelled: countOf('CANCELLED'),
+      cashMovements: countOf('CASH_IN', 'CASH_OUT', 'PAID_OUT'),
     },
     transactions: paged,
     page: pageNum,

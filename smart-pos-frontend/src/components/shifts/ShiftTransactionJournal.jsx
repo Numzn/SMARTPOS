@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { shiftApi } from '../../services/shiftService';
 import { exportShiftJournalPdf, exportShiftJournalCsv } from '../../lib/shiftPdf';
 
@@ -54,17 +54,32 @@ const ShiftTransactionJournal = ({ shiftId, onClose }) => {
     }
   }, [shiftId]);
 
+  // One effect, not two: an initial load plus a debounced filter effect both
+  // fired on mount and made two requests for a single page open. The first
+  // run loads immediately; later runs debounce so typing doesn't fire a
+  // request per keystroke.
+  const firstRun = useRef(true);
   useEffect(() => {
-    load({ sort });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shiftId]);
-
-  // Debounce the search so typing doesn't fire a request per keystroke.
-  useEffect(() => {
+    if (firstRun.current) {
+      firstRun.current = false;
+      load({ search, type, sort });
+      return undefined;
+    }
     const t = setTimeout(() => load({ search, type, sort }), 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, type, sort]);
+  }, [shiftId, search, type, sort]);
+
+  const handleExport = async (exporter) => {
+    if (!journal) return;
+    try {
+      await exporter(journal);
+    } catch (err) {
+      // The PDF bundle is fetched on demand, so this also covers the chunk
+      // being unavailable (offline, or stale after a redeploy).
+      setError(`Export failed: ${err.message}`);
+    }
+  };
 
   const summary = journal?.summary || {};
   const rows = journal?.transactions || [];
@@ -77,19 +92,21 @@ const ShiftTransactionJournal = ({ shiftId, onClose }) => {
             <h1 className="text-2xl font-bold text-gray-900">Shift Transaction Journal</h1>
             <p className="text-sm text-gray-500">
               {journal?.shift?.shiftNumber || shiftId} · {journal?.shift?.status} ·{' '}
-              {summary.total ?? 0} transaction{summary.total === 1 ? '' : 's'}
+              {summary.filteredCount === summary.total
+                ? `${summary.total ?? 0} transaction${summary.total === 1 ? '' : 's'}`
+                : `showing ${summary.filteredCount ?? 0} of ${summary.total ?? 0}`}
             </p>
           </div>
           <div className="flex gap-2">
             <button
-              onClick={() => journal && exportShiftJournalCsv(journal)}
+              onClick={() => handleExport(exportShiftJournalCsv)}
               disabled={!journal}
               className="px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
             >
               Export CSV
             </button>
             <button
-              onClick={() => journal && exportShiftJournalPdf(journal)}
+              onClick={() => handleExport(exportShiftJournalPdf)}
               disabled={!journal}
               className="px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
             >

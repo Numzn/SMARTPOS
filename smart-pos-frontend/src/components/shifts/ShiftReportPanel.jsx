@@ -43,7 +43,21 @@ const Block = ({ title, children }) => (
  * printable page no matter how busy the till was.
  */
 const ShiftReportPanel = ({ report, onViewTransactions }) => {
+  const [exportError, setExportError] = React.useState(null);
+
   if (!report) return null;
+
+  // exportShiftReportPdf is async because jsPDF is fetched on demand; without
+  // a catch a failed chunk load (offline, or stale after a redeploy) would
+  // reject unhandled and the button would just look dead.
+  const handleExportPdf = async () => {
+    setExportError(null);
+    try {
+      await exportShiftReportPdf(report);
+    } catch (err) {
+      setExportError(`PDF export failed: ${err.message}`);
+    }
+  };
 
   const {
     shift = {},
@@ -105,7 +119,7 @@ const ShiftReportPanel = ({ report, onViewTransactions }) => {
             </button>
           )}
           <button
-            onClick={() => exportShiftReportPdf(report)}
+            onClick={handleExportPdf}
             className="px-3 py-1.5 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
             Export PDF
@@ -118,6 +132,12 @@ const ShiftReportPanel = ({ report, onViewTransactions }) => {
           </button>
         </div>
       </div>
+
+      {exportError && (
+        <div className="px-4 py-2 bg-red-50 border-b border-red-200 text-sm text-red-700 print:hidden">
+          {exportError}
+        </div>
+      )}
 
       {/* Expected cash — the number the whole report exists to produce */}
       <div className="px-4 py-3 bg-indigo-50 border-b border-indigo-100 flex items-center justify-between">

@@ -142,6 +142,11 @@ describe('Shift X/Z reports and transaction journal', () => {
     const filtered = await getShiftTransactions(shift.id, { type: 'CASH_OUT' });
     expect(filtered.transactions.length).toBe(1);
     expect(filtered.transactions[0].type).toBe('CASH_OUT');
+    // Summary describes the whole shift regardless of filter; only
+    // filteredCount tracks the current view.
+    expect(filtered.summary.total).toBe(2);
+    expect(filtered.summary.filteredCount).toBe(1);
+    expect(filtered.summary.cashMovements).toBe(2);
 
     const searched = await getShiftTransactions(shift.id, { search: 'alpha' });
     expect(searched.transactions.length).toBe(1);
