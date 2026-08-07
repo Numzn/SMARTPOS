@@ -1,0 +1,216 @@
+import { describe, it, expect, beforeAll, afterEach } from 'vitest';
+import testData from '../helpers/testData.js';
+import productImport from '../../lib/productImport.js';
+
+const { prisma, createTestBranch, createTestCategory, createTestProduct, cleanupTestData } = testData;
+const { parseCsv, planProductImport, applyProductImport, exportProductsCsv } = productImport;
+
+const csv = (...lines) => lines.join('\n');
+
+describe('product CSV import', () => {
+  let category;
+
+  beforeAll(async () => {
+    await createTestBranch();
+  });
+
+  afterEach(async () => {
+    await cleanupTestData();
+  });
+
+  async function withCategory() {
+    category = await createTestCategory();
+    return category;
+  }
+
+  /* ---------------- parser ---------------- */
+
+  it('parses quoted fields, embedded commas, escaped quotes and CRLF', () => {
+    const rows = parseCsv('a,b,c\r\n"x,1","say ""hi""",z\r\n');
+    expect(rows).toEqual([
+      ['a', 'b', 'c'],
+      ['x,1', 'say "hi"', 'z'],
+    ]);
+  });
+
+  it('ignores a UTF-8 BOM, which Excel exports routinely include', () => {
+    const rows = parseCsv('﻿name,price\nWidget,10');
+    expect(rows[0]).toEqual(['name', 'price']);
+  });
+
+  /* ---------------- planning ---------------- */
+
+  it('plans creates without writing anything', async () => {
+    const cat = await withCategory();
+    const before = await prisma.product.count();
+
+    const plan = await planProductImport(
+      csv('name,price,category,sku', `TEST-Widget,25.50,${cat.name},TEST-SKU-IMP-1`)
+    );
+
+    expect(plan.summary).toMatchObject({ create: 1, update: 0, error: 0 });
+    expect(plan.rows[0].action).toBe('create');
+    // The whole point of the dry run.
+    expect(await prisma.product.count()).toBe(before);
+  });
+
+  it('classifies a row as an update when the SKU already exists', async () => {
+    const cat = await withCategory();
+    const existing = await createTestProduct({ categoryId: cat.id });
+
+    const plan = await planProductImport(
+      csv('name,price,sku', `Renamed,99,${existing.sku}`)
+    );
+
+    expect(plan.summary).toMatchObject({ create: 0, update: 1, error: 0 });
+    expect(plan.rows[0].existingId).toBe(existing.id);
+  });
+
+  it('reports an unknown category rather than inventing one', async () => {
+    const plan = await planProductImport(
+      csv('name,price,category', 'TEST-Thing,10,No Such Category')
+    );
+
+    expect(plan.summary.error).toBe(1);
+    expect(plan.rows[0].errors.join(' ')).toMatch(/unknown category/i);
+    expect(await prisma.category.findFirst({ where: { name: 'No Such Category' } })).toBeNull();
+  });
+
+  it('catches duplicate SKUs inside the file, naming the conflicting line', async () => {
+    const cat = await withCategory();
+    const plan = await planProductImport(
+      csv(
+        'name,price,category,sku',
+        `TEST-A,1,${cat.name},TEST-SKU-DUP`,
+        `TEST-B,2,${cat.name},TEST-SKU-DUP`
+      )
+    );
+
+    expect(plan.summary.error).toBe(1);
+    expect(plan.rows[1].errors.join(' ')).toMatch(/duplicate sku in file \(also on line 2\)/i);
+  });
+
+  it('rejects non-numeric prices and missing names with the spreadsheet line number', async () => {
+    const cat = await withCategory();
+    const plan = await planProductImport(
+      csv('name,price,category', `TEST-Bad,abc,${cat.name}`, `,10,${cat.name}`)
+    );
+
+    expect(plan.summary.error).toBe(2);
+    expect(plan.rows[0].line).toBe(2); // header is line 1
+    expect(plan.rows[0].errors.join(' ')).toMatch(/not a number/);
+    expect(plan.rows[1].errors.join(' ')).toMatch(/name is required/);
+  });
+
+  it('requires a category for new products but not for updates', async () => {
+    const cat = await withCategory();
+    const existing = await createTestProduct({ categoryId: cat.id });
+
+    const plan = await planProductImport(
+      csv('name,price,sku', 'TEST-New,5,TEST-SKU-NOCAT', `Updated,7,${existing.sku}`)
+    );
+
+    expect(plan.rows[0].action).toBe('error');
+    expect(plan.rows[0].errors.join(' ')).toMatch(/category is required for new products/i);
+    expect(plan.rows[1].action).toBe('update');
+  });
+
+  it('rejects a header missing a required column', async () => {
+    await expect(planProductImport(csv('name,sku', 'TEST-X,ABC'))).rejects.toMatchObject({
+      status: 400,
+    });
+  });
+
+  /* ---------------- applying ---------------- */
+
+  it('applies a valid file, creating and updating in one go', async () => {
+    const cat = await withCategory();
+    const existing = await createTestProduct({ categoryId: cat.id });
+
+    const result = await applyProductImport(
+      csv(
+        'name,price,category,sku',
+        `TEST-Imported,12.5,${cat.name},TEST-SKU-APPLY-1`,
+        `TEST-Updated,44,${cat.name},${existing.sku}`
+      )
+    );
+
+    expect(result).toMatchObject({ created: 1, updated: 1, totalRows: 2 });
+
+    const created = await prisma.product.findFirst({ where: { sku: 'TEST-SKU-APPLY-1' } });
+    expect(created.price).toBe(12.5);
+    const updated = await prisma.product.findUnique({ where: { id: existing.id } });
+    expect(updated.price).toBe(44);
+    expect(updated.name).toBe('TEST-Updated');
+  });
+
+  it('REGRESSION: writes nothing at all when any row is invalid', async () => {
+    const cat = await withCategory();
+    const before = await prisma.product.count();
+
+    // First row is perfectly valid; the second is not.
+    await expect(
+      applyProductImport(
+        csv(
+          'name,price,category,sku',
+          `TEST-Good,10,${cat.name},TEST-SKU-ATOMIC-1`,
+          `TEST-Bad,notanumber,${cat.name},TEST-SKU-ATOMIC-2`
+        )
+      )
+    ).rejects.toMatchObject({ status: 400 });
+
+    // The valid row must not have slipped through — a half-applied catalogue
+    // is worse than a rejected file.
+    expect(await prisma.product.count()).toBe(before);
+    expect(await prisma.product.findFirst({ where: { sku: 'TEST-SKU-ATOMIC-1' } })).toBeNull();
+  });
+
+  it('REGRESSION: leaves omitted columns untouched on update rather than blanking them', async () => {
+    const cat = await withCategory();
+    const existing = await createTestProduct({
+      categoryId: cat.id,
+      brand: 'TEST-Brand',
+      description: 'TEST-Description',
+      isActive: false,
+    });
+
+    // A price-only update: the file mentions nothing else.
+    await applyProductImport(csv('name,price,sku', `Kept,20,${existing.sku}`));
+
+    const updated = await prisma.product.findUnique({ where: { id: existing.id } });
+    expect(updated.price).toBe(20);
+    // Absent columns must not be treated as "set this to empty".
+    expect(updated.brand).toBe('TEST-Brand');
+    expect(updated.description).toBe('TEST-Description');
+    // And an absent isActive must not silently reactivate the product.
+    expect(updated.isActive).toBe(false);
+  });
+
+  it('treats a present-but-blank column as an explicit clear', async () => {
+    const cat = await withCategory();
+    const existing = await createTestProduct({ categoryId: cat.id, brand: 'TEST-Brand' });
+
+    // brand is in the header this time, deliberately empty.
+    await applyProductImport(csv('name,price,sku,brand', `Cleared,20,${existing.sku},`));
+
+    const updated = await prisma.product.findUnique({ where: { id: existing.id } });
+    expect(updated.brand).toBeNull();
+  });
+
+  /* ---------------- export ---------------- */
+
+  it('exports a header the importer accepts, so a round-trip works', async () => {
+    const cat = await withCategory();
+    await createTestProduct({ categoryId: cat.id });
+
+    const out = await exportProductsCsv();
+    const header = out.split('\r\n')[0];
+
+    expect(header.split(',')).toEqual(
+      expect.arrayContaining(['sku', 'name', 'category', 'price'])
+    );
+    // Feeding the export straight back must not produce errors.
+    const plan = await planProductImport(out);
+    expect(plan.summary.error).toBe(0);
+  });
+});

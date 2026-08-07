@@ -4,6 +4,7 @@ const prisma = require('../lib/prisma');
 const { authenticateToken, requirePermission, optionalAuth } = require('../middleware/auth');
 const auditService = require('../services/auditService');
 const { resolveProductStock, DEFAULT_BRANCH } = require('../lib/productStockView');
+const { planProductImport, applyProductImport, exportProductsCsv } = require('../lib/productImport');
 const {
   registerProductWithVsdc,
   isRegistrationStrict,
@@ -98,6 +99,70 @@ router.get('/', optionalAuth, async (req, res) => {
   } catch (error) {
     console.error('Error fetching products:', error);
     res.status(500).json({ error: 'Failed to fetch products' });
+  }
+});
+
+
+/**
+ * GET /api/products/export — the catalogue as CSV, in exactly the shape the
+ * importer accepts so an export can be edited and fed straight back in.
+ */
+router.get('/export', authenticateToken, requirePermission('products:read'), async (req, res) => {
+  try {
+    const csv = await exportProductsCsv();
+    const filename = `products_${new Date().toISOString().slice(0, 10)}.csv`;
+
+    auditService.safeLog(auditService.eventTypes.DATA_EXPORT, {
+      ...auditService.contextFromReq(req),
+      entityType: 'PRODUCT',
+      action: 'EXPORT_PRODUCTS_CSV',
+      description: `Exported the product catalogue to CSV (${filename})`,
+    });
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.send(csv);
+  } catch (error) {
+    console.error('Error exporting products:', error.message);
+    return res.status(error.status || 500).json({ error: error.message || 'Failed to export products' });
+  }
+});
+
+/**
+ * POST /api/products/import — body { csv, commit }.
+ *
+ * Without commit it only plans: every row validated and classified
+ * create/update/error, nothing written. With commit it applies, and refuses
+ * the whole file if any row is invalid. Import can rewrite the catalogue a
+ * till is actively selling from, so it is preview-first by default.
+ */
+router.post('/import', authenticateToken, requirePermission('products:write'), async (req, res) => {
+  try {
+    const { csv, commit } = req.body || {};
+    if (typeof csv !== 'string' || !csv.trim()) {
+      return res.status(400).json({ error: 'No CSV content was provided' });
+    }
+
+    if (!commit) {
+      return res.json({ dryRun: true, ...(await planProductImport(csv)) });
+    }
+
+    const result = await applyProductImport(csv);
+
+    auditService.safeLog(auditService.eventTypes.PRODUCT_CREATE, {
+      ...auditService.contextFromReq(req),
+      entityType: 'PRODUCT',
+      action: 'IMPORT_PRODUCTS_CSV',
+      newValues: result,
+      description: `Imported products from CSV: ${result.created} created, ${result.updated} updated`,
+    });
+
+    return res.json({ dryRun: false, ...result });
+  } catch (error) {
+    console.error('Error importing products:', error.message);
+    return res
+      .status(error.status || 500)
+      .json({ error: error.message || 'Failed to import products', plan: error.plan });
   }
 });
 

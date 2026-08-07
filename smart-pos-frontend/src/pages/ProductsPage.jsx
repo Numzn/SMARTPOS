@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import ProductImportModal from '../components/products/ProductImportModal';
+import { productImportApi } from '../services/productImportService';
 import ProductModal from '../components/ProductModal';
 import ProductsTable from '../components/ProductsTable';
 import { productApi, categoryApi, inventoryApi } from '../services/productService';
@@ -201,6 +203,22 @@ const ProductsPage = () => {
   const getInventoryInfoForProduct = (productId) => getInventoryInfo(inventory, productId);
   const getStockStatusForProduct = (productId) => getStockStatus(inventory, productId);
 
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [exportError, setExportError] = useState('');
+
+  // Server-side export, which emits exactly the columns the importer accepts
+  // so a catalogue can be exported, edited in a spreadsheet and fed back in.
+  // The previous client-side helper produced a different shape that could not
+  // be re-imported.
+  const handleExport = async () => {
+    setExportError('');
+    try {
+      await productImportApi.exportCsv();
+    } catch (err) {
+      setExportError(err.message || 'Export failed');
+    }
+  };
+
   const exportProducts = () => {
     exportProductsToCSV(products, categories, getInventoryInfoForProduct);
   };
@@ -237,20 +255,23 @@ const ProductsPage = () => {
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6 p-4 sm:p-6">
       {/* Header */}
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Product Catalog</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Product Catalog</h1>
           <p className="text-gray-600">Manage your product information and pricing</p>
         </div>              <div className="flex gap-2">
-                <button 
-                  onClick={exportProducts}
+                <button
+                  onClick={handleExport}
                   className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
                 >
                   📥 Export
                 </button>
-                <button className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">
+                <button
+                  onClick={() => setShowImportModal(true)}
+                  className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                >
                   📤 Import
                 </button>
                 <button
@@ -347,6 +368,18 @@ const ProductsPage = () => {
               onEdit={openEditModal}
               onDelete={handleDeleteProduct}
               navigateToInventory={navigateToInventory}
+            />
+
+            {exportError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-3 text-sm">
+                {exportError}
+              </div>
+            )}
+
+            <ProductImportModal
+              show={showImportModal}
+              onClose={() => setShowImportModal(false)}
+              onImported={fetchProducts}
             />
 
             {/* Add Product Modal */}
