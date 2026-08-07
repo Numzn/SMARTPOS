@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useDialog } from '../../hooks/useDialog';
 import { X, Printer } from 'lucide-react';
 import { fetchReceipt } from '../../api/receiptsApi';
 import { routeReceiptPrint } from '../../lib/printReceipt';
@@ -48,9 +49,18 @@ export default function ReceiptViewModal({
     }
   };
 
+  const dialogRef = useDialog(true, onClose);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
+        className="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col focus:outline-none"
+      >
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
           <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
           <div className="flex items-center gap-2">

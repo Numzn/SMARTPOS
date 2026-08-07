@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useDialog } from '../../hooks/useDialog';
 import { X, RotateCcw, Receipt } from 'lucide-react';
 import { fetchReceipt } from '../../api/receiptsApi';
 import { routeReceiptPrint } from '../../lib/printReceipt';
@@ -139,9 +140,18 @@ const RefundModal = ({ sale, onClose, onSuccess }) => {
     }
   };
 
+  const dialogRef = useDialog(true, onClose);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Credit note / refund"
+        tabIndex={-1}
+        className="bg-white rounded-lg shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col focus:outline-none"
+      >
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">Credit note / refund</h2>

@@ -1,4 +1,5 @@
 import React from 'react';
+import Modal from '../ui/Modal';
 
 const EMPTY_RETURN = { supplierId: '', reason: '', items: [] };
 
@@ -15,8 +16,6 @@ const SupplierReturnModal = ({
   suppliers,
   products,
 }) => {
-  if (!showModal) return null;
-
   const handleClose = () => {
     setShowModal(false);
     setReturnData(EMPTY_RETURN);
@@ -35,10 +34,32 @@ const SupplierReturnModal = ({
     setReturnData({ ...returnData, items: returnData.items.filter((_, i) => i !== index) });
   };
 
+  const footerActions = (
+    <>
+          <button
+            onClick={handleClose}
+            className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onSubmit}
+            disabled={loading}
+            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+          >
+            {loading ? 'Saving...' : 'Record Return'}
+          </button>
+    </>
+  );
+
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
-        <h3 className="text-lg font-semibold mb-4">Return Stock to Supplier</h3>
+    <Modal
+      open={showModal}
+      onClose={handleClose}
+      title={'Return Stock to Supplier'}
+      size="xl"
+      footer={footerActions}
+    >
 
         <div className="mb-4">
           <label className="block text-sm font-medium mb-1">Supplier *</label>
@@ -151,23 +172,7 @@ const SupplierReturnModal = ({
           </div>
         )}
 
-        <div className="flex justify-end gap-2">
-          <button
-            onClick={handleClose}
-            className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onSubmit}
-            disabled={loading}
-            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
-          >
-            {loading ? 'Saving...' : 'Record Return'}
-          </button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 };
 

@@ -1,3 +1,4 @@
+import Modal from './ui/Modal';
 import React from 'react';
 
 const ProductModal = ({ 
@@ -14,8 +15,6 @@ const ProductModal = ({
   selectedProduct,
   getInventoryInfo 
 }) => {
-  if (!showModal) return null;
-
   const resetProductData = () => {
     setProductData({
       name: '',
@@ -43,12 +42,32 @@ const ProductModal = ({
     resetProductData();
   };
 
+  const footerActions = (
+    <>
+      <button
+        onClick={handleClose}
+        className="px-4 py-2 text-gray-600 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
+      >
+        Cancel
+      </button>
+      <button
+        onClick={onSubmit}
+        disabled={loading}
+        className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
+      >
+        {loading ? (isEdit ? 'Updating…' : 'Creating…') : (isEdit ? 'Update Product' : 'Create Product')}
+      </button>
+    </>
+  );
+
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 w-full max-w-4xl mx-4 max-h-[90vh] overflow-y-auto">
-        <h3 className="text-lg font-semibold mb-4">
-          {isEdit ? 'Edit Product' : 'Add New Product'}
-        </h3>
+    <Modal
+      open={showModal}
+      onClose={handleClose}
+      title={isEdit ? 'Edit Product' : 'Add New Product'}
+      size="xl"
+      footer={footerActions}
+    >
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Basic Information */}
@@ -298,23 +317,7 @@ const ProductModal = ({
           </div>
         )}
 
-        <div className="flex justify-end space-x-3 mt-6 pt-4 border-t">
-          <button
-            onClick={handleClose}
-            className="px-4 py-2 text-gray-600 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onSubmit}
-            disabled={loading}
-            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 transition-colors"
-          >
-            {loading ? (isEdit ? 'Updating...' : 'Creating...') : (isEdit ? 'Update Product' : 'Create Product')}
-          </button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 };
 

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useId } from 'react';
+import { useDialog } from '../../hooks/useDialog';
 
 const SIZES = {
   sm: 'max-w-md',
@@ -40,64 +41,14 @@ const Modal = ({
   footer,
   initialFocusRef,
 }) => {
-  const panelRef = useRef(null);
-  const previouslyFocused = useRef(null);
+  const panelRef = useDialog(open, onClose);
   const titleId = useId();
   const descId = useId();
 
+  // Optional caller-chosen initial focus, applied after the hook's default.
   useEffect(() => {
-    if (!open) return undefined;
-
-    previouslyFocused.current = document.activeElement;
-
-    // Move focus into the dialog: caller's choice first, else the first
-    // focusable element, else the panel itself so Escape still reaches us.
-    const focusTarget =
-      initialFocusRef?.current ||
-      panelRef.current?.querySelector(FOCUSABLE) ||
-      panelRef.current;
-    focusTarget?.focus?.();
-
-    const onKeyDown = (e) => {
-      if (e.key === 'Escape' && onClose) {
-        e.stopPropagation();
-        onClose();
-        return;
-      }
-      if (e.key !== 'Tab') return;
-
-      const focusable = Array.from(panelRef.current?.querySelectorAll(FOCUSABLE) || []).filter(
-        (el) => el.offsetParent !== null
-      );
-      if (focusable.length === 0) {
-        e.preventDefault();
-        return;
-      }
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-
-      // Wrap at both ends so focus can never escape the dialog.
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener('keydown', onKeyDown, true);
-
-    // Stop the page behind the dialog scrolling under it.
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-
-    return () => {
-      document.removeEventListener('keydown', onKeyDown, true);
-      document.body.style.overflow = previousOverflow;
-      previouslyFocused.current?.focus?.();
-    };
-  }, [open, onClose, initialFocusRef]);
+    if (open && initialFocusRef?.current) initialFocusRef.current.focus();
+  }, [open, initialFocusRef]);
 
   if (!open) return null;
 

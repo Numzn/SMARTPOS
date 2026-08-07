@@ -1,4 +1,5 @@
 import React from 'react';
+import Modal from '../ui/Modal';
 
 const EMPTY_PO = { supplierId: '', expectedDate: '', notes: '', items: [] };
 
@@ -16,8 +17,6 @@ const PurchaseOrderModal = ({
   suppliers,
   products,
 }) => {
-  if (!showModal) return null;
-
   const handleClose = () => {
     setShowModal(false);
     setPoData(EMPTY_PO);
@@ -41,10 +40,32 @@ const PurchaseOrderModal = ({
     0
   );
 
+  const footerActions = (
+    <>
+          <button
+            onClick={handleClose}
+            className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onSubmit}
+            disabled={loading}
+            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+          >
+            {loading ? 'Saving...' : isEdit ? 'Save Changes' : 'Create Draft'}
+          </button>
+    </>
+  );
+
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 w-full max-w-3xl mx-4 max-h-[90vh] overflow-y-auto">
-        <h3 className="text-lg font-semibold mb-4">{isEdit ? 'Edit Draft Purchase Order' : 'New Purchase Order'}</h3>
+    <Modal
+      open={showModal}
+      onClose={handleClose}
+      title={isEdit ? 'Edit Draft Purchase Order' : 'New Purchase Order'}
+      size="xl"
+      footer={footerActions}
+    >
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
           <div>
@@ -172,23 +193,7 @@ const PurchaseOrderModal = ({
 
         <div className="text-right text-sm font-medium text-gray-800 mb-6">Total: K{total.toFixed(2)}</div>
 
-        <div className="flex justify-end gap-2">
-          <button
-            onClick={handleClose}
-            className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onSubmit}
-            disabled={loading}
-            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
-          >
-            {loading ? 'Saving...' : isEdit ? 'Save Changes' : 'Create Draft'}
-          </button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 };
 
