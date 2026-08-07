@@ -86,10 +86,10 @@ const ShiftTransactionJournal = ({ shiftId, onClose }) => {
 
   return (
     <div className="fixed inset-0 bg-white z-50 overflow-y-auto">
-      <div className="max-w-7xl mx-auto p-6 space-y-4">
+      <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Shift Transaction Journal</h1>
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Shift Transaction Journal</h1>
             <p className="text-sm text-gray-500">
               {journal?.shift?.shiftNumber || shiftId} · {journal?.shift?.status} ·{' '}
               {summary.filteredCount === summary.total
@@ -97,7 +97,7 @@ const ShiftTransactionJournal = ({ shiftId, onClose }) => {
                 : `showing ${summary.filteredCount ?? 0} of ${summary.total ?? 0}`}
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               onClick={() => handleExport(exportShiftJournalCsv)}
               disabled={!journal}

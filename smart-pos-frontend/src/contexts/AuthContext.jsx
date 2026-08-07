@@ -60,14 +60,17 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       let message = 'Login failed';
 
+      // Written for whoever is actually standing at the till. The previous
+      // wording told shop staff to run npm commands in a source directory,
+      // which is unactionable on a real terminal and reads like the system is
+      // broken beyond repair.
       if (!error.response) {
         message =
-          'Cannot reach the API server. Start the backend (port 4000) and Postgres, then try again.';
+          'Cannot reach the server. Check this terminal’s network connection, then try again. If the connection is fine, contact your administrator.';
       } else if (error.response.data?.error) {
         message = error.response.data.error;
       } else if (error.response.status === 500) {
-        message =
-          'Server error during login. Check that Postgres is running (npm run db:up) and run npm run setup-db.';
+        message = 'The server could not complete the sign-in. Please try again, or contact your administrator if this continues.';
       }
 
       console.error('Login error:', error.response?.data || error.message);

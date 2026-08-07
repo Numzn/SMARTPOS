@@ -95,12 +95,14 @@ const LoginForm = () => {
           </div>
 
           {apiStatus === 'offline' && (
-            <div className="mb-4 flex gap-2 p-3 border border-amber-300 bg-amber-50 text-amber-900 text-xs rounded">
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <div
+              role="status"
+              className="mb-4 flex gap-2 p-3 border border-amber-300 bg-amber-50 text-amber-900 text-xs rounded"
+            >
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
               <div>
-                <strong>Backend offline.</strong> Run{' '}
-                <code className="font-mono bg-amber-100/80 px-1">npm run dev</code> in{' '}
-                <code className="font-mono bg-amber-100/80 px-1">smart-pos-backend</code>.
+                <strong>Can’t reach the server.</strong> Check this terminal’s network
+                connection and try again. If the connection is fine, contact your administrator.
               </div>
             </div>
           )}

@@ -120,9 +120,9 @@ const CashRegisterPage = () => {
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6 p-4 sm:p-6">
       <div>
-        <h1 className="text-3xl font-bold text-gray-900">Cash Register</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Cash Register</h1>
         <p className="text-gray-600">Open and close the till, record cash movements, reconcile the drawer</p>
       </div>
 

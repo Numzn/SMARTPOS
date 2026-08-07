@@ -29,8 +29,8 @@ const ReportsPage = () => {
 
   return (
     <div className="space-y-6">
-      <div className="bg-white rounded-lg shadow-sm p-6">
-        <h1 className="text-2xl font-bold text-gray-900">Reports &amp; Analytics</h1>
+      <div className="bg-white rounded-lg shadow-sm p-4 sm:p-6">
+        <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Reports &amp; Analytics</h1>
         <p className="text-gray-600 mt-1">Business insights and ZRA fiscal status</p>
       </div>
 
