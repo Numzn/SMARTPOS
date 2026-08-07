@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Modal from '../ui/Modal';
 
 const ReceiveAgainstPoModal = ({ show, onClose, po, loading, onSubmit }) => {
   const [quantities, setQuantities] = useState({});
@@ -13,9 +14,7 @@ const ReceiveAgainstPoModal = ({ show, onClose, po, loading, onSubmit }) => {
     setQuantities(initial);
   }, [po]);
 
-  if (!show || !po) return null;
-
-  const pendingItems = po.items.filter((item) => item.quantityOrdered - item.quantityReceived > 0);
+  const pendingItems = po ? po.items.filter((item) => item.quantityOrdered - item.quantityReceived > 0) : [];
 
   const handleSubmit = () => {
     const items = pendingItems
@@ -25,12 +24,30 @@ const ReceiveAgainstPoModal = ({ show, onClose, po, loading, onSubmit }) => {
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 w-full max-w-xl mx-4 max-h-[90vh] overflow-y-auto">
-        <h3 className="text-lg font-semibold mb-1">Receive Stock — {po.poNumber}</h3>
-        <p className="text-sm text-gray-500 mb-4">
-          Enter the quantity actually delivered for each line. Leave at 0 to skip a line for this delivery.
-        </p>
+    <Modal
+      open={Boolean(show && po)}
+      onClose={onClose}
+      title={`Receive Stock — ${po?.poNumber || ''}`}
+      description="Enter the quantity actually delivered for each line. Leave at 0 to skip a line for this delivery."
+      size="lg"
+      footer={
+        <>
+          <button
+            onClick={onClose}
+            className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={loading || pendingItems.length === 0}
+            className="px-4 py-2 bg-green-600 text-white rounded-md text-sm font-medium hover:bg-green-700 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-green-500"
+          >
+            {loading ? 'Receiving…' : 'Confirm Receipt'}
+          </button>
+        </>
+      }
+    >
 
         {pendingItems.length === 0 ? (
           <p className="text-sm text-gray-500 border border-dashed border-gray-300 rounded-md p-4 text-center">
@@ -71,23 +88,7 @@ const ReceiveAgainstPoModal = ({ show, onClose, po, loading, onSubmit }) => {
           </table>
         )}
 
-        <div className="flex justify-end gap-2">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={loading || pendingItems.length === 0}
-            className="px-4 py-2 bg-green-600 text-white rounded-md text-sm font-medium hover:bg-green-700 disabled:opacity-50"
-          >
-            {loading ? 'Receiving...' : 'Confirm Receipt'}
-          </button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 };
 

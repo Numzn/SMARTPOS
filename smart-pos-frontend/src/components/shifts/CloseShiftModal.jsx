@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import Modal from '../ui/Modal';
+import { TextField, TextAreaField, LiveStatus } from '../ui/Field';
 
 const money = (n) => `K${Number(n || 0).toFixed(2)}`;
 
@@ -15,8 +17,6 @@ const CloseShiftModal = ({ show, onClose, loading, onSubmit, expectedCash, break
   const [notes, setNotes] = useState('');
   const [error, setError] = useState('');
   const [revealed, setRevealed] = useState(false);
-
-  if (!show) return null;
 
   const counted = Number(countedCash);
   const countIsValid = Number.isFinite(counted) && counted >= 0 && countedCash !== '';
@@ -55,124 +55,97 @@ const CloseShiftModal = ({ show, onClose, loading, onSubmit, expectedCash, break
         ? 'text-blue-700'
         : 'text-red-700';
 
+  const row = (label, value, opts = {}) => (
+    <div className={`flex justify-between px-3 py-2 ${opts.strong ? 'font-semibold' : ''}`}>
+      <span className={opts.strong ? '' : 'text-gray-600'}>{label}</span>
+      <span className={opts.tone || ''}>{value}</span>
+    </div>
+  );
+
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
-        <h3 className="text-lg font-semibold mb-1">Close Shift</h3>
-        <p className="text-sm text-gray-500 mb-4">
-          Count the physical cash in the drawer and enter the total. The expected figure is
-          revealed after you commit your count.
-        </p>
-
-        <div className="mb-4">
-          <label className="block text-sm font-medium mb-1">Counted Cash (K) *</label>
-          <input
-            type="number"
-            min="0"
-            step="0.01"
-            autoFocus
-            disabled={revealed}
-            value={countedCash}
-            onChange={(e) => setCountedCash(e.target.value)}
-            placeholder="0.00"
-            className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50 ${
-              error ? 'border-red-500' : 'border-gray-300'
-            }`}
-          />
-          {error && <p className="text-red-500 text-xs mt-1">{error}</p>}
-        </div>
-
-        {!revealed ? (
-          <button
-            onClick={handleReveal}
-            className="w-full mb-6 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
-          >
-            Commit count &amp; show variance
-          </button>
-        ) : (
-          <div className="mb-6 border border-gray-200 rounded-md divide-y divide-gray-100 text-sm">
-            {breakdown && (
-              <>
-                <div className="flex justify-between px-3 py-2">
-                  <span className="text-gray-600">Opening float</span>
-                  <span>{money(breakdown.openingFloat)}</span>
-                </div>
-                <div className="flex justify-between px-3 py-2">
-                  <span className="text-gray-600">Cash sales</span>
-                  <span>{money(breakdown.cashSales)}</span>
-                </div>
-                <div className="flex justify-between px-3 py-2">
-                  <span className="text-gray-600">Cash refunds</span>
-                  <span>-{money(breakdown.cashRefunds)}</span>
-                </div>
-                <div className="flex justify-between px-3 py-2">
-                  <span className="text-gray-600">Cash in</span>
-                  <span>{money(breakdown.cashIn)}</span>
-                </div>
-                <div className="flex justify-between px-3 py-2">
-                  <span className="text-gray-600">Cash out</span>
-                  <span>-{money(breakdown.cashOut)}</span>
-                </div>
-                <div className="flex justify-between px-3 py-2">
-                  <span className="text-gray-600">Paid out</span>
-                  <span>-{money(breakdown.paidOut)}</span>
-                </div>
-              </>
-            )}
-            <div className="flex justify-between px-3 py-2 font-medium">
-              <span>Expected in drawer</span>
-              <span>{money(expectedCash)}</span>
-            </div>
-            <div className="flex justify-between px-3 py-2">
-              <span className="text-gray-600">You counted</span>
-              <span>{money(counted)}</span>
-            </div>
-            <div className={`flex justify-between px-3 py-2 font-semibold ${varianceTone}`}>
-              <span>
-                Variance
-                {variance !== null && variance !== 0 && (
-                  <span className="font-normal text-gray-500">
-                    {variance > 0 ? ' (over)' : ' (short)'}
-                  </span>
-                )}
-              </span>
-              <span>{money(variance)}</span>
-            </div>
-          </div>
-        )}
-
-        <div className="mb-6">
-          <label className="block text-sm font-medium mb-1">Closing Notes</label>
-          <textarea
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            rows={2}
-            placeholder={
-              variance !== null && variance !== 0
-                ? 'Explain the variance if you can'
-                : 'Optional'
-            }
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          />
-        </div>
-
-        <div className="flex justify-end gap-2">
+    <Modal
+      open={show}
+      onClose={handleClose}
+      title="Close Shift"
+      description="Count the physical cash in the drawer and enter the total. The expected figure is revealed after you commit your count."
+      size="md"
+      footer={
+        <>
           <button
             onClick={handleClose}
-            className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+            className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             Cancel
           </button>
           <button
             onClick={handleSubmit}
             disabled={loading || !revealed}
-            className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50"
+            className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-red-500"
           >
-            {loading ? 'Closing...' : 'Close Shift'}
+            {loading ? 'Closing…' : 'Close Shift'}
           </button>
-        </div>
+        </>
+      }
+    >
+      <LiveStatus
+        message={
+          revealed && variance !== null
+            ? `Expected ${money(expectedCash)}, counted ${money(counted)}, variance ${money(variance)}`
+            : ''
+        }
+      />
+
+      <div className="space-y-4">
+        <TextField
+          label="Counted Cash (K)"
+          required
+          type="number"
+          min="0"
+          step="0.01"
+          placeholder="0.00"
+          disabled={revealed}
+          value={countedCash}
+          onChange={(e) => setCountedCash(e.target.value)}
+          error={error}
+        />
+
+        {!revealed ? (
+          <button
+            onClick={handleReveal}
+            className="w-full px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            Commit count &amp; show variance
+          </button>
+        ) : (
+          <div className="border border-gray-200 rounded-md divide-y divide-gray-100 text-sm">
+            {breakdown && (
+              <>
+                {row('Opening float', money(breakdown.openingFloat))}
+                {row('Cash sales', money(breakdown.cashSales))}
+                {row('Cash refunds', `-${money(breakdown.cashRefunds)}`)}
+                {row('Cash in', money(breakdown.cashIn))}
+                {row('Cash out', `-${money(breakdown.cashOut)}`)}
+                {row('Paid out', `-${money(breakdown.paidOut)}`)}
+              </>
+            )}
+            {row('Expected in drawer', money(expectedCash), { strong: true })}
+            {row('You counted', money(counted))}
+            {row(
+              `Variance${variance !== null && variance !== 0 ? (variance > 0 ? ' (over)' : ' (short)') : ''}`,
+              money(variance),
+              { strong: true, tone: varianceTone }
+            )}
+          </div>
+        )}
+
+        <TextAreaField
+          label="Closing Notes"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder={variance !== null && variance !== 0 ? 'Explain the variance if you can' : 'Optional'}
+        />
       </div>
-    </div>
+    </Modal>
   );
 };
 

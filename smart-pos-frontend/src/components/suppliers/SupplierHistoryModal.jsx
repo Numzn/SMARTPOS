@@ -1,4 +1,5 @@
 import React from 'react';
+import Modal from '../ui/Modal';
 
 const statusColors = {
   DRAFT: 'bg-gray-100 text-gray-700',
@@ -9,17 +10,13 @@ const statusColors = {
 };
 
 const SupplierHistoryModal = ({ show, onClose, supplier, history, loading }) => {
-  if (!show) return null;
-
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 w-full max-w-2xl mx-4 max-h-[85vh] overflow-y-auto">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-semibold">Purchase history — {supplier?.name}</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600" aria-label="Close">
-            ✕
-          </button>
-        </div>
+    <Modal
+      open={show}
+      onClose={onClose}
+      title={`Purchase history — ${supplier?.name || ''}`}
+      size="lg"
+    >
 
         {loading ? (
           <div className="text-sm text-gray-500 py-8 text-center">Loading...</div>
@@ -80,8 +77,7 @@ const SupplierHistoryModal = ({ show, onClose, supplier, history, loading }) => 
             )}
           </>
         )}
-      </div>
-    </div>
+    </Modal>
   );
 };
 

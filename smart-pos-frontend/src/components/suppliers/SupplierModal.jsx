@@ -1,70 +1,58 @@
 import React from 'react';
+import Modal from '../ui/Modal';
+import { TextField, TextAreaField } from '../ui/Field';
 
 const EMPTY_SUPPLIER = { name: '', contactPerson: '', phone: '', email: '', tpin: '', address: '', notes: '' };
 
 const SupplierModal = ({ showModal, setShowModal, isEdit, supplierData, setSupplierData, errors, loading, onSubmit }) => {
-  if (!showModal) return null;
-
   const handleClose = () => {
     setShowModal(false);
     setSupplierData(EMPTY_SUPPLIER);
   };
 
-  const field = (key, label, extra = {}) => (
-    <div>
-      <label className="block text-sm font-medium mb-1">{label}</label>
-      <input
-        type={extra.type || 'text'}
-        value={supplierData[key] || ''}
-        onChange={(e) => setSupplierData({ ...supplierData, [key]: e.target.value })}
-        className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
-          errors?.[key] ? 'border-red-500' : 'border-gray-300'
-        }`}
-      />
-      {errors?.[key] && <p className="text-red-500 text-xs mt-1">{errors[key]}</p>}
-    </div>
-  );
+  const set = (key) => (e) => setSupplierData({ ...supplierData, [key]: e.target.value });
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
-        <h3 className="text-lg font-semibold mb-4">{isEdit ? 'Edit Supplier' : 'Add Supplier'}</h3>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="md:col-span-2">{field('name', 'Company Name *')}</div>
-          {field('contactPerson', 'Contact Person')}
-          {field('phone', 'Phone')}
-          {field('email', 'Email', { type: 'email' })}
-          {field('tpin', 'TPIN')}
-          <div className="md:col-span-2">{field('address', 'Address')}</div>
-          <div className="md:col-span-2">
-            <label className="block text-sm font-medium mb-1">Notes</label>
-            <textarea
-              value={supplierData.notes || ''}
-              onChange={(e) => setSupplierData({ ...supplierData, notes: e.target.value })}
-              rows={2}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-        </div>
-
-        <div className="flex justify-end gap-2 mt-6">
+    <Modal
+      open={showModal}
+      onClose={handleClose}
+      title={isEdit ? 'Edit Supplier' : 'Add Supplier'}
+      size="md"
+      footer={
+        <>
           <button
             onClick={handleClose}
-            className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+            className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             Cancel
           </button>
           <button
             onClick={onSubmit}
             disabled={loading}
-            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
-            {loading ? 'Saving...' : isEdit ? 'Save Changes' : 'Add Supplier'}
+            {loading ? 'Saving…' : isEdit ? 'Save Changes' : 'Add Supplier'}
           </button>
-        </div>
+        </>
+      }
+    >
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <TextField
+          className="md:col-span-2"
+          label="Company Name"
+          required
+          value={supplierData.name}
+          onChange={set('name')}
+          error={errors?.name}
+        />
+        <TextField label="Contact Person" value={supplierData.contactPerson} onChange={set('contactPerson')} />
+        <TextField label="Phone" type="tel" value={supplierData.phone} onChange={set('phone')} />
+        <TextField label="Email" type="email" value={supplierData.email} onChange={set('email')} />
+        <TextField label="TPIN" value={supplierData.tpin} onChange={set('tpin')} />
+        <TextField className="md:col-span-2" label="Address" value={supplierData.address} onChange={set('address')} />
+        <TextAreaField className="md:col-span-2" label="Notes" value={supplierData.notes} onChange={set('notes')} />
       </div>
-    </div>
+    </Modal>
   );
 };
 
