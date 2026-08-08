@@ -1,4 +1,9 @@
 const express = require('express');
+const {
+  planInventoryImport,
+  applyInventoryImport,
+  exportInventoryCsv,
+} = require('../../lib/inventoryImport');
 const router = express.Router();
 const prisma = require('../../lib/prisma');
 const { authenticateToken, requirePermission } = require('../../middleware/auth');
@@ -247,6 +252,79 @@ router.post('/receive', authenticateToken, requirePermission('inventory:write'),
       error: 'Failed to receive stock',
       details: error.message 
     });
+  }
+});
+
+
+/**
+ * GET /api/inventory/export — current stock as CSV.
+ *
+ * Doubles as the stock-take sheet: the `counted` column is emitted blank so it
+ * can be printed or opened, filled in, and fed straight back to /import.
+ */
+router.get('/export', authenticateToken, requirePermission('inventory:read'), async (req, res) => {
+  try {
+    const branchId = req.query.branchId || DEFAULT_BRANCH;
+    const csv = await exportInventoryCsv({ branchId });
+    const filename = `stock_take_${branchId}_${new Date().toISOString().slice(0, 10)}.csv`;
+
+    auditService.safeLog(auditService.eventTypes.DATA_EXPORT, {
+      ...auditService.contextFromReq(req),
+      entityType: 'INVENTORY',
+      action: 'EXPORT_STOCK_CSV',
+      description: `Exported stock for branch ${branchId} to CSV (${filename})`,
+    });
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.send(csv);
+  } catch (error) {
+    console.error('Error exporting inventory:', error.message);
+    return res.status(error.status || 500).json({ error: error.message || 'Failed to export stock' });
+  }
+});
+
+/**
+ * POST /api/inventory/import — body { csv, commit, branchId, reason }.
+ *
+ * A stock take, not a bulk overwrite. The file carries counted quantities;
+ * each differing row becomes a RECOUNT adjustment through the same path the
+ * manual screen uses, so every change lands in the stock ledger and the ZRA
+ * audit trail. Preview-first, and refused wholesale if any row is invalid.
+ */
+router.post('/import', authenticateToken, requirePermission('inventory:write'), async (req, res) => {
+  try {
+    const { csv, commit, branchId = DEFAULT_BRANCH, reason } = req.body || {};
+    if (typeof csv !== 'string' || !csv.trim()) {
+      return res.status(400).json({ error: 'No CSV content was provided' });
+    }
+
+    if (!commit) {
+      return res.json({ dryRun: true, ...(await planInventoryImport(csv, { branchId })) });
+    }
+
+    const result = await applyInventoryImport(csv, {
+      branchId,
+      reason,
+      userId: req.user.userId,
+    });
+
+    auditService.safeLog(auditService.eventTypes.STOCK_ADJUSTMENT, {
+      ...auditService.contextFromReq(req),
+      entityType: 'INVENTORY',
+      action: 'IMPORT_STOCK_TAKE_CSV',
+      newValues: result,
+      description:
+        `Stock take imported for branch ${branchId}: ` +
+        `${result.increased} increased, ${result.decreased} decreased, net ${result.netUnits} unit(s)`,
+    });
+
+    return res.json({ dryRun: false, ...result });
+  } catch (error) {
+    console.error('Error importing stock take:', error.message);
+    return res
+      .status(error.status || 500)
+      .json({ error: error.message || 'Failed to import stock take', plan: error.plan });
   }
 });
 

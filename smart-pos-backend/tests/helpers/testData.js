@@ -255,6 +255,13 @@ async function cleanupTestData() {
   // creates its own "RFD-..." batches on refund, not "TEST-BATCH-" ones.
   await prisma.inventoryBatch.deleteMany({ where: { product: { sku: { startsWith: 'TEST-SKU-' } } } });
   await prisma.inventory.deleteMany({ where: { product: { sku: { startsWith: 'TEST-SKU-' } } } });
+  // StockAdjustment.productId is Restrict, so these must go before the
+  // products. Nothing created them until the stock-take importer did, which
+  // is why cleanup got away without this until now — and why the resulting
+  // FK failure aborted cleanup mid-way and poisoned later, unrelated tests.
+  await prisma.stockAdjustment.deleteMany({
+    where: { product: { sku: { startsWith: 'TEST-SKU-' } } },
+  });
   await prisma.product.deleteMany({ where: { sku: { startsWith: 'TEST-SKU-' } } });
   await prisma.category.deleteMany({ where: { name: { startsWith: 'Test Category ' } } });
   // Shift deletion cascades to shift_cash_movements; must happen before the
