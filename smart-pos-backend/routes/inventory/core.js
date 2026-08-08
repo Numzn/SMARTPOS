@@ -8,6 +8,7 @@ const router = express.Router();
 const prisma = require('../../lib/prisma');
 const { authenticateToken, requirePermission } = require('../../middleware/auth');
 const { receiveStock } = require('../../lib/receiving');
+const { DEFAULT_BRANCH } = require('../../lib/inventoryStock');
 const stockSyncService = require('../../services/stockSyncService');
 const auditService = require('../../services/auditService');
 
