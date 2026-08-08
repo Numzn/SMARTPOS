@@ -1,8 +1,13 @@
 import React, { useState, useEffect } from 'react';
+import StockTakeImportModal from '../components/inventory/StockTakeImportModal';
+import { inventoryImportApi } from '../services/inventoryImportService';
 import { productApi } from '../services/productService';
 import { apiFetch } from '../lib/apiClient';
 
 const InventoryPage = () => {
+  const [showStockTake, setShowStockTake] = useState(false);
+  const [ioError, setIoError] = useState('');
+
   const [inventory, setInventory] = useState([]);
   const [products, setProducts] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -160,6 +165,15 @@ const InventoryPage = () => {
     return matchesSearch;
   });
 
+  const handleExport = async () => {
+    setIoError('');
+    try {
+      await inventoryImportApi.exportCsv();
+    } catch (err) {
+      setIoError(err.message || 'Export failed');
+    }
+  };
+
   const lowStockCount = inventory.filter(item => item.currentStock <= item.reorderPoint).length;
   const outOfStockCount = inventory.filter(item => item.currentStock === 0).length;
   const expiringItemsCount = inventory.filter(item => item.expiryAlerts?.hasExpiringItems).length;
@@ -176,16 +190,24 @@ const InventoryPage = () => {
   return (
     <div className="space-y-6 p-6">
       {/* Header */}
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Inventory Management</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Inventory Management</h1>
           <p className="text-gray-600">Track and manage your stock levels</p>
         </div>
-        <div className="flex gap-2">
-          <button className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={handleExport}
+            title="Download current stock as a CSV count sheet"
+            className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+          >
             📥 Export
           </button>
-          <button className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">
+          <button
+            onClick={() => setShowStockTake(true)}
+            title="Import a completed stock take"
+            className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+          >
             📤 Import
           </button>
           <button className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">
@@ -628,6 +650,18 @@ const InventoryPage = () => {
           </div>
         </div>
       )}
+      {ioError && (
+        <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-3 text-sm">
+          {ioError}
+        </div>
+      )}
+
+      <StockTakeImportModal
+        show={showStockTake}
+        onClose={() => setShowStockTake(false)}
+        onImported={fetchInventory}
+      />
+
     </div>
   );
 };

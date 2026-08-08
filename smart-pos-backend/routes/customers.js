@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
 const auditService = require('../services/auditService');
+const { toCsv } = require('../lib/csv');
 const { authenticateToken, requirePermission } = require('../middleware/auth');
 
 const UPDATABLE_FIELDS = ['name', 'phone', 'email', 'tpin', 'address', 'notes'];
@@ -40,6 +41,45 @@ router.get('/', authenticateToken, requirePermission('customers:read'), async (r
   } catch (error) {
     console.error('Error fetching customers:', error.message);
     res.status(500).json({ success: false, error: 'Failed to fetch customers' });
+  }
+});
+
+
+/**
+ * GET /api/customers/export — customers as CSV, including deactivated ones so the
+ * file is a complete record rather than only what the list screen shows.
+ */
+router.get('/export', authenticateToken, requirePermission('customers:read'), async (req, res) => {
+  try {
+    const records = await prisma.customer.findMany({ orderBy: { name: 'asc' } });
+    const csv = toCsv(
+      ['name', 'phone', 'email', 'tpin', 'address', 'notes', 'isActive', 'createdAt'],
+      records.map((r) => [
+      r.name ?? '',
+      r.phone ?? '',
+      r.email ?? '',
+      r.tpin ?? '',
+      r.address ?? '',
+      r.notes ?? '',
+      r.isActive ?? '',
+      new Date(r.createdAt).toISOString(),
+      ])
+    );
+    const filename = `customers_${new Date().toISOString().slice(0, 10)}.csv`;
+
+    auditService.safeLog(auditService.eventTypes.DATA_EXPORT, {
+      ...auditService.contextFromReq(req),
+      entityType: 'CUSTOMER',
+      action: 'EXPORT_CUSTOMERS_CSV',
+      description: `Exported ${records.length} customers to CSV (${filename})`,
+    });
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.send(csv);
+  } catch (error) {
+    console.error('Error exporting customers:', error.message);
+    return res.status(500).json({ error: 'Failed to export customers' });
   }
 });
 
