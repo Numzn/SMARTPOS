@@ -121,6 +121,98 @@ describe('product CSV import', () => {
     });
   });
 
+  /* ---------------- tax rate forms ---------------- */
+
+  it('REGRESSION: accepts a VAT category name in taxRate, not just a number', async () => {
+    const cat = await withCategory();
+
+    // The reported failure: a hand-built file with STANDARD under taxRate was
+    // rejected as "not a number", which is true but useless — STANDARD is a
+    // real VAT category in this domain.
+    const plan = await planProductImport(
+      csv('name,price,category,sku,taxRate', `TEST-Std,10,${cat.name},TEST-SKU-TAX-1,STANDARD`)
+    );
+
+    expect(plan.summary.error).toBe(0);
+    expect(plan.rows[0].data.taxRate).toBe(16);
+    // The name means a category, so it should set one.
+    expect(plan.rows[0].data.vatCategoryCode).toBe('STANDARD');
+  });
+
+  it('maps zero-rated and exempt to a zero rate', async () => {
+    const cat = await withCategory();
+    const plan = await planProductImport(
+      csv(
+        'name,price,category,sku,taxRate',
+        `TEST-Zero,10,${cat.name},TEST-SKU-TAX-2,ZERO_RATED`,
+        `TEST-Exempt,10,${cat.name},TEST-SKU-TAX-3,EXEMPT`
+      )
+    );
+
+    expect(plan.summary.error).toBe(0);
+    expect(plan.rows[0].data.taxRate).toBe(0);
+    expect(plan.rows[0].data.vatCategoryCode).toBe('ZERO_RATED');
+    expect(plan.rows[1].data.vatCategoryCode).toBe('EXEMPT');
+  });
+
+  it('tolerates a percent sign, which spreadsheets add constantly', async () => {
+    const cat = await withCategory();
+    const plan = await planProductImport(
+      csv('name,price,category,sku,taxRate', `TEST-Pct,10,${cat.name},TEST-SKU-TAX-4,16%`)
+    );
+    expect(plan.summary.error).toBe(0);
+    expect(plan.rows[0].data.taxRate).toBe(16);
+  });
+
+  it('still rejects genuine nonsense in taxRate, and says what is accepted', async () => {
+    const cat = await withCategory();
+    const plan = await planProductImport(
+      csv('name,price,category,sku,taxRate', `TEST-Junk,10,${cat.name},TEST-SKU-TAX-5,banana`)
+    );
+    expect(plan.summary.error).toBe(1);
+    expect(plan.rows[0].errors.join(' ')).toMatch(/STANDARD/);
+  });
+
+  /* ---------------- category guidance ---------------- */
+
+  it('suggests the near-miss category and lists the valid ones', async () => {
+    const cat = await withCategory(); // "Test Category <suffix>"
+    const plan = await planProductImport(
+      csv('name,price,category', `TEST-Near,10,${cat.name.slice(0, -1)}`)
+    );
+
+    const message = plan.rows[0].errors.join(' ');
+    expect(message).toMatch(/did you mean/i);
+    expect(message).toContain(cat.name);
+  });
+
+  it('reports an unknown category once, not as two stacked problems', async () => {
+    const plan = await planProductImport(
+      csv('name,price,category', 'TEST-One,10,Nonexistent Category Name')
+    );
+    // Previously this also emitted "category is required for new products",
+    // making a single mistake look like two.
+    expect(plan.rows[0].errors.length).toBe(1);
+    expect(plan.rows[0].errors[0]).toMatch(/unknown category/i);
+  });
+
+  it('creates missing categories only when explicitly opted in', async () => {
+    const source = csv('name,price,category,sku', 'TEST-New Cat,10,TEST-Brand New Cat,TEST-SKU-CAT-1');
+
+    const refused = await planProductImport(source);
+    expect(refused.summary.error).toBe(1);
+
+    const allowed = await planProductImport(source, { createMissingCategories: true });
+    expect(allowed.summary.error).toBe(0);
+
+    const result = await applyProductImport(source, { createMissingCategories: true });
+    expect(result.categoriesCreated).toBe(1);
+    const made = await prisma.category.findFirst({ where: { name: 'TEST-Brand New Cat' } });
+    expect(made).not.toBeNull();
+    await prisma.product.deleteMany({ where: { sku: 'TEST-SKU-CAT-1' } });
+    await prisma.category.delete({ where: { id: made.id } });
+  });
+
   /* ---------------- applying ---------------- */
 
   it('applies a valid file, creating and updating in one go', async () => {

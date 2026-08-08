@@ -116,6 +116,101 @@ const num = (value) => {
 };
 
 /**
+ * Tax rates are stored as a percentage (16 means 16% VAT), but the domain also
+ * names its rates: ZRA works in VAT categories, and a "tax" column in a
+ * hand-built file very often reads STANDARD rather than 16. Both are
+ * meaningful, and rejecting the named form with "not a number" is technically
+ * true and practically useless.
+ *
+ * So a taxRate cell accepts either. A named category resolves to its rate and
+ * also sets vatCategoryCode, since that is what the name actually means.
+ */
+const VAT_CATEGORY_RATES = {
+  STANDARD: 16,
+  ZERO_RATED: 0,
+  ZERO: 0,
+  'ZERO RATED': 0,
+  EXEMPT: 0,
+};
+
+const VAT_CATEGORY_CANONICAL = {
+  STANDARD: 'STANDARD',
+  ZERO_RATED: 'ZERO_RATED',
+  ZERO: 'ZERO_RATED',
+  'ZERO RATED': 'ZERO_RATED',
+  EXEMPT: 'EXEMPT',
+};
+
+/**
+ * Returns { rate, vatCategoryCode, error }. A percent sign is tolerated
+ * ("16%"), since spreadsheets format tax columns that way constantly.
+ */
+function parseTaxRate(raw) {
+  if (raw === undefined || raw === '') return { rate: undefined, vatCategoryCode: undefined };
+
+  const key = String(raw).trim().toUpperCase().replace(/[-_]+/g, ' ').replace(/\s+/g, ' ');
+  const byName = key in VAT_CATEGORY_RATES ? key : key.replace(/ /g, '_');
+
+  if (byName in VAT_CATEGORY_RATES) {
+    return {
+      rate: VAT_CATEGORY_RATES[byName],
+      vatCategoryCode: VAT_CATEGORY_CANONICAL[byName],
+    };
+  }
+
+  const n = num(String(raw).replace(/%/g, '').trim());
+  if (n === null) return { rate: undefined, vatCategoryCode: undefined };
+  if (Number.isNaN(n)) {
+    return {
+      error:
+        `taxRate "${raw}" is not a number or a known VAT category. ` +
+        `Use a percentage like 16, or one of: ${Object.keys(VAT_CATEGORY_CANONICAL).join(', ')}`,
+    };
+  }
+  if (n < 0 || n > 100) {
+    return { error: `taxRate "${raw}" is out of range — it is a percentage, so 16 means 16%` };
+  }
+  return { rate: n, vatCategoryCode: undefined };
+}
+
+/** Edit distance, capped — only used to suggest a near-miss category name. */
+function editDistance(a, b) {
+  const s = a.toLowerCase();
+  const t = b.toLowerCase();
+  const d = Array.from({ length: s.length + 1 }, (_, i) => [i, ...Array(t.length).fill(0)]);
+  for (let j = 0; j <= t.length; j += 1) d[0][j] = j;
+  for (let i = 1; i <= s.length; i += 1) {
+    for (let j = 1; j <= t.length; j += 1) {
+      d[i][j] = Math.min(
+        d[i - 1][j] + 1,
+        d[i][j - 1] + 1,
+        d[i - 1][j - 1] + (s[i - 1] === t[j - 1] ? 0 : 1)
+      );
+    }
+  }
+  return d[s.length][t.length];
+}
+
+/**
+ * Suggests the closest existing category. Deliberately suggests rather than
+ * auto-corrects: "Groceries" and "Grocery" are one edit apart but could
+ * genuinely be different categories, and silently reassigning a product's
+ * category is not a guess worth making on the user's behalf.
+ */
+function suggestCategory(input, names) {
+  let best = null;
+  let bestDistance = Infinity;
+  for (const name of names) {
+    const distance = editDistance(input, name);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = name;
+    }
+  }
+  return bestDistance <= Math.max(2, Math.floor(input.length / 3)) ? best : null;
+}
+
+/**
  * Distinguishes "the file has no such column" from "the column is there but
  * blank". Absent means leave the existing value alone (undefined, which Prisma
  * drops); blank means the user explicitly cleared it (null).
@@ -141,7 +236,7 @@ const bool = (value) => {
  * Validate and resolve every row against current data, reporting what would
  * happen. Writes nothing.
  */
-async function planProductImport(csvText) {
+async function planProductImport(csvText, { createMissingCategories = false } = {}) {
   const records = toRecords(csvText);
 
   const [categories, existingProducts] = await Promise.all([
@@ -176,15 +271,31 @@ async function planProductImport(csvText) {
     const cost = num(record.cost);
     if (Number.isNaN(cost)) errors.push(`cost "${record.cost}" is not a number`);
 
-    const taxRate = num(record.taxrate);
-    if (Number.isNaN(taxRate)) errors.push(`taxRate "${record.taxrate}" is not a number`);
+    const tax = parseTaxRate(record.taxrate);
+    if (tax.error) errors.push(tax.error);
 
-    // Category must already exist. Creating one from a typo would be worse
-    // than refusing the row.
+    // Categories are matched by name, case-insensitively. An unknown one is
+    // reported with the valid options and a suggestion, rather than a bare
+    // "unknown category" that leaves the user guessing — a plural is the
+    // commonest miss ("Groceries" against a "Grocery" category).
     let category = null;
+    let missingCategoryName = null;
     if (record.category) {
       category = categoryByName.get(record.category.toLowerCase()) || null;
-      if (!category) errors.push(`unknown category "${record.category}"`);
+      if (!category) {
+        if (createMissingCategories) {
+          missingCategoryName = record.category;
+        } else {
+          const names = categories.map((c) => c.name);
+          const suggestion = suggestCategory(record.category, names);
+          errors.push(
+            `unknown category "${record.category}"` +
+            (suggestion ? ` — did you mean "${suggestion}"?` : '') +
+            ` Existing categories: ${names.join(', ') || '(none yet)'}.` +
+            ' Tick "Create missing categories" to add it during import.'
+          );
+        }
+      }
     }
 
     // Duplicates inside the file itself, which the database constraint would
@@ -212,7 +323,10 @@ async function planProductImport(csvText) {
     }
 
     // Creating a product needs a category; updating one can leave it alone.
-    if (!existing && !category) {
+    // Only complain when no category was supplied at all — if one was given
+    // but unrecognised, that is already reported above and repeating it here
+    // just makes one problem look like two.
+    if (!existing && !category && !missingCategoryName && !record.category) {
       errors.push('category is required for new products');
     }
 
@@ -221,6 +335,7 @@ async function planProductImport(csvText) {
       action: errors.length ? 'error' : existing ? 'update' : 'create',
       errors,
       existingId: existing?.id || null,
+      newCategoryName: missingCategoryName,
       data: {
         name: record.name,
         sku: optional(record.sku),
@@ -230,8 +345,10 @@ async function planProductImport(csvText) {
         unit: optional(record.unit),
         price,
         cost: cost ?? undefined,
-        taxRate: taxRate ?? undefined,
-        vatCategoryCode: optional(record.vatcategorycode),
+        taxRate: tax.rate,
+        // An explicit vatCategoryCode column wins; otherwise a named taxRate
+        // (STANDARD, EXEMPT…) implies it.
+        vatCategoryCode: optional(record.vatcategorycode) ?? tax.vatCategoryCode,
         isActive: bool(record.isactive),
         categoryId: category?.id || null,
       },
@@ -254,8 +371,8 @@ async function planProductImport(csvText) {
  * a partially-applied catalogue is harder to reason about than a rejected
  * file, and the user has already seen exactly which rows to fix.
  */
-async function applyProductImport(csvText) {
-  const plan = await planProductImport(csvText);
+async function applyProductImport(csvText, { createMissingCategories = false } = {}) {
+  const plan = await planProductImport(csvText, { createMissingCategories });
 
   if (plan.summary.error > 0) {
     const err = new Error(
@@ -269,9 +386,25 @@ async function applyProductImport(csvText) {
   const results = await prisma.$transaction(async (tx) => {
     let created = 0;
     let updated = 0;
+    let categoriesCreated = 0;
+
+    // Create any opted-in categories first, inside the same transaction, so a
+    // later failure rolls them back too rather than leaving orphans behind.
+    const newCategoryIds = new Map();
+    for (const row of plan.rows) {
+      if (!row.newCategoryName) continue;
+      const key = row.newCategoryName.toLowerCase();
+      if (newCategoryIds.has(key)) continue;
+      const category = await tx.category.create({ data: { name: row.newCategoryName } });
+      newCategoryIds.set(key, category.id);
+      categoriesCreated += 1;
+    }
 
     for (const row of plan.rows) {
-      const { categoryId, ...rest } = row.data;
+      const { categoryId: plannedCategoryId, ...rest } = row.data;
+      const categoryId =
+        plannedCategoryId ||
+        (row.newCategoryName ? newCategoryIds.get(row.newCategoryName.toLowerCase()) : null);
       // undefined keys are dropped by Prisma, so an absent CSV column leaves
       // the existing value alone rather than blanking it.
       const clean = Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined));
@@ -288,7 +421,7 @@ async function applyProductImport(csvText) {
       }
     }
 
-    return { created, updated };
+    return { created, updated, categoriesCreated };
   });
 
   return { ...results, totalRows: plan.totalRows };

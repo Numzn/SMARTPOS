@@ -8,16 +8,16 @@ import { apiFetch, API_BASE, getAuthHeaders } from '../lib/apiClient';
  * honestly — nothing is written unless something literally calls commit.
  */
 export const productImportApi = {
-  preview: (csv) =>
+  preview: (csv, createMissingCategories = false) =>
     apiFetch('/products/import', {
       method: 'POST',
-      body: JSON.stringify({ csv, commit: false }),
+      body: JSON.stringify({ csv, commit: false, createMissingCategories }),
     }),
 
-  commit: (csv) =>
+  commit: (csv, createMissingCategories = false) =>
     apiFetch('/products/import', {
       method: 'POST',
-      body: JSON.stringify({ csv, commit: true }),
+      body: JSON.stringify({ csv, commit: true, createMissingCategories }),
     }),
 
   /** Downloads the catalogue as CSV — the same shape import accepts. */

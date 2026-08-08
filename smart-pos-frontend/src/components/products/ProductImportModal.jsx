@@ -20,6 +20,7 @@ const ProductImportModal = ({ show, onClose, onImported }) => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [done, setDone] = useState(null);
+  const [createCategories, setCreateCategories] = useState(false);
   const fileRef = useRef(null);
 
   const reset = () => {
@@ -29,6 +30,7 @@ const ProductImportModal = ({ show, onClose, onImported }) => {
     setError('');
     setDone(null);
     setBusy(false);
+    setCreateCategories(false);
     if (fileRef.current) fileRef.current.value = '';
   };
 
@@ -53,7 +55,7 @@ const ProductImportModal = ({ show, onClose, onImported }) => {
     setBusy(true);
     setError('');
     try {
-      setPlan(await productImportApi.preview(csv));
+      setPlan(await productImportApi.preview(csv, createCategories));
     } catch (err) {
       setError(err?.data?.error || err.message || 'Could not read that file');
       setPlan(err?.data?.plan || null);
@@ -66,7 +68,7 @@ const ProductImportModal = ({ show, onClose, onImported }) => {
     setBusy(true);
     setError('');
     try {
-      const result = await productImportApi.commit(csv);
+      const result = await productImportApi.commit(csv, createCategories);
       setDone(result);
       onImported?.();
     } catch (err) {
@@ -126,6 +128,9 @@ const ProductImportModal = ({ show, onClose, onImported }) => {
         <div className="bg-green-50 border border-green-200 rounded-md p-4 text-sm text-green-900">
           Imported <strong>{done.created}</strong> new product{done.created === 1 ? '' : 's'} and
           updated <strong>{done.updated}</strong>.
+          {done.categoriesCreated > 0 && (
+            <> Created <strong>{done.categoriesCreated}</strong> new categor{done.categoriesCreated === 1 ? 'y' : 'ies'}.</>
+          )}
         </div>
       ) : (
         <div className="space-y-4">
@@ -144,12 +149,36 @@ const ProductImportModal = ({ show, onClose, onImported }) => {
             <p className="text-xs text-gray-500 mt-1">
               Required columns: <code>name</code>, <code>price</code>. Optional:{' '}
               <code>sku</code>, <code>category</code>, <code>cost</code>, <code>barcode</code>,{' '}
-              <code>brand</code>, <code>unit</code>, <code>taxRate</code>, <code>description</code>.
+              <code>brand</code>, <code>unit</code>, <code>taxRate</code>, <code>description</code>.{' '}
+              <code>taxRate</code> is a percentage (<code>16</code> = 16% VAT) and also accepts a
+              VAT category name — <code>STANDARD</code>, <code>ZERO_RATED</code> or{' '}
+              <code>EXEMPT</code>.
               Rows are matched on <code>sku</code> — a match updates, anything else is created.
               Columns you leave out are left untouched. Export the catalogue first for a
               ready-made template.
             </p>
           </div>
+
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={createCategories}
+              onChange={(e) => {
+                setCreateCategories(e.target.checked);
+                // The preview must always reflect what Import would actually
+                // do, so changing this invalidates the current plan.
+                setPlan(null);
+              }}
+              className="mt-1"
+            />
+            <span>
+              <span className="font-medium">Create missing categories</span>
+              <span className="block text-xs text-gray-500">
+                Off by default — an unrecognised category is usually a typo, and inventing one
+                silently is how a catalogue turns to mush.
+              </span>
+            </span>
+          </label>
 
           {error && (
             <div className="bg-red-50 border border-red-200 rounded-md p-3 text-sm text-red-700">{error}</div>

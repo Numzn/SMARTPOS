@@ -138,16 +138,19 @@ router.get('/export', authenticateToken, requirePermission('products:read'), asy
  */
 router.post('/import', authenticateToken, requirePermission('products:write'), async (req, res) => {
   try {
-    const { csv, commit } = req.body || {};
+    const { csv, commit, createMissingCategories } = req.body || {};
     if (typeof csv !== 'string' || !csv.trim()) {
       return res.status(400).json({ error: 'No CSV content was provided' });
     }
 
     if (!commit) {
-      return res.json({ dryRun: true, ...(await planProductImport(csv)) });
+      return res.json({
+        dryRun: true,
+        ...(await planProductImport(csv, { createMissingCategories })),
+      });
     }
 
-    const result = await applyProductImport(csv);
+    const result = await applyProductImport(csv, { createMissingCategories });
 
     auditService.safeLog(auditService.eventTypes.PRODUCT_CREATE, {
       ...auditService.contextFromReq(req),
