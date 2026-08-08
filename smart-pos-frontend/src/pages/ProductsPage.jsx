@@ -7,7 +7,6 @@ import { productApi, categoryApi, inventoryApi } from '../services/productServic
 import { 
   validateProductForm, 
   filterProducts, 
-  exportProductsToCSV, 
   getInitialProductData, 
   vatCategories, 
   getInventoryInfo, 
@@ -217,10 +216,6 @@ const ProductsPage = () => {
     } catch (err) {
       setExportError(err.message || 'Export failed');
     }
-  };
-
-  const exportProducts = () => {
-    exportProductsToCSV(products, categories, getInventoryInfoForProduct);
   };
 
   // Enhanced filtering that includes inventory-based filters

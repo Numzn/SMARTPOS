@@ -39,33 +39,10 @@ export const filterProducts = (products, categories, searchTerm, filterBy) => {
   });
 };
 
-// Export utilities
-export const exportProductsToCSV = (products, categories, getInventoryInfo) => {
-  const csvContent = [
-    ['Name', 'SKU', 'Price', 'Cost', 'Category', 'Stock', 'Status'],
-    ...products.map(product => {
-      const category = categories.find(cat => cat.id === product.categoryId);
-      const inventoryInfo = getInventoryInfo(product.id);
-      return [
-        product.name,
-        product.sku,
-        product.price,
-        product.cost || 0,
-        category?.name || 'Unknown',
-        inventoryInfo.currentStock,
-        product.isActive ? 'Active' : 'Inactive'
-      ];
-    })
-  ].map(row => row.join(',')).join('\n');
-
-  const blob = new Blob([csvContent], { type: 'text/csv' });
-  const url = window.URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `products_${new Date().toISOString().split('T')[0]}.csv`;
-  a.click();
-  window.URL.revokeObjectURL(url);
-};
+// Product export now lives server-side (GET /api/products/export). It emits
+// exactly the columns the importer accepts so a catalogue round-trips, and it
+// escapes fields properly — this client-side version joined on commas with no
+// quoting, so a single product name containing a comma corrupted the file.
 
 // Initial product data
 export const getInitialProductData = () => ({
