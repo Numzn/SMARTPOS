@@ -97,7 +97,7 @@ describe('extractZraFromVsdcPayload', () => {
     expect(extractZraFromVsdcPayload({ data: { foo: 'bar' } })).toBeNull();
   });
 
-  it('extracts fields from a flat payload', () => {
+  it('extracts fields from a flat payload without cross-filling a missing intrlData', () => {
     const result = extractZraFromVsdcPayload({
       rcptNo: 'RCPT-1',
       qrCode: 'QR-1',
@@ -106,12 +106,13 @@ describe('extractZraFromVsdcPayload', () => {
     expect(result).toEqual({
       rcptNo: 'RCPT-1',
       qrCode: 'QR-1',
-      intrlData: 'SIGN-1',
+      intrlData: null,
       rcptSign: 'SIGN-1',
+      vsdcRcptPbctDate: null,
     });
   });
 
-  it('extracts fields from a nested { data: {...} } payload, preferring intrlData over rcptSign', () => {
+  it('extracts fields from a nested { data: {...} } payload, keeping intrlData and rcptSign distinct', () => {
     const result = extractZraFromVsdcPayload({
       data: { rcptNo: 'RCPT-2', qrCode: 'QR-2', intrlData: 'INTRL-2', rcptSign: 'SIGN-2' },
     });

@@ -62,5 +62,5 @@ Expected: **24/24 PASS** against mock VSDC.
 ## Related docs
 
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — sequence diagrams and layering
-- [zra-compliance-checklist.md](./zra-compliance-checklist.md) — VSDC requirement detail
+- [zra-self-checklist.md](./zra-self-checklist.md) — ZRA certification self-assessment, evidence-cited (supersedes `zra-compliance-checklist.md`)
 - [DATABASE.md](./DATABASE.md) — Postgres and migrations

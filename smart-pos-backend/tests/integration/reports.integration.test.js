@@ -74,6 +74,22 @@ describe('Phase 4 reports', () => {
     expect(Array.isArray(transactions.body.transactions)).toBe(true);
   });
 
+  it('REGRESSION: transactions CSV export includes a description of goods/services (ZRA item 31*)', async () => {
+    const manager = await createTestUser({ role: 'MANAGER' });
+    const product = await createSellableProduct({ stock: 10 });
+    await createCompletedSale({ user: manager, product, quantity: 2, price: 100 });
+
+    const res = await request(app)
+      .get('/api/reports/transactions?format=csv')
+      .set('Authorization', `Bearer ${tokenFor(manager)}`);
+
+    expect(res.status).toBe(200);
+    const [header, row] = res.text.split('\r\n');
+    expect(header.split(',')).toContain('Description');
+    const descriptionIdx = header.split(',').indexOf('Description');
+    expect(row.split(',')[descriptionIdx]).toContain(product.name);
+  });
+
   /* ---------------- tax ---------------- */
 
   it('tax report sums the per-line ZRA tax amounts captured at sale time', async () => {

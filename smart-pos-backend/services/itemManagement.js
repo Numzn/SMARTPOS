@@ -1,5 +1,6 @@
 const prisma = require('../lib/prisma')
 const vsdcService = require('./vsdcService')
+const endpointAdapter = require('../lib/vsdc-gateway/endpointAdapter')
 const {
   markRegistrationSuccess,
   markRegistrationFailed,
@@ -123,7 +124,7 @@ class ItemManagementService {
       
       const response = await vsdcService.makeAuthenticatedRequest(
         'POST',
-        vsdcService.endpoints.itemSave,
+        endpointAdapter.path('itemSave'),
         payload
       )
       

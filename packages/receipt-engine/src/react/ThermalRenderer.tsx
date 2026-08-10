@@ -92,12 +92,21 @@ export function ThermalRenderer({ viewModel: vm, className = '' }: ThermalRender
           <span>Subtotal</span>
           <span>{formatCurrency(vm.totals.subtotal)}</span>
         </div>
+        {vm.totals.vatBreakdown.length > 1 ? (
+          vm.totals.vatBreakdown.map((entry, i) => (
+            <div className="receipt-total-row" key={i}>
+              <span>{entry.label}</span>
+              <span>{formatCurrency(entry.vat)}</span>
+            </div>
+          ))
+        ) : (
+          <div className="receipt-total-row">
+            <span>{vm.totals.vatLabel}</span>
+            <span>{formatCurrency(vm.totals.vat)}</span>
+          </div>
+        )}
         <div className="receipt-total-row">
-          <span>{vm.totals.vatLabel}</span>
-          <span>{formatCurrency(vm.totals.vat)}</span>
-        </div>
-        <div className="receipt-total-row">
-          <span>Discount</span>
+          <span>{vm.totals.discountLabel}</span>
           <span>{formatCurrency(vm.totals.discount)}</span>
         </div>
         <div className="receipt-total-row receipt-grand">
@@ -125,6 +134,7 @@ export function ThermalRenderer({ viewModel: vm, className = '' }: ThermalRender
         {vm.fiscal.sdcId && <div>SDC ID: {vm.fiscal.sdcId}</div>}
         {vm.fiscal.fiscalReceiptNo && <div>Fiscal Receipt No: {vm.fiscal.fiscalReceiptNo}</div>}
         {vm.fiscal.receiptSignature && <div>Receipt Signature: {vm.fiscal.receiptSignature}</div>}
+        {vm.fiscal.internalData && <div>Internal Data: {vm.fiscal.internalData}</div>}
         {vm.fiscal.verificationCode && <div>Verification Code: {vm.fiscal.verificationCode}</div>}
         {vm.receiptMeta.originalReceiptNo && (
           <div>Original Receipt: {vm.receiptMeta.originalReceiptNo}</div>
@@ -145,6 +155,7 @@ export function ThermalRenderer({ viewModel: vm, className = '' }: ThermalRender
           <div>Customer TPIN: {vm.customer.tpin}</div>
         )}
         <div>Customer: {vm.customer.name}</div>
+        {vm.customer.address && <div>{vm.customer.address}</div>}
       </div>
 
       <div className="receipt-footer-lines">

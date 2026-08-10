@@ -97,14 +97,17 @@ app.post('/api/invoice/submit', handleInvoiceSubmit);
 app.post('/trnsSales/saveSales', handleInvoiceSubmit);
 
 /** Read-only receipt lookup for fiscal reconciliation */
-app.post('/trnsSales/selectSales', (req, res) => {
+const handleSelectSales = (req, res) => {
   const invcNo = Number(req.body.invcNo);
   const found = submittedInvoices.get(invcNo);
   if (found) {
     return res.json(ok(found));
   }
   res.json({ resultCd: '001', resultMsg: 'Invoice not found', resultDt: ok().resultDt });
-});
+};
+
+app.post('/trnsSales/selectSales', handleSelectSales);
+app.post('/api/sales/select', handleSelectSales);
 
 const handleCodes = (req, res) => {
   console.log('📋 Mock VSDC codes select');
@@ -125,6 +128,7 @@ const handleItemClass = (req, res) => {
 };
 
 app.post('/itemClass/selectItemsClass', handleItemClass);
+app.post('/api/itemClass/get', handleItemClass);
 
 const handleItemSave = (req, res) => {
   console.log('📦 Mock VSDC item save:', req.body.itemCd);

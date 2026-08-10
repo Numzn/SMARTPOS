@@ -70,6 +70,10 @@ const CheckoutModal = ({
   const [receiptFormat, setReceiptFormat] = useState('thermal');
 
   const detailRef = useRef(null);
+  // The very first print of a completed sale is the original tax invoice, not
+  // a reprint — only the printer button's second-and-later click for the same
+  // sale is a genuine reprint (which VSDC/audit expects to show a COPY banner).
+  const hasPrintedRef = useRef(false);
 
   const change = useMemo(() => {
     if (paymentMethod !== 'cash') return 0;
@@ -190,7 +194,8 @@ const CheckoutModal = ({
       return;
     }
     try {
-      const vm = await fetchReceipt('sales', saleId, { reprint: true });
+      const vm = await fetchReceipt('sales', saleId, { reprint: hasPrintedRef.current });
+      hasPrintedRef.current = true;
       setReceiptVm(vm);
       if (vm) {
         await routeReceiptPrint(vm);
@@ -243,6 +248,7 @@ const CheckoutModal = ({
       setZraState('submitting');
       const result = await checkoutSale(payload);
       setSaleId(result.sale?.id);
+      hasPrintedRef.current = false;
 
       if (result.fiscal?.success) {
         setZraReceipt(result.fiscal.rcptNo || result.fiscal.receiptNumber || 'OK');

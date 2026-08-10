@@ -147,13 +147,14 @@ router.get('/transactions', authenticateToken, requirePermission('reports:read')
         discount: true,
         total: true,
         paymentMethod: true,
+        saleItems: { select: { quantity: true, product: { select: { name: true } } } },
       },
     });
 
     if (req.query.format === 'csv') {
       const headers = [
         'Invoice No', 'Receipt No', 'Date', 'Customer', 'TPIN',
-        'Status', 'Payment', 'Subtotal', 'Tax', 'Discount', 'Total',
+        'Description', 'Status', 'Payment', 'Subtotal', 'Tax', 'Discount', 'Total',
       ];
       const rows = sales.map((s) => [
         s.fiscalInvcNo ?? '',
@@ -161,6 +162,7 @@ router.get('/transactions', authenticateToken, requirePermission('reports:read')
         s.createdAt.toISOString(),
         s.customerName ?? '',
         s.customerTpin ?? '',
+        s.saleItems.map((li) => `${li.product?.name ?? 'Item'} x${li.quantity}`).join('; '),
         s.status,
         s.paymentMethod,
         (s.subtotal ?? 0).toFixed(2),

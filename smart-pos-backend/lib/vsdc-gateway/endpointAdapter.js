@@ -18,11 +18,11 @@ const OFFICIAL = {
 const MOCK = {
   initialize: '/api/initialize',
   codes: '/api/codes/get',
-  itemClass: '/itemClass/selectItemsClass',
+  itemClass: '/api/itemClass/get',
   itemSave: '/api/items/save',
   itemUpdate: '/api/items/save',
   salesSave: '/api/invoice/submit',
-  salesSelect: '/trnsSales/selectSales',
+  salesSelect: '/api/sales/select',
   stockItems: '/api/stock/save',
   stockMaster: '/api/stock/save',
   purchaseGet: '/api/purchase/get',

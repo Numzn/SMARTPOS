@@ -24,7 +24,7 @@ FROM node:20-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 
-RUN apk add --no-cache openssl libc6-compat tini bash wget \
+RUN apk add --no-cache openssl libc6-compat tini bash wget postgresql-client \
  && addgroup -S nodejs && adduser -S nodejs -G nodejs
 
 COPY --from=deps /app/node_modules ./node_modules

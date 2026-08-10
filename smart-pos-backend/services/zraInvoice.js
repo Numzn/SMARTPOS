@@ -27,6 +27,7 @@ class ZRAInvoiceService {
     this.receiptTypes = {
       SALE: 'S',                // Sale receipt
       REFUND: 'R',              // Refund receipt
+      DEBIT_NOTE: 'D',          // Debit note (adjustment)
       TRAINING: 'T'             // Training receipt
     }
 
@@ -72,13 +73,27 @@ class ZRAInvoiceService {
       })
 
       if (!gatewayResult.success) {
-        throw new Error(gatewayResult.error || 'ZRA submission failed')
+        const err = new Error(gatewayResult.error || 'ZRA submission failed')
+        err.code = gatewayResult.code
+        throw err
       }
 
       const invoiceResponse = gatewayResult.zraResponse
       const vsdcInvoiceData = gatewayResult.payload
 
       await this.updateLocalInvoice(invoiceData, invoiceResponse)
+
+      if (gatewayResult.stockSyncErrors?.length) {
+        await auditService.logEvent(auditService.eventTypes.STOCK_SYNC, {
+          entityType: 'INVOICE',
+          entityId: invoiceData.invoiceNumber,
+          action: 'ZRA_STOCK_SYNC',
+          success: false,
+          errorMessage: gatewayResult.stockSyncErrors.map((e) => `${e.itemCd}: ${e.error}`).join('; '),
+          description: `Post-sale VSDC stock sync failed for invoice ${invoiceData.invoiceNumber}`,
+          metadata: { stockSyncErrors: gatewayResult.stockSyncErrors },
+        }).catch(() => null)
+      }
 
       await auditService.logEvent(auditService.eventTypes.INVOICE_SUBMIT, {
         entityType: 'INVOICE',
@@ -117,7 +132,7 @@ class ZRAInvoiceService {
       return {
         success: false,
         error: error.message,
-        code: 'ZRA_INVOICE_SUBMIT_FAILED',
+        code: error.code || 'ZRA_INVOICE_SUBMIT_FAILED',
       }
     }
   }
@@ -255,7 +270,11 @@ class ZRAInvoiceService {
 
     const items = sale.saleItems.map((line) => {
       const product = line.product;
-      const itemClassification = getProductClassification(product);
+      // Prefer the classification/tax type snapshotted on the line at sale
+      // time — falls back to a live Product read only for rows created
+      // before that snapshot existed, so a later edit to the product can't
+      // change what an already-fiscalized (but retried) sale submits.
+      const itemClassification = line.itemClsCd || getProductClassification(product);
       if (!itemClassification) {
         throw new Error(
           `Product ${product.sku || product.name} is missing ZRA classification code`
@@ -274,7 +293,7 @@ class ZRAInvoiceService {
         supplyAmount: line.splyAmt,
         discountRate: 0,
         discountAmount: 0,
-        taxType: product.taxType || 'A',
+        taxType: line.taxType || product.taxType || 'A',
         taxableAmount: line.taxblAmt,
         taxAmount: line.taxAmt,
         totalAmount: line.totAmt,
@@ -314,7 +333,7 @@ class ZRAInvoiceService {
 
     const items = refund.refundItems.map((line) => {
       const product = line.product;
-      const itemClassification = getProductClassification(product);
+      const itemClassification = line.itemClsCd || getProductClassification(product);
       if (!itemClassification) {
         throw new Error(
           `Product ${product.sku || product.name} is missing ZRA classification code`
@@ -333,7 +352,7 @@ class ZRAInvoiceService {
         supplyAmount: line.splyAmt,
         discountRate: 0,
         discountAmount: 0,
-        taxType: product.taxType || 'A',
+        taxType: line.taxType || product.taxType || 'A',
         taxableAmount: line.taxblAmt,
         taxAmount: line.taxAmt,
         totalAmount: line.totAmt,
@@ -417,6 +436,7 @@ class ZRAInvoiceService {
           rcptNo: sale.rcptNo,
           qrCode: sale.qrCode,
           rcptSign: sale.rcptSign,
+          intrlData: sale.intrlData,
         },
         vsdcRequest: sale.vsdcRequest,
         vsdcResponse: sale.vsdcResponse,
@@ -454,6 +474,19 @@ class ZRAInvoiceService {
 
     const result = await this.submitInvoiceWithRetry(invoiceData);
 
+    if (!result.success && result.code === '007') {
+      const recovered = await this.recoverDuplicateInvoice(fiscalInvcNo);
+      if (recovered) {
+        return {
+          success: true,
+          message: 'Sale already recorded at ZRA (duplicate submission recovered)',
+          zraResponse: recovered.zraResponse,
+          vsdcRequest,
+          vsdcResponse: recovered.raw,
+        };
+      }
+    }
+
     const vsdcResponse = result.success
       ? result.zraResponse
       : { error: result.error, code: result.code, resultMsg: result.error };
@@ -462,6 +495,7 @@ class ZRAInvoiceService {
       return {
         success: false,
         message: result.error || 'ZRA submission failed',
+        code: result.code,
         vsdcRequest,
         vsdcResponse,
         zraResponse: result,
@@ -475,6 +509,26 @@ class ZRAInvoiceService {
       vsdcRequest,
       vsdcResponse,
     };
+  }
+
+  /**
+   * ZRA resultCd "007" means this invcNo was already accepted — a retry
+   * against an invcNo that only actually failed on our side of the wire
+   * (e.g. request timeout after ZRA recorded it). Recover the receipt that
+   * already exists at ZRA rather than mark a real fiscal success as failed.
+   */
+  async recoverDuplicateInvoice(invcNo) {
+    try {
+      const lookup = await vsdcGateway.lookupInvoice(invcNo);
+      if (!lookup.success || lookup.data?.resultCd !== '000') return null;
+      const { extractZraFromVsdcPayload } = require('../lib/saleFiscal');
+      const zra = extractZraFromVsdcPayload(lookup.data);
+      if (!zra) return null;
+      return { zraResponse: zra, raw: lookup.data };
+    } catch (e) {
+      console.warn('[zraInvoice] duplicate-invoice recovery lookup failed:', e.message);
+      return null;
+    }
   }
 
   /**
@@ -502,6 +556,7 @@ class ZRAInvoiceService {
           rcptNo: refund.rcptNo,
           qrCode: refund.qrCode,
           rcptSign: refund.rcptSign,
+          intrlData: refund.intrlData,
         },
         vsdcRequest: refund.vsdcRequest,
         vsdcResponse: refund.vsdcResponse,
@@ -551,6 +606,19 @@ class ZRAInvoiceService {
 
     const result = await this.submitInvoiceWithRetry(invoiceData);
 
+    if (!result.success && result.code === '007') {
+      const recovered = await this.recoverDuplicateInvoice(fiscalInvcNo);
+      if (recovered) {
+        return {
+          success: true,
+          message: 'Credit note already recorded at ZRA (duplicate submission recovered)',
+          zraResponse: recovered.zraResponse,
+          vsdcRequest,
+          vsdcResponse: recovered.raw,
+        };
+      }
+    }
+
     const vsdcResponse = result.success
       ? result.zraResponse
       : { error: result.error, code: result.code, resultMsg: result.error };
@@ -559,6 +627,7 @@ class ZRAInvoiceService {
       return {
         success: false,
         message: result.error || 'ZRA credit note submission failed',
+        code: result.code,
         vsdcRequest,
         vsdcResponse,
         zraResponse: result,
@@ -788,6 +857,28 @@ class ZRAInvoiceService {
       console.error('❌ Failed to update local invoice:', error.message)
       // Don't throw error here as ZRA submission was successful
     }
+  }
+
+  async submitDebitNote(debitNoteData) {
+    const payload = {
+      tpin: this.tpin,
+      bhfId: this.bhfId,
+      rcptTyCd: this.receiptTypes.DEBIT_NOTE,
+      dbtRsnCd: debitNoteData.reasonCode || '01',
+      invcAdjustReason: debitNoteData.reason || '',
+      orgInvcNo: debitNoteData.originalInvoiceNo,
+      itemList: debitNoteData.items.map(item => ({
+        itemCd: item.productId,
+        itemClsCd: item.itemClsCd,
+        splyAmt: item.splyAmt,
+        taxAmt: item.taxAmt,
+        totAmt: item.totAmt
+      })),
+      exchgeRt: 1,
+      totals: debitNoteData.totals
+    };
+
+    return this.submitInvoiceWithRetry(payload);
   }
 }
 

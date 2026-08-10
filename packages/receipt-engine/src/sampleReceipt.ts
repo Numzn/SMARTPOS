@@ -55,6 +55,7 @@ export function buildSampleReceiptViewModel(
       sdcId: 'MOCK-SDC-001',
       fiscalReceiptNo: 'MOCK-RCPT-PREVIEW',
       receiptSignature: 'AB12-CD34-EF56',
+      internalData: 'INTRL-98GH-76KL',
       verificationCode: 'VERIFY-1234',
       qrPayload: 'https://verify.zra.org.zm/MOCK-RCPT-PREVIEW',
     },

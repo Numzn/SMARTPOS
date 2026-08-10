@@ -66,6 +66,7 @@ export function A4Renderer({ viewModel: vm, className = '' }: A4RendererProps) {
               <strong>Customer TPIN:</strong> {vm.customer.tpin}
             </div>
           )}
+          {vm.customer.address && <div>{vm.customer.address}</div>}
           <div>
             <strong>Items:</strong> {vm.transaction.itemCount}
           </div>
@@ -99,6 +100,7 @@ export function A4Renderer({ viewModel: vm, className = '' }: A4RendererProps) {
           {vm.fiscal.sdcId && <div>SDC ID: {vm.fiscal.sdcId}</div>}
           {vm.fiscal.fiscalReceiptNo && <div>Fiscal receipt: {vm.fiscal.fiscalReceiptNo}</div>}
           {vm.fiscal.receiptSignature && <div>Signature: {vm.fiscal.receiptSignature}</div>}
+          {vm.fiscal.internalData && <div>Internal Data: {vm.fiscal.internalData}</div>}
           {vm.fiscal.verificationCode && <div>Verification: {vm.fiscal.verificationCode}</div>}
           {vm.receiptMeta.originalReceiptNo && (
             <div>Original receipt: {vm.receiptMeta.originalReceiptNo}</div>
@@ -110,12 +112,21 @@ export function A4Renderer({ viewModel: vm, className = '' }: A4RendererProps) {
             <span>Subtotal</span>
             <span>{formatCurrency(vm.totals.subtotal)}</span>
           </div>
+          {vm.totals.vatBreakdown.length > 1 ? (
+            vm.totals.vatBreakdown.map((entry, i) => (
+              <div className="receipt-a4-total-row" key={i}>
+                <span>{entry.label}</span>
+                <span>{formatCurrency(entry.vat)}</span>
+              </div>
+            ))
+          ) : (
+            <div className="receipt-a4-total-row">
+              <span>{vm.totals.vatLabel}</span>
+              <span>{formatCurrency(vm.totals.vat)}</span>
+            </div>
+          )}
           <div className="receipt-a4-total-row">
-            <span>{vm.totals.vatLabel}</span>
-            <span>{formatCurrency(vm.totals.vat)}</span>
-          </div>
-          <div className="receipt-a4-total-row">
-            <span>Discount</span>
+            <span>{vm.totals.discountLabel}</span>
             <span>{formatCurrency(vm.totals.discount)}</span>
           </div>
           <div className="receipt-a4-total-row receipt-a4-grand">

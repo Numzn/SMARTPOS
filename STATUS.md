@@ -68,7 +68,11 @@ flowchart LR
 | Admin codes sync | Done | `POST /api/vsdc/codes/sync` |
 | Sandbox smoke script | Done | [`scripts/sandbox-smoke.js`](smart-pos-backend/scripts/sandbox-smoke.js) |
 
-**Explicitly deferred (post-M4):** Imports, commercial/provisional invoices, purchases §5.11.
+**Deferred post-M4, but required for certification:** Imports, purchases §5.11, commercial/provisional
+invoices. The ZRA developer self-checklist marks imports (items 11\*, 12\*) and purchases (13\*, 14\*)
+**mandatory**, so this deferral blocks certification rather than merely postponing polish. Debit
+notes (21\*) are mandatory and entirely unimplemented. Scoped as Track C in
+[zra-self-checklist.md](smart-pos-backend/docs/zra-self-checklist.md).
 
 ---
 
@@ -122,4 +126,5 @@ See [DEPLOY.md](DEPLOY.md) § Sandbox UAT.
 | [DEPLOY.md](DEPLOY.md) | Full deployment + sandbox prerequisites |
 | [DEV_GUIDE.md](DEV_GUIDE.md) | Local development workflow |
 | [ARCHITECTURE.md](smart-pos-backend/docs/ARCHITECTURE.md) | Backend flows and layering |
-| [zra-compliance-checklist.md](smart-pos-backend/docs/zra-compliance-checklist.md) | Requirement-level ZRA status |
+| [zra-self-checklist.md](smart-pos-backend/docs/zra-self-checklist.md) | ZRA certification self-assessment (evidence-cited) |
+| ~~zra-compliance-checklist.md~~ | Superseded by the above; retained as a historical record only |

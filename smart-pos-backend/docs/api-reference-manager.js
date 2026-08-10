@@ -1,3 +1,15 @@
+/**
+ * ⚠️ The reference index this generates is NOT a compliance record.
+ *
+ * `createReferenceIndex()` builds `vsdc-reference-index.json` from a hardcoded map that lists
+ * MOCK server paths (`/api/login`, `/api/initialize`, `/api/branch/save`) as though they were
+ * VSDC spec endpoints, and stamps them `implementation_status: "completed"`. Regenerating the
+ * file does not re-verify anything against the spec or against the code.
+ *
+ * For actual endpoint coverage see docs/zra-self-checklist.md, which cites file:line evidence
+ * and records mock-only paths as NOT implemented.
+ */
+
 const fs = require('fs')
 const path = require('path')
 

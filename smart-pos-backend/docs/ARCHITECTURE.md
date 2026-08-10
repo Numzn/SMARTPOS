@@ -122,7 +122,7 @@ sequenceDiagram
 - [STATUS.md](../../STATUS.md) — three-lens project status (authoritative)
 - `npm run compliance` — checklist runner
 - `docs/implementation-summary.md` — module map
-- `docs/zra-compliance-checklist.md` — VSDC requirements list
+- `docs/zra-self-checklist.md` — ZRA certification self-assessment, evidence-cited (`docs/zra-compliance-checklist.md` is superseded)
 
 ## Local development
 

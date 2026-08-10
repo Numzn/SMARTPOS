@@ -176,15 +176,37 @@ docker compose up -d --build
 
 ### Backup PostgreSQL
 
+Manual, one-off:
+
 ```bash
 docker compose exec postgres pg_dump -U smartpos smartpos > backup-$(date +%F).sql
 ```
+
+Scripted, gzip'd, with retention pruning and an audit trail (`BACKUP_CREATE`), via
+`smart-pos-backend/lib/backup.js`:
+
+```bash
+node smart-pos-backend/scripts/backup-database.js       # writes to smart-pos-backend/backups/
+BACKUP_RETENTION=14 node smart-pos-backend/scripts/backup-database.js
+```
+
+An ADMIN can also trigger this on demand via `POST /api/settings/backup`.
+
+**Not scheduled by default.** Set `BACKUP_ENABLED=true` (and optionally
+`BACKUP_INTERVAL_MS`, default 24h) on the backend service to run it on an
+interval inside the Node process — or drive `scripts/backup-database.js` from
+host cron/systemd-timer instead, which survives a container restart. Backups
+are written to local disk (`BACKUP_DIR`, default `smart-pos-backend/backups/`);
+copy them off-host, this repo does not do that for you.
 
 ### Restore
 
 ```bash
 cat backup-2026-06-08.sql | docker compose exec -T postgres psql -U smartpos smartpos
+# or, for a gzip'd dump from the scripted path:
+gunzip -c smart-pos-backend/backups/smartpos-<timestamp>.sql.gz | docker compose exec -T postgres psql -U smartpos smartpos
 ```
+
 
 ### Stop / reset
 
