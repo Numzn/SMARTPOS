@@ -96,4 +96,36 @@ describe('completeSaleAfterFiscalSuccess (fiscal completion atomicity)', () => {
     });
     expect(movement).toBeNull();
   });
+
+  it('REGRESSION: writes rcptSign and intrlData to separate columns instead of collapsing them', async () => {
+    const user = await createTestUser();
+    const product = await createSellableProduct({ stock: 10 });
+    const sale = await createTestSale({ userId: user.id, productId: product.id, quantity: 1, price: 100 });
+
+    const completed = await completeSaleAfterFiscalSuccess(
+      sale.id,
+      { rcptNo: 'TEST-RCPT-4', qrCode: 'QR-4', rcptSign: 'SIGN-4', intrlData: 'INTRL-4' },
+      {},
+      DEFAULT_BRANCH_CODE
+    );
+
+    expect(completed.rcptSign).toBe('SIGN-4');
+    expect(completed.intrlData).toBe('INTRL-4');
+  });
+
+  it('leaves intrlData null when the VSDC payload does not supply one, rather than backfilling from rcptSign', async () => {
+    const user = await createTestUser();
+    const product = await createSellableProduct({ stock: 10 });
+    const sale = await createTestSale({ userId: user.id, productId: product.id, quantity: 1, price: 100 });
+
+    const completed = await completeSaleAfterFiscalSuccess(
+      sale.id,
+      { rcptNo: 'TEST-RCPT-5', qrCode: 'QR-5', rcptSign: 'SIGN-5' },
+      {},
+      DEFAULT_BRANCH_CODE
+    );
+
+    expect(completed.rcptSign).toBe('SIGN-5');
+    expect(completed.intrlData).toBeNull();
+  });
 });

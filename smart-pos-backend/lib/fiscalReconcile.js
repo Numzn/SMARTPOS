@@ -48,7 +48,9 @@ async function reconcileStuckSale(sale, { branchId = DEFAULT_BRANCH } = {}) {
         rcptNo: sale.rcptNo,
         qrCode: sale.qrCode,
         rcptSign: sale.rcptSign,
-        intrlData: sale.rcptSign,
+        intrlData: sale.intrlData,
+        vsdcRcptPbctDate:
+          sale.vsdcRcptPbctDate ?? extractZraFromVsdcPayload(sale.vsdcResponse)?.vsdcRcptPbctDate ?? null,
       },
       { vsdcRequest: sale.vsdcRequest, vsdcResponse: sale.vsdcResponse },
       branchId
@@ -93,7 +95,9 @@ async function reconcileStuckRefund(refund, { branchId = DEFAULT_BRANCH } = {}) 
         rcptNo: refund.rcptNo,
         qrCode: refund.qrCode,
         rcptSign: refund.rcptSign,
-        intrlData: refund.rcptSign,
+        intrlData: refund.intrlData,
+        vsdcRcptPbctDate:
+          refund.vsdcRcptPbctDate ?? extractZraFromVsdcPayload(refund.vsdcResponse)?.vsdcRcptPbctDate ?? null,
       },
       { vsdcRequest: refund.vsdcRequest, vsdcResponse: refund.vsdcResponse },
       branchId

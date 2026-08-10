@@ -8,8 +8,18 @@ export function copyLabel(vm: ReceiptViewModel): string | null {
 }
 
 export function receiptTitle(vm: ReceiptViewModel): string {
-  if (vm.receiptMeta.receiptType === 'CREDIT_NOTE') return 'CREDIT NOTE';
-  return 'TAX INVOICE';
+  switch (vm.receiptMeta.receiptType) {
+    case 'CREDIT_NOTE':
+      return 'CREDIT NOTE';
+    case 'DEBIT_NOTE':
+      return 'DEBIT NOTE';
+    case 'PROFORMA':
+      return 'PROFORMA INVOICE';
+    case 'PURCHASE':
+      return 'PURCHASE INVOICE';
+    default:
+      return 'TAX INVOICE';
+  }
 }
 
 export function formatPaymentMethod(method: string): string {

@@ -17,3 +17,6 @@ tmp/
 
 # Generated
 /generated/prisma
+
+# Local database backups (see lib/backup.js)
+/backups/

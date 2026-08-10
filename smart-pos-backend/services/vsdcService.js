@@ -3,6 +3,7 @@ const crypto = require('crypto')
 const fs = require('fs')
 const path = require('path')
 const prisma = require('../lib/prisma')
+const endpointAdapter = require('../lib/vsdc-gateway/endpointAdapter')
 
 /**
  * VSDC Service - Enhanced implementation based on VSDC API Specification v1.0.8
@@ -153,7 +154,7 @@ class VSDCService {
         dvcSrlNo: await this.getDeviceSerial()
       }
 
-      const response = await this.makeAuthenticatedRequest('POST', this.endpoints.initialize, initPayload)
+      const response = await this.makeAuthenticatedRequest('POST', endpointAdapter.path('initialize'), initPayload)
       
       if (response.success && response.data.resultCd === '000') {
         await this.persistDeviceFromInit(initPayload, response.data)
@@ -733,7 +734,7 @@ class VSDCService {
 
     const response = await this.makeAuthenticatedRequest(
       'POST',
-      this.endpoints.stockSave,
+      endpointAdapter.path('stockItems'),
       vsdcBody
     )
 

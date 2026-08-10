@@ -123,13 +123,16 @@ model Sale {
   
   // ZRA Smart Invoice fields
   rcptNo         String?    // Receipt number from ZRA
-  rcptSign       String?    // Digital signature
+  rcptSign       String?    // Digital signature (receiptSignature)
+  intrlData      String?    // VSDC internal data — distinct from rcptSign, both required on the printed invoice
   qrCode         String?    // QR Code URL
   vsdcTimestamp  DateTime?  // Timestamp ZRA issued invoice
   vsdcRequest    Json?      // VSDC request payload (retention)
   vsdcResponse   Json?      // VSDC response payload (retention)
   fiscalError    String?    // Last fiscal submission error
+  fiscalErrorCode String?   // ZRA resultCd from the failed submission (e.g. "007" = duplicate), distinct from the human message
   fiscalInvcNo   Int?       // Sequential VSDC invoice number (per device)
+  vsdcRcptPbctDate DateTime? // VSDC-issued confirmation date (distinct from vsdcTimestamp, our local clock)
   branchId       String     @default("main") // Operational branch code (inventory.branchId)
 
   // Receipt / customer
@@ -160,6 +163,10 @@ model Sale {
   @@index([shiftId])
   @@index([discountApprovedByUserId])
   @@index([customerId])
+  // Regression guard on the atomic counter in allocateFiscalInvcNo — does not
+  // catch a sale and a refund colliding, since they share one counter across
+  // two tables (see fiscalInvoiceNumber.js).
+  @@unique([fiscalInvcNo])
   @@map("sales")
 }
 
@@ -178,11 +185,14 @@ model Refund {
 
   rcptNo         String?
   rcptSign       String?
+  intrlData      String?
   qrCode         String?
   vsdcTimestamp  DateTime?
   vsdcRequest    Json?
   vsdcResponse   Json?
   fiscalError    String?
+  fiscalErrorCode String?
+  vsdcRcptPbctDate DateTime? // VSDC-issued confirmation date (distinct from vsdcTimestamp, our local clock)
 
   fiscalInvcNo   Int?       // Sequential VSDC credit-note invoice number
 
@@ -199,6 +209,7 @@ model Refund {
 
   @@index([originalSaleId])
   @@index([shiftId])
+  @@unique([fiscalInvcNo])
   @@map("refunds")
 }
 
@@ -218,10 +229,75 @@ model RefundItem {
   taxAmt     Float
   totAmt     Float
 
+  // Snapshot of the product's ZRA classification/tax type at refund time —
+  // a later edit to Product must not change what a past credit note (re)submits
+  // or reprints (see the equivalent SaleItem fields and saleFiscal.js note).
+  itemClsCd  String?
+  taxType    String?
+
   refund     Refund  @relation(fields: [refundId], references: [id], onDelete: Cascade)
   product    Product @relation(fields: [productId], references: [id])
 
   @@map("refund_items")
+}
+
+model DebitNote {
+  id             String       @id @default(cuid())
+  originalSaleId String
+  userId         String
+  status         RefundStatus @default(PENDING)
+  reasonCode     String       @default("01")
+  reason         String?
+  subtotal       Float
+  tax            Float?
+  discount       Float?
+  total          Float
+  paymentMethod  PaymentMethod
+
+  rcptNo         String?
+  rcptSign       String?
+  intrlData      String?
+  qrCode         String?
+  vsdcTimestamp  DateTime?
+  vsdcRequest    Json?
+  vsdcResponse   Json?
+  fiscalError    String?
+  fiscalErrorCode String?
+  fiscalInvcNo   Int?
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  items          DebitNoteItem[]
+  sale           Sale         @relation(fields: [originalSaleId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id])
+
+  @@map("debit_notes")
+}
+
+model DebitNoteItem {
+  id           String  @id @default(cuid())
+  debitNoteId  String
+  saleItemId   String?
+  productId    String
+  quantity     Int
+  price        Float
+  total        Float
+  pkg          Int?
+  qty          Int
+  prc          Float
+  splyAmt      Float
+  taxblAmt     Float
+  taxAmt       Float
+  totAmt       Float
+
+  itemClsCd    String?
+  taxType      String?
+
+  debitNote    DebitNote @relation(fields: [debitNoteId], references: [id], onDelete: Cascade)
+  product      Product   @relation(fields: [productId], references: [id])
+
+  @@map("debit_note_items")
 }
 
 model SaleItem {
@@ -247,7 +323,16 @@ model SaleItem {
   taxblAmt  Float    // Taxable Amount
   taxAmt    Float    // Tax Amount
   totAmt    Float    // Total Amount per item
-  
+
+  // Snapshot of the product's ZRA item classification and tax type at sale
+  // time. Read live from Product at VSDC-submission time until this was added,
+  // which meant a later edit to a product's classification silently changed
+  // what an already-fiscalized (but retried) or reprinted sale would submit/
+  // show. Falls back to a live Product read for rows created before this field
+  // existed (see services/zraInvoice.js).
+  itemClsCd String?
+  taxType   String?
+
   // Relations
   sale      Sale    @relation(fields: [saleId], references: [id])
   product   Product @relation(fields: [productId], references: [id])

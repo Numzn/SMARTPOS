@@ -43,6 +43,32 @@ function sumItemQty(items) {
   return items.reduce((s, i) => s + (i.qty || 0), 0);
 }
 
+/**
+ * Group raw line rows (SaleItem/RefundItem, each carrying taxblAmt/taxAmt) by
+ * their effective VAT rate — real per-line data, not an assumed flat rate.
+ * Rows with no taxable amount (free/zero-value lines) are dropped from the
+ * breakdown rather than distorting the rate with a divide-by-zero.
+ */
+function computeVatBreakdown(lines) {
+  const byRate = new Map();
+  for (const line of lines) {
+    const taxblAmt = Number(line.taxblAmt) || 0;
+    const taxAmt = Number(line.taxAmt) || 0;
+    if (taxblAmt <= 0) continue;
+    const rate = Math.round((taxAmt / taxblAmt) * 10000) / 100;
+    const existing = byRate.get(rate) || { rate, taxable: 0, vat: 0 };
+    existing.taxable += taxblAmt;
+    existing.vat += taxAmt;
+    byRate.set(rate, existing);
+  }
+  return Array.from(byRate.values()).sort((a, b) => a.rate - b.rate);
+}
+
+function computeDiscountRate(discount, subtotal) {
+  if (!discount || subtotal <= 0) return 0;
+  return Math.round((discount / subtotal) * 10000) / 100;
+}
+
 async function loadBusinessContext() {
   return getBusinessProfile();
 }
@@ -73,7 +99,9 @@ async function buildSaleReceiptSource(sale, business) {
     totals: {
       subtotal: sale.subtotal,
       vat: sale.tax ?? 0,
+      vatBreakdown: computeVatBreakdown(sale.saleItems),
       discount: sale.discount ?? 0,
+      discountRate: computeDiscountRate(sale.discount ?? 0, sale.subtotal),
       total: sale.total,
     },
     payment: {
@@ -88,12 +116,14 @@ async function buildSaleReceiptSource(sale, business) {
       sdcId: extractVsdcField(vsdc, 'sdcId', 'sdicId', 'zraSdcId'),
       fiscalReceiptNo: sale.rcptNo,
       receiptSignature: sale.rcptSign,
+      internalData: sale.intrlData,
       verificationCode: extractVsdcField(vsdc, 'verificationCode', 'vfnCode'),
       qrPayload: sale.qrCode,
     },
     customer: {
       name: sale.customerName,
       tpin: sale.customerTpin,
+      address: sale.customer?.address || null,
     },
     footer: {
       lines: Array.isArray(business.footerLines) ? business.footerLines : [],
@@ -136,7 +166,9 @@ async function buildRefundReceiptSource(refund, business) {
     totals: {
       subtotal: refund.subtotal,
       vat: refund.tax ?? 0,
+      vatBreakdown: computeVatBreakdown(refund.refundItems),
       discount: refund.discount ?? 0,
+      discountRate: computeDiscountRate(refund.discount ?? 0, refund.subtotal),
       total: refund.total,
     },
     payment: {
@@ -151,12 +183,14 @@ async function buildRefundReceiptSource(refund, business) {
       sdcId: extractVsdcField(vsdc, 'sdcId', 'sdicId', 'zraSdcId'),
       fiscalReceiptNo: refund.rcptNo,
       receiptSignature: refund.rcptSign,
+      internalData: refund.intrlData,
       verificationCode: extractVsdcField(vsdc, 'verificationCode', 'vfnCode'),
       qrPayload: refund.qrCode,
     },
     customer: {
       name: original.customerName,
       tpin: original.customerTpin,
+      address: original.customer?.address || null,
     },
     footer: {
       lines: Array.isArray(business.footerLines) ? business.footerLines : [],

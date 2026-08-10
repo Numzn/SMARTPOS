@@ -12,6 +12,7 @@ function normalizeCustomer(source: ReceiptSourceData) {
     name: name.toUpperCase() === 'WALK-IN CUSTOMER' ? WALK_IN_NAME : name,
     tpin,
     showTpin: isB2B,
+    address: source.customer?.address?.trim() || null,
   };
 }
 
@@ -21,9 +22,43 @@ function mapSubmissionTime(value?: string | Date | null): string | null {
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
+/**
+ * Real per-rate VAT — no hardcoded fallback. A rate is only known two ways:
+ * an explicit per-line breakdown (preferred, handles mixed-rate baskets), or
+ * a single blended rate derived from vat/subtotal (falls back to 0 only when
+ * there's nothing to derive from, e.g. a zero-value sale — never defaults to
+ * 16% for an exempt/zero-rated line, which is the bug this replaces).
+ */
+function resolveVatBreakdown(source: ReceiptSourceData) {
+  const raw = source.totals.vatBreakdown;
+  if (Array.isArray(raw) && raw.length > 0) {
+    return raw.map((entry) => ({
+      rate: entry.rate,
+      taxable: entry.taxable,
+      vat: entry.vat,
+      label: `VAT (${entry.rate}%)`,
+    }));
+  }
+
+  const { subtotal, vat, vatRate } = source.totals;
+  const rate = vatRate ?? (subtotal > 0 ? Math.round((vat / subtotal) * 10000) / 100 : 0);
+  return [{ rate, taxable: subtotal, vat, label: `VAT (${rate}%)` }];
+}
+
+function resolveDiscountRate(source: ReceiptSourceData): number {
+  if (source.totals.discountRate != null) return source.totals.discountRate;
+  const { subtotal, discount } = source.totals;
+  if (!discount || subtotal <= 0) return 0;
+  return Math.round((discount / subtotal) * 10000) / 100;
+}
+
 export function buildReceiptViewModel(source: ReceiptSourceData): ReceiptViewModel {
   const occurredAt = source.transaction.occurredAt;
-  const vatRate = source.totals.vatRate ?? 16;
+  const vatBreakdown = resolveVatBreakdown(source);
+  const vatLabel =
+    vatBreakdown.length === 1 ? vatBreakdown[0].label : 'VAT';
+  const discountRate = resolveDiscountRate(source);
+  const discountLabel = discountRate > 0 ? `Discount (${discountRate}%)` : 'Discount';
   const customer = normalizeCustomer(source);
   const version = source.footer?.receiptVersion ?? '1.0';
 
@@ -49,8 +84,11 @@ export function buildReceiptViewModel(source: ReceiptSourceData): ReceiptViewMod
     totals: {
       subtotal: source.totals.subtotal,
       vat: source.totals.vat,
-      vatLabel: `VAT (${vatRate}%)`,
+      vatLabel,
+      vatBreakdown,
       discount: source.totals.discount,
+      discountRate,
+      discountLabel,
       total: source.totals.total,
     },
     payment: {
@@ -65,6 +103,7 @@ export function buildReceiptViewModel(source: ReceiptSourceData): ReceiptViewMod
       sdcId: source.fiscal.sdcId ?? null,
       fiscalReceiptNo: source.fiscal.fiscalReceiptNo ?? source.transaction.receiptNo,
       receiptSignature: source.fiscal.receiptSignature ?? null,
+      internalData: source.fiscal.internalData ?? null,
       verificationCode: source.fiscal.verificationCode ?? null,
       qrPayload: source.fiscal.qrPayload ?? null,
       fiscalInvoiceNo: formatInvoiceNo(source.transaction.fiscalInvoiceNo),

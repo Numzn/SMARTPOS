@@ -42,12 +42,10 @@ async function submitInvoiceData(invoiceData) {
     ? buildSaveCreditNotePayload(invoiceData, ctx())
     : buildSaveSalesPayload(invoiceData, ctx());
 
-  const validation = validateSaveSalesPayload(
-    endpointAdapter.isOfficial()
-      ? payload
-      : { ...payload, currencyTyCd: 'ZMW', exchangeRt: '1' }
-  );
-  if (!validation.isValid && endpointAdapter.isOfficial()) {
+  // Validate the real payload in every mode — mock runs must exercise the
+  // same checks the sandbox will, or bugs only surface once credentials arrive.
+  const validation = validateSaveSalesPayload(payload);
+  if (!validation.isValid) {
     return { success: false, error: validation.errors.join(', '), code: 'VALIDATION_ERROR' };
   }
 
@@ -67,8 +65,9 @@ async function submitInvoiceData(invoiceData) {
     const body = result.data?.data ? { ...result.data, ...result.data.data } : result.data;
     const zraResponse = mapSaleResponse(body);
 
+    let stockSyncErrors = [];
     if (!isCredit) {
-      await postSaleStock(payload, body);
+      stockSyncErrors = await postSaleStock(payload, body);
     }
 
     return {
@@ -77,6 +76,7 @@ async function submitInvoiceData(invoiceData) {
       zraResponse,
       payload,
       raw: result.data,
+      stockSyncErrors,
     };
   } catch (err) {
     return { success: false, error: err.message, code: 'TRANSPORT_ERROR', payload };
@@ -84,6 +84,7 @@ async function submitInvoiceData(invoiceData) {
 }
 
 async function postSaleStock(salesPayload, responseData) {
+  const errors = [];
   try {
     const stockPath = endpointAdapter.path('stockItems');
     const masterPath = endpointAdapter.path('stockMaster');
@@ -104,7 +105,12 @@ async function postSaleStock(salesPayload, responseData) {
         modrId: 'SYSTEM',
         modrNm: 'SYSTEM',
       };
-      await transport.authenticatedPost(stockPath, stockBody).catch(() => null);
+      try {
+        await transport.authenticatedPost(stockPath, stockBody);
+      } catch (e) {
+        console.error(`[vsdc-gateway] stock item post failed for ${item.itemCd}:`, e.message);
+        errors.push({ itemCd: item.itemCd, error: e.message });
+      }
     }
 
     const masterBody = {
@@ -115,10 +121,17 @@ async function postSaleStock(salesPayload, responseData) {
         qty: -Math.abs(Number(item.qty || 0)),
       })),
     };
-    await transport.authenticatedPost(masterPath, masterBody).catch(() => null);
+    try {
+      await transport.authenticatedPost(masterPath, masterBody);
+    } catch (e) {
+      console.error('[vsdc-gateway] stock master post failed:', e.message);
+      errors.push({ itemCd: 'MASTER', error: e.message });
+    }
   } catch (e) {
     console.warn('[vsdc-gateway] post-sale stock skipped:', e.message);
+    errors.push({ itemCd: null, error: e.message });
   }
+  return errors;
 }
 
 async function lookupInvoice(invcNo) {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useDialog } from '../../hooks/useDialog';
 import { X, RotateCcw, Receipt } from 'lucide-react';
 import { fetchReceipt } from '../../api/receiptsApi';
@@ -36,6 +36,9 @@ const RefundModal = ({ sale, onClose, onSuccess }) => {
   const [receiptVm, setReceiptVm] = useState(null);
   const [receiptLoading, setReceiptLoading] = useState(false);
   const [receiptFormat, setReceiptFormat] = useState('thermal');
+  // The very first print of a completed refund is the original credit note,
+  // not a reprint — same reasoning as CheckoutModal's hasPrintedRef.
+  const hasPrintedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -127,7 +130,8 @@ const RefundModal = ({ sale, onClose, onSuccess }) => {
     const refundId = result?.refund?.id;
     if (!refundId) return;
     try {
-      const vm = await fetchReceipt('refunds', refundId, { reprint: true });
+      const vm = await fetchReceipt('refunds', refundId, { reprint: hasPrintedRef.current });
+      hasPrintedRef.current = true;
       setReceiptVm(vm);
       if (vm) {
         await routeReceiptPrint(vm);

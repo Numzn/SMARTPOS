@@ -14,6 +14,7 @@ const refundInclude = {
   originalSale: {
     include: {
       saleItems: { include: { product: true } },
+      customer: true,
     },
   },
 };
@@ -24,6 +25,12 @@ function getOriginalInvcNo(sale) {
     return resp.invcNo || resp.data?.invcNo || 0;
   }
   return 0;
+}
+
+function parseVsdcDate(value) {
+  if (!value) return null;
+  const d = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 async function getRefundedQtyBySaleItem(originalSaleId) {
@@ -170,6 +177,11 @@ async function createPendingRefund(originalSaleId, body) {
       taxblAmt,
       taxAmt,
       totAmt,
+      // Carry forward the sale line's classification snapshot rather than
+      // re-reading the current Product — a refund must match what was
+      // actually sold, not what the product looks like today.
+      itemClsCd: saleItem.itemClsCd ?? null,
+      taxType: saleItem.taxType ?? null,
     };
   });
 
@@ -212,12 +224,15 @@ async function completeRefundAfterFiscalSuccess(refundId, zra, fiscalPayload = {
       data: {
         status: 'COMPLETED',
         rcptNo: zra.rcptNo,
-        rcptSign: zra.intrlData || zra.rcptSign,
+        rcptSign: zra.rcptSign ?? null,
+        intrlData: zra.intrlData ?? null,
         qrCode: zra.qrCode,
         vsdcTimestamp: new Date(),
+        vsdcRcptPbctDate: parseVsdcDate(zra.vsdcRcptPbctDate),
         vsdcRequest: fiscalPayload.vsdcRequest ?? undefined,
         vsdcResponse: fiscalPayload.vsdcResponse ?? undefined,
         fiscalError: null,
+        fiscalErrorCode: null,
       },
       include: refundInclude,
     });
@@ -332,6 +347,7 @@ async function finalizeRefundFiscally(refundId, { branchId = DEFAULT_BRANCH } = 
       data: {
         status: 'FISCAL_FAILED',
         fiscalError: fiscalResult.message || fiscalResult.error || 'ZRA credit note failed',
+        fiscalErrorCode: fiscalResult.code || null,
         vsdcRequest: fiscalResult.vsdcRequest ?? undefined,
         vsdcResponse: fiscalResult.vsdcResponse ?? undefined,
       },
@@ -341,7 +357,7 @@ async function finalizeRefundFiscally(refundId, { branchId = DEFAULT_BRANCH } = 
     return {
       success: false,
       refund: failed,
-      fiscal: { success: false, error: failed.fiscalError },
+      fiscal: { success: false, error: failed.fiscalError, code: failed.fiscalErrorCode },
     };
   }
 

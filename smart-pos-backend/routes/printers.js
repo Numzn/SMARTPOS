@@ -12,7 +12,7 @@ const sampleVm = () => ({
   items: [{ name: 'Test Item', qty: 1, unitPrice: 10, lineTotal: 10 }],
   totals: { subtotal: 8.62, vat: 1.38, vatLabel: 'VAT (16%)', discount: 0, total: 10 },
   payment: { method: 'CASH', amountPaid: 10, change: 0 },
-  fiscal: { mode: 'ONLINE', submissionStatus: 'SUBMITTED', submissionTime: null, sdcId: null, fiscalReceiptNo: null, receiptSignature: null, verificationCode: null, qrPayload: null, fiscalInvoiceNo: null },
+  fiscal: { mode: 'ONLINE', submissionStatus: 'SUBMITTED', submissionTime: null, sdcId: null, fiscalReceiptNo: null, receiptSignature: null, internalData: null, verificationCode: null, qrPayload: null, fiscalInvoiceNo: null },
   customer: { name: 'TEST', tpin: null, showTpin: false },
   footer: { lines: ['Printer test OK'], showPoweredBy: false, poweredByLine: '', fiscalizedLine: '' },
   receiptMeta: { receiptType: 'SALE', originalReceiptNo: null, isCopy: false, printedAt: null, printedBy: null, reprintCount: 0, version: '1.0' },

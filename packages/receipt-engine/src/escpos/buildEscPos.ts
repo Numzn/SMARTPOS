@@ -100,11 +100,17 @@ export function buildEscPosCommands(viewModel: ReceiptViewModel): Uint8Array {
   parts.push(line(`Store: ${vm.merchant.tradingName}`, enc));
   parts.push(line(`TPIN: ${vm.merchant.tpin}`, enc));
   parts.push(line(`Branch: ${vm.merchant.branchName}`, enc));
+  if (vm.merchant.address) {
+    parts.push(line(vm.merchant.address, enc));
+  }
   parts.push(divider('-'));
   parts.push(line(`Date: ${vm.transaction.date}  Time: ${vm.transaction.time}`, enc));
   parts.push(line(`Cashier: ${vm.transaction.cashier}`, enc));
   if (vm.transaction.receiptNo) {
     parts.push(line(`Receipt: ${vm.transaction.receiptNo}`, enc));
+  }
+  if (vm.transaction.invoiceNo) {
+    parts.push(line(`Invoice: ${vm.transaction.invoiceNo}`, enc));
   }
   parts.push(divider('-'));
 
@@ -120,8 +126,14 @@ export function buildEscPosCommands(viewModel: ReceiptViewModel): Uint8Array {
 
   parts.push(divider('-'));
   parts.push(line(`Subtotal: ${formatCurrency(vm.totals.subtotal)}`, enc));
-  parts.push(line(`${vm.totals.vatLabel}: ${formatCurrency(vm.totals.vat)}`, enc));
-  parts.push(line(`Discount: ${formatCurrency(vm.totals.discount)}`, enc));
+  if (vm.totals.vatBreakdown.length > 1) {
+    for (const entry of vm.totals.vatBreakdown) {
+      parts.push(line(`${entry.label}: ${formatCurrency(entry.vat)}`, enc));
+    }
+  } else {
+    parts.push(line(`${vm.totals.vatLabel}: ${formatCurrency(vm.totals.vat)}`, enc));
+  }
+  parts.push(line(`${vm.totals.discountLabel}: ${formatCurrency(vm.totals.discount)}`, enc));
   parts.push(cmd(ESC, 0x45, 1));
   parts.push(line(`TOTAL: ${formatCurrency(vm.totals.total)}`, enc));
   parts.push(cmd(ESC, 0x45, 0));
@@ -148,12 +160,18 @@ export function buildEscPosCommands(viewModel: ReceiptViewModel): Uint8Array {
   if (vm.fiscal.receiptSignature) {
     parts.push(line(`Signature: ${vm.fiscal.receiptSignature}`, enc));
   }
+  if (vm.fiscal.internalData) {
+    parts.push(line(`Internal Data: ${vm.fiscal.internalData}`, enc));
+  }
   if (vm.fiscal.qrPayload) {
     parts.push(center('Scan to verify on ZRA Smart Invoice', enc));
     parts.push(qrCode(vm.fiscal.qrPayload, enc));
   }
 
   parts.push(divider('-'));
+  if (vm.customer.showTpin && vm.customer.tpin) {
+    parts.push(line(`Customer TPIN: ${vm.customer.tpin}`, enc));
+  }
   parts.push(line(`Customer: ${vm.customer.name}`, enc));
   for (const footerLine of vm.footer.lines) {
     parts.push(center(footerLine, enc));

@@ -40,11 +40,21 @@ export interface ReceiptLineItem {
   lineTotal: number;
 }
 
+export interface VatBreakdownEntry {
+  rate: number;
+  taxable: number;
+  vat: number;
+  label: string;
+}
+
 export interface TotalsBlock {
   subtotal: number;
   vat: number;
   vatLabel: string;
+  vatBreakdown: VatBreakdownEntry[];
   discount: number;
+  discountRate: number;
+  discountLabel: string;
   total: number;
 }
 
@@ -61,6 +71,7 @@ export interface FiscalBlock {
   sdcId: string | null;
   fiscalReceiptNo: string | null;
   receiptSignature: string | null;
+  internalData: string | null;
   verificationCode: string | null;
   qrPayload: string | null;
   fiscalInvoiceNo: string | null;
@@ -70,6 +81,7 @@ export interface CustomerBlock {
   name: string;
   tpin: string | null;
   showTpin: boolean;
+  address: string | null;
 }
 
 export interface FooterBlock {
@@ -115,7 +127,9 @@ export interface ReceiptSourceData {
     subtotal: number;
     vat: number;
     vatRate?: number;
+    vatBreakdown?: Array<{ rate: number; taxable: number; vat: number }>;
     discount: number;
+    discountRate?: number;
     total: number;
   };
   payment: {
@@ -130,12 +144,14 @@ export interface ReceiptSourceData {
     sdcId?: string | null;
     fiscalReceiptNo?: string | null;
     receiptSignature?: string | null;
+    internalData?: string | null;
     verificationCode?: string | null;
     qrPayload?: string | null;
   };
   customer?: {
     name?: string | null;
     tpin?: string | null;
+    address?: string | null;
   };
   footer?: {
     lines?: string[];

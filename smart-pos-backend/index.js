@@ -107,6 +107,19 @@ app.listen(PORT, HOST, () => {
     console.log(`🔄 Fiscal reconciliation scheduled every ${intervalMs / 1000}s`);
   }
 
+  if (process.env.BACKUP_ENABLED === 'true') {
+    const { runDatabaseBackup } = require('./lib/backup');
+    const intervalMs = parseInt(process.env.BACKUP_INTERVAL_MS || '86400000', 10);
+    const runBackup = () => {
+      runDatabaseBackup().catch((err) => {
+        console.error('[Backup] Scheduled run failed:', err.message);
+      });
+    };
+    setTimeout(runBackup, 60_000);
+    setInterval(runBackup, intervalMs);
+    console.log(`💾 Database backup scheduled every ${intervalMs / 1000}s`);
+  }
+
   if (process.env.STOCK_RECONCILE_ENABLED !== 'false') {
     const { reconcileReservedStock } = require('./lib/inventoryStock');
     const intervalMs = parseInt(process.env.STOCK_RECONCILE_INTERVAL_MS || '300000', 10);

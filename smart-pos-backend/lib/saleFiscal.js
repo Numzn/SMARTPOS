@@ -19,6 +19,7 @@ const vsdcService = require('../services/vsdcService');
 const saleInclude = {
   user: { select: { id: true, name: true, email: true } },
   saleItems: { include: { product: true } },
+  customer: true,
 };
 
 // Applied when a product has no maxDiscount set — a line discount above this
@@ -248,6 +249,8 @@ async function createPendingSale(body) {
           taxblAmt,
           taxAmt,
           totAmt,
+          itemClsCd: product.zraItemClassification || product.zraClassificationCode || null,
+          taxType: product.taxType || null,
         },
       });
     }
@@ -278,9 +281,18 @@ function extractZraFromVsdcPayload(payload) {
   return {
     rcptNo: data.rcptNo,
     qrCode: data.qrCode,
-    intrlData: data.intrlData || data.rcptSign,
-    rcptSign: data.rcptSign || data.intrlData,
+    // Distinct VSDC fields — a missing one must read as missing, not silently
+    // backfilled from the other (that conflation is the bug A2 fixes).
+    intrlData: data.intrlData ?? null,
+    rcptSign: data.rcptSign ?? null,
+    vsdcRcptPbctDate: data.vsdcRcptPbctDate ?? null,
   };
+}
+
+function parseVsdcDate(value) {
+  if (!value) return null;
+  const d = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 /**
@@ -299,12 +311,15 @@ async function completeSaleAfterFiscalSuccess(saleId, zra, fiscalPayload = {}, b
       data: {
         status: 'COMPLETED',
         rcptNo: zra.rcptNo,
-        rcptSign: zra.intrlData || zra.rcptSign,
+        rcptSign: zra.rcptSign ?? null,
+        intrlData: zra.intrlData ?? null,
         qrCode: zra.qrCode,
         vsdcTimestamp: new Date(),
+        vsdcRcptPbctDate: parseVsdcDate(zra.vsdcRcptPbctDate),
         vsdcRequest: fiscalPayload.vsdcRequest ?? undefined,
         vsdcResponse: fiscalPayload.vsdcResponse ?? undefined,
         fiscalError: null,
+        fiscalErrorCode: null,
       },
       include: saleInclude,
     });
@@ -451,6 +466,7 @@ async function finalizeSaleFiscally(saleId, { branchId = DEFAULT_BRANCH } = {}) 
       data: {
         status: 'FISCAL_FAILED',
         fiscalError: fiscalResult.message || fiscalResult.error || 'ZRA submission failed',
+        fiscalErrorCode: fiscalResult.code || null,
         vsdcRequest: fiscalResult.vsdcRequest ?? undefined,
         vsdcResponse: fiscalResult.vsdcResponse ?? undefined,
       },
@@ -463,6 +479,7 @@ async function finalizeSaleFiscally(saleId, { branchId = DEFAULT_BRANCH } = {}) 
       fiscal: {
         success: false,
         error: failed.fiscalError,
+        code: failed.fiscalErrorCode,
       },
     };
   }
