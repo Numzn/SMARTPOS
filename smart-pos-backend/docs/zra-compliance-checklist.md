@@ -1,6 +1,22 @@
 # ZRA Smart Invoice Compliance Checklist
 
-> **Living checklist** — authoritative project status is in [STATUS.md](../../STATUS.md).
+> ## ⛔ SUPERSEDED — DO NOT USE FOR CERTIFICATION
+>
+> Replaced by **[zra-self-checklist.md](./zra-self-checklist.md)**, which is structured against the
+> official ZRA developer self-checklist and cites `file:line` evidence for every claim.
+>
+> This document is retained only as a record of what was previously believed. It is **stale and
+> wrong in material ways** — last aligned July 2025, self-declares "45% complete", and reports
+> suppliers/purchasing as "Not Implemented" when Phase 3 shipped both.
+>
+> Two of its ticked items are demonstrably false:
+> - *"Sequential `fiscalInvcNo` per branch"* — the counter is keyed on `process.env.BRANCH_ID`,
+>   never `Sale.branchId` (`lib/fiscalInvoiceNumber.js:12`), and allocation races
+>   (`lib/fiscalInvoiceNumber.js:43`).
+> - Endpoint coverage generally — several official paths have constants defined but are never
+>   called, so `VSDC_MODE=official` does not reach them.
+>
+> Authoritative project status remains [STATUS.md](../../STATUS.md).
 
 ## Implementation Progress Tracker
 
