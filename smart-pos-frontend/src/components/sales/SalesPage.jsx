@@ -1,9 +1,10 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
-import { RefreshCw, RotateCcw, Receipt, Search } from 'lucide-react';
+import { RefreshCw, RotateCcw, FilePlus, Receipt, Search } from 'lucide-react';
 import { fetchSales, getSaleStatusBadge } from '../../api/salesApi';
 import { usePermissions } from '../../hooks/usePermissions';
 import RefundModal from './RefundModal';
+import DebitNoteModal from './DebitNoteModal';
 import ReceiptViewModal from '../receipt/ReceiptViewModal';
 
 function saleMatchesSearch(sale, term) {
@@ -40,6 +41,7 @@ const SalesPage = () => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [localSearch, setLocalSearch] = useState('');
   const [refundSale, setRefundSale] = useState(null);
+  const [debitNoteSale, setDebitNoteSale] = useState(null);
   const [viewReceiptSale, setViewReceiptSale] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
 
@@ -77,6 +79,13 @@ const SalesPage = () => {
     canAccess.viewSales && sale.rcptNo && ['COMPLETED', 'REFUNDED'].includes(sale.status);
 
   const canRefund = (sale) =>
+    canAccess.refundSale &&
+    sale.status === 'COMPLETED' &&
+    sale.rcptNo;
+
+  // Debit notes share the sales:refund permission on the backend — both are
+  // fiscal invoice adjustments (routes/sales.js), just in opposite directions.
+  const canDebitNote = (sale) =>
     canAccess.refundSale &&
     sale.status === 'COMPLETED' &&
     sale.rcptNo;
@@ -228,6 +237,16 @@ const SalesPage = () => {
                               Refund
                             </button>
                           )}
+                          {canDebitNote(sale) && (
+                            <button
+                              type="button"
+                              onClick={() => setDebitNoteSale(sale)}
+                              className="inline-flex items-center gap-1 text-sm text-amber-600 hover:text-amber-800 font-medium"
+                            >
+                              <FilePlus className="w-3.5 h-3.5" />
+                              Debit note
+                            </button>
+                          )}
                         </td>
                       </tr>
                       {expanded && (
@@ -264,6 +283,16 @@ const SalesPage = () => {
         <RefundModal
           sale={refundSale}
           onClose={() => setRefundSale(null)}
+          onSuccess={() => {
+            loadSales();
+          }}
+        />
+      )}
+
+      {debitNoteSale && (
+        <DebitNoteModal
+          sale={debitNoteSale}
+          onClose={() => setDebitNoteSale(null)}
           onSuccess={() => {
             loadSales();
           }}

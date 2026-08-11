@@ -153,6 +153,15 @@ async function getOrCreateSnapshot(sourceType, sourceId) {
     }
   }
 
+  if (sourceType === 'DEBIT_NOTE') {
+    const debitNote = await prisma.debitNote.findUnique({ where: { id: sourceId } });
+    if (debitNote?.status === 'COMPLETED' && debitNote.rcptNo) {
+      await createSnapshotFromSource('DEBIT_NOTE', sourceId);
+      row = await getSnapshot('DEBIT_NOTE', sourceId);
+      return row?.snapshot;
+    }
+  }
+
   return null;
 }
 

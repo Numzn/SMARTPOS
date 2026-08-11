@@ -7,11 +7,12 @@ const { getOrCreateSnapshot, recordReprint } = require('../lib/receipt/snapshot'
 const SOURCE_MAP = {
   sales: 'SALE',
   refunds: 'CREDIT_NOTE',
+  'debit-notes': 'DEBIT_NOTE',
 };
 
 /**
  * GET /api/receipts/:sourceType/:sourceId
- * sourceType: sales | refunds
+ * sourceType: sales | refunds | debit-notes
  * query: ?reprint=true — audit reprint and mark COPY
  */
 router.get(
@@ -24,7 +25,7 @@ router.get(
       const mapped = SOURCE_MAP[sourceType];
 
       if (!mapped) {
-        return res.status(400).json({ error: 'Invalid source type. Use sales or refunds.' });
+        return res.status(400).json({ error: 'Invalid source type. Use sales, refunds, or debit-notes.' });
       }
 
       const isReprint = req.query.reprint === 'true';

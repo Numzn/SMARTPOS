@@ -30,6 +30,28 @@ export const REFUND_REASON_CODES = [
   { code: '04', label: 'Other' },
 ];
 
+export async function fetchSaleDebitNotes(saleId) {
+  return apiFetch(`/sales/${saleId}/debit-notes`);
+}
+
+/**
+ * @param {string} saleId
+ * @param {{ userId: string, reasonCode?: string, reason?: string, items: { saleItemId?: string, productId?: string, quantity: number, price?: number }[] }} payload
+ */
+export async function createDebitNote(saleId, payload) {
+  return apiFetch(`/sales/${saleId}/debit-note`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export const DEBIT_NOTE_REASON_CODES = [
+  { code: '01', label: 'Under-billed / price correction' },
+  { code: '02', label: 'Additional charge' },
+  { code: '03', label: 'Quantity correction' },
+  { code: '04', label: 'Other' },
+];
+
 export function getSaleStatusBadge(status) {
   const map = {
     COMPLETED: { label: 'Completed', className: 'bg-green-100 text-green-800' },
