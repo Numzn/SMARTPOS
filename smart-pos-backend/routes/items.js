@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const itemManagementService = require('../services/itemManagement');
+const zraCodesService = require('../services/zraCodesService');
 const { authenticateToken, requirePermission } = require('../middleware/auth');
 
 /**
@@ -71,22 +72,26 @@ router.post('/sync', authenticateToken, requirePermission('zra:sync'), async (re
   }
 });
 
-// Get ZRA item classification codes (requires products:read permission)
+// Get ZRA item classification codes — reads the synced ZraClassificationCode
+// table (populated by codesSync.js -> /itemClass/selectItemsClass), syncing
+// on demand if empty. Previously called itemManagementService's version,
+// which bypassed endpointAdapter entirely and hit a hardcoded mock-only
+// path (/api/codes/get) on every request instead of the synced data.
 router.get('/classification-codes', authenticateToken, requirePermission('products:read'), async (req, res) => {
   try {
-    const result = await itemManagementService.getItemClassificationCodes();
-    
+    const result = await zraCodesService.getItemClassifications();
+
     if (result.success) {
       res.json({
         success: true,
-        codes: result.codes,
+        codes: result.classifications,
         message: result.message
       });
     } else {
       res.status(400).json({
         success: false,
         error: result.error,
-        code: result.code
+        code: 'CLASSIFICATION_CODES_ERROR'
       });
     }
   } catch (error) {

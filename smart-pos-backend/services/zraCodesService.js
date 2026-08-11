@@ -102,16 +102,23 @@ class ZRACodesService {
         await this.fetchAllCodes()
         rows = await this.prisma.zraClassificationCode.findMany({ orderBy: { code: 'asc' } })
       }
+      // useYn === 'N' means ZRA has explicitly marked the code unusable/
+      // deprecated — don't offer it. A null/unset useYn (e.g. rows synced
+      // before this field existed) is treated as usable, not filtered.
+      const usable = rows.filter((item) => item.useYn !== 'N')
       return {
         success: true,
-        classifications: rows.map((item) => ({
+        classifications: usable.map((item) => ({
           code: item.code,
           name: item.name,
           description: null,
           level: item.level || 1,
           parentCode: null,
+          taxTyCd: item.taxTyCd,
+          mjrTgYn: item.mjrTgYn,
+          useYn: item.useYn,
         })),
-        message: `Found ${rows.length} item classifications`,
+        message: `Found ${usable.length} item classifications`,
       }
     } catch (error) {
       return {

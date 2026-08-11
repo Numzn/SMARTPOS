@@ -745,6 +745,9 @@ model ZraClassificationCode {
   code      String   @unique
   name      String
   level     Int?
+  taxTyCd   String?
+  mjrTgYn   String?
+  useYn     String?
   raw       Json?
   syncedAt  DateTime @default(now())
   updatedAt DateTime @updatedAt

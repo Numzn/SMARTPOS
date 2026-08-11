@@ -72,17 +72,24 @@ async function syncClassificationCodes() {
   for (const row of rows) {
     const code = row.itemClsCd || row.code;
     if (!code) continue;
+    const level = row.itemClsLvl ?? row.lvl;
     await prisma.zraClassificationCode.upsert({
       where: { code: String(code) },
       create: {
         code: String(code),
         name: row.itemClsNm || row.name || String(code),
-        level: row.lvl != null ? Number(row.lvl) : null,
+        level: level != null ? Number(level) : null,
+        taxTyCd: row.taxTyCd || null,
+        mjrTgYn: row.mjrTgYn || null,
+        useYn: row.useYn || null,
         raw: row,
       },
       update: {
         name: row.itemClsNm || row.name || String(code),
-        level: row.lvl != null ? Number(row.lvl) : null,
+        level: level != null ? Number(level) : null,
+        taxTyCd: row.taxTyCd || null,
+        mjrTgYn: row.mjrTgYn || null,
+        useYn: row.useYn || null,
         raw: row,
         syncedAt: new Date(),
       },

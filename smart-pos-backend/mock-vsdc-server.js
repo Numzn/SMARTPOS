@@ -31,8 +31,10 @@ const MOCK_CODES = [
 ];
 
 const MOCK_CLASSIFICATIONS = [
-  { itemClsCd: '50100000', itemClsNm: 'General retail', lvl: 1 },
-  { itemClsCd: '50101500', itemClsNm: 'Food and beverages', lvl: 2 },
+  { itemClsCd: '50100000', itemClsNm: 'General retail', itemClsLvl: 1, taxTyCd: 'A', mjrTgYn: 'Y', useYn: 'Y' },
+  { itemClsCd: '50101500', itemClsNm: 'Food and beverages', itemClsLvl: 2, taxTyCd: 'B', mjrTgYn: 'N', useYn: 'Y' },
+  // Deliberately useYn:'N' — exercises the "don't serve deprecated codes" filter in zraCodesService.getItemClassifications().
+  { itemClsCd: '50999999', itemClsNm: 'Deprecated test category', itemClsLvl: 1, taxTyCd: 'A', mjrTgYn: 'N', useYn: 'N' },
 ];
 
 app.get('/api/ping', (req, res) => {
