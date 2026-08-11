@@ -21,10 +21,10 @@
 
 | | Count |
 |---|---|
-| Checklist endpoints implemented against the **official** path | **5 of 17** |
-| Mandatory functional items passing | **18 of 27** |
+| Checklist endpoints implemented against the **official** path | **9 of 17** |
+| Mandatory functional items passing | **19 of 27** |
 | Mandatory functional items partial | **2** |
-| Mandatory functional items failing | **7** |
+| Mandatory functional items failing | **6** |
 
 The single most important remaining structural finding: **`VSDC_MODE=official` does not put item
 registration onto its official path.** `endpointAdapter.js` defines `itemSave`, but the live call in
@@ -61,11 +61,11 @@ have the same problem — corrected 2026-08-11, see item 1\* below; it was alrea
 |---|---|---|---|
 | 1 | Device Initialisation | `/initializer/selectInitInfo` | ✖️ **constant defined, never called** |
 | 2 | Get Code Data | `/code/selectCodes` | ✔️ |
-| 3 | Get Branch Customers | `/branches/selectBranchCustomers` | ✖️ absent |
-| 4 | Save Branch Customer | `/branches/saveBrancheCustomers` | ✖️ absent |
+| 3 | Get Branch Customers | `/customers/selectCustomer` | ✔️ **corrected 2026-08-11 — the endpoint name here was fabricated; no `/branches/selectBranchCustomers` exists in the spec at all. The real endpoint is `/customers/selectCustomer` (Section 5.6, a different namespace), an on-demand lookup by `custmTpin`, not a bulk branch-customer list.** |
+| 4 | Save Branch Customer | `/branches/saveBrancheCustomers` | ✔️ |
 | 5 | Item Class | `/itemClass/selectItemsClass` | ✔️ |
-| 6 | Save Branch User | `/branches/saveBrancheUsers` | ✖️ absent |
-| 7 | Get Branch Information | `/branches/selectBranches` | ✖️ absent |
+| 6 | Save Branch User | `/branches/saveBrancheUser` | ✔️ **corrected 2026-08-11 — spec has it singular ("User"), every prior reference in this codebase/doc assumed plural.** |
+| 7 | Get Branch Information | `/branches/selectBranches` | ✔️ |
 | 8 | Save Item Information | `/items/saveItem` | ✖️ **constant defined, never called** |
 | 9 | Get Item List | `/items/selectItems` | ✖️ absent |
 | 10 | Get Import Items | `/imports/selectImportItems` | ✖️ absent |
@@ -186,10 +186,10 @@ documents — no VSDC involvement."* `endpointAdapter.js:15` defines `purchaseGe
 | | **Classification Codes** | | |
 | 3\* | Retrieve and save classification codes | ✔️ | `codesSync.js:58-93` — `POST /itemClass/selectItemsClass` with `tpin`/`bhfId`/`lastReqDt`; persists to `ZraClassificationCode`. **Fixed a real bug the same day (2026-08-11):** `GET /api/items/classification-codes` called `itemManagementService.getItemClassificationCodes()`, which bypassed `endpointAdapter` entirely and posted to a hardcoded mock-only path (`/api/codes/get`) on every request instead of reading the synced table — same defect pattern as item 2\*'s tax/unit codes, different endpoint. Fixed by pointing the route at `zraCodesService.getItemClassifications()` (already existed, already correct, just unused — same "reuse, don't rebuild" pattern as item 2\*). Also added `taxTyCd`/`mjrTgYn`/`useYn` as first-class columns on `ZraClassificationCode` (previously only in an opaque `raw` JSON blob) and wired filtering so a code ZRA marks `useYn='N'` (deprecated) is never served — verified live: synced 3 classification codes against Numzlab's mock (2 usable + 1 deliberately `useYn='N'`), hit the real HTTP endpoint with a real JWT, confirmed only the 2 usable codes returned. ⚠️ No live frontend consumer exists yet — the product-creation UI's classification field is free-text with no dropdown/autocomplete and no server-side cross-check against synced codes; a typo or invalid code would only be caught by real ZRA at registration time. Flagged as a remaining risk, not fixed here — building that UI is a separate, larger change than the confirmed defect (wrong endpoint) required. Tests: `tests/unit/classificationCodes.unit.test.js` (4), `tests/integration/classificationCodesRoute.integration.test.js` (3). |
 | | **Branch Information** | | |
-| 4 | Save branch customer details | ✖️ | Endpoint absent |
-| 5 | Retrieve branch customer details | ✖️ | Endpoint absent |
-| 6 | Save branch user details | ✖️ | Endpoint absent |
-| 7\* | Retrieve registered branch details | ✖️ | Non-spec path, mock only. See §2.2. |
+| 4 | Save branch customer details | ✔️ | **Section 4, done 2026-08-11.** Endpoints verified directly against the spec PDF (`POST /branches/saveBrancheCustomers`), not inferred from prior code — real spec text disagreed with what earlier drafts of this doc assumed. `lib/vsdc-gateway/branchSync.js` `saveBranchCustomer()`; route `POST /api/customers/:id/zra-sync` (gated `zra:sync`, deliberately not `customers:write` — pushing fiscal data is a different sensitivity tier than a cashier's quick-add). `custTpin` is a required VSDC field, so a customer with no TPIN is rejected before any network call — that's the real business trigger, not "sync every customer." No new model: existing `Customer` (name/phone/tpin/address/email/isActive/notes) already maps directly onto ZRA's fields. Live-verified against Numzlab: created a real customer with a TPIN, pushed it, `resultCd='000'`, `zraSyncedAt` persisted. Tests: `tests/unit/branchSync.unit.test.js` (13, shared with items 5-7), `tests/integration/customerZraSync.integration.test.js` (6). |
+| 5 | Retrieve branch customer details | ✔️ | **Section 4, done 2026-08-11.** The endpoint name in this doc was previously fabricated (`/branches/selectBranchCustomers` — does not exist in the spec at all). The real endpoint is `POST /customers/selectCustomer` (Section 5.6 "Customer Information," a *different namespace* than the other Section 5.5 branch endpoints), an on-demand lookup by `custmTpin`, not a bulk list. `branchSync.js` `selectCustomer()`; route `GET /api/customers/zra-lookup?tpin=...` (read-only, `customers:read`). Live-verified: looked up the customer just pushed for item 4 by TPIN, got back matching data — proves the full save→retrieve round-trip against Numzlab's mock, not just each endpoint in isolation. |
+| 6 | Save branch user details | ✔️ | **Section 4, done 2026-08-11.** Spec endpoint is `POST /branches/saveBrancheUser` — **singular** "User," verified directly against the PDF; every prior reference anywhere in this codebase assumed the plural form, which would have 404'd against real ZRA. Clarified NUMZ's application login is *not* automatically the same thing as a ZRA branch user — they're related but distinct concepts (per the audit's explicit instruction). `bhfId` is required, resolved via `User.branchId → Branch.code → Branch.bhfId`; a user with no assigned branch is rejected before any network call. No new model: existing `User` maps directly. Route `POST /api/users/:id/zra-sync` (ADMIN only). Live-verified against Numzlab: real finding — **zero seeded users currently have a branch assigned** (confirmed the guard correctly rejects the real admin account); success path verified with a dedicated test user, cleaned up after. Tests: `tests/integration/userZraSync.integration.test.js` (4). |
+| 7\* | Retrieve registered branch details | ✔️ | **Section 4, done 2026-08-11.** Was reachable only via a fabricated endpoint (`GET /api/branch/get/:bhfId` — wrong method, wrong path, wrong request shape; real spec is `POST /branches/selectBranches` with a JSON body). The old code's failure was silently swallowed (`catch` → `zraDetails = null`, no error surfaced) — a real correctness gap independent of the wrong-endpoint bug. Fixed: `branchSync.js` `selectBranches()`; route `POST /api/vsdc/branches/sync` (mirrors the existing `codes/sync` pattern, `zra:sync`). Retrieved data is stored as a **reference snapshot** (`Branch.zraBranchSnapshot`) rather than overwriting operational fields (`name`/`province`/`district`/...) — those are foreign-key-critical locally (`sales.branchId`, shifts) and ZRA's copy is something to compare against, not an authority that should silently mutate live records. Live-verified against Numzlab: ZRA's mock returned a different branch name ("Headquarter") than the local operational record ("Main Branch") — confirmed the snapshot captured it while the operational `name` field stayed untouched. ⚠️ `routes/branches.js`'s pre-existing `registerBranchWithZRA()` and its `GET /:id` ZRA-details fetch still target the fabricated `/api/branch/save` / `/api/branch/get/:bhfId` paths and were deliberately left alone — **no "Save Branch" endpoint exists anywhere in the real spec at all** (confirmed by full-text search of the spec PDF); branch registration is a ZRA-portal-only administrative act. That pre-existing feature is out of scope for this section and flagged as a separate cleanup, not fixed here. |
 | | **Item Information** | | |
 | 8\* | Save item details, transmit via VSDC | ✖️ | Mock path only. See §2.2. |
 | 9\* | Save item composition details | ✖️ | No implementation anywhere |
