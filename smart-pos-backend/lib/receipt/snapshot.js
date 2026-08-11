@@ -6,15 +6,18 @@ const prisma = require('../prisma');
 const { buildReceiptViewModel } = require('@smartpos/receipt-engine');
 const { saleInclude } = require('../saleFiscal');
 const { refundInclude } = require('../saleRefund');
+const { debitNoteInclude } = require('../saleDebitNote');
 const {
   buildSaleReceiptSource,
   buildRefundReceiptSource,
+  buildDebitNoteReceiptSource,
   loadBusinessContext,
 } = require('./loaders');
 
 const SOURCE_TYPE_MAP = {
   SALE: 'SALE',
   CREDIT_NOTE: 'CREDIT_NOTE',
+  DEBIT_NOTE: 'DEBIT_NOTE',
 };
 
 async function buildViewModelForSale(saleId) {
@@ -53,6 +56,30 @@ async function buildViewModelForRefund(refundId) {
   return buildReceiptViewModel(source);
 }
 
+async function buildViewModelForDebitNote(debitNoteId) {
+  const debitNote = await prisma.debitNote.findUnique({
+    where: { id: debitNoteId },
+    include: {
+      ...debitNoteInclude,
+      sale: {
+        include: {
+          saleItems: { include: { product: true } },
+          customer: true,
+          branch: true,
+        },
+      },
+    },
+  });
+  if (!debitNote) {
+    const err = new Error('Debit note not found');
+    err.status = 404;
+    throw err;
+  }
+  const business = await loadBusinessContext();
+  const source = await buildDebitNoteReceiptSource(debitNote, business);
+  return buildReceiptViewModel(source);
+}
+
 async function createSnapshotFromSource(sourceType, sourceId) {
   const prismaType = SOURCE_TYPE_MAP[sourceType];
   if (!prismaType) {
@@ -62,6 +89,8 @@ async function createSnapshotFromSource(sourceType, sourceId) {
   const vm =
     sourceType === 'SALE'
       ? await buildViewModelForSale(sourceId)
+      : sourceType === 'DEBIT_NOTE'
+      ? await buildViewModelForDebitNote(sourceId)
       : await buildViewModelForRefund(sourceId);
 
   const version = vm.receiptMeta.version || '1.0';

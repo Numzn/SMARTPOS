@@ -215,6 +215,8 @@ async function cleanupTestData() {
   await prisma.stockMovement.deleteMany({ where: { product: { sku: { startsWith: 'TEST-SKU-' } } } });
   await prisma.refundItem.deleteMany({ where: { product: { sku: { startsWith: 'TEST-SKU-' } } } });
   await prisma.refund.deleteMany({ where: { originalSale: { user: { email: { contains: '@smartpos.test' } } } } });
+  await prisma.debitNoteItem.deleteMany({ where: { product: { sku: { startsWith: 'TEST-SKU-' } } } });
+  await prisma.debitNote.deleteMany({ where: { sale: { user: { email: { contains: '@smartpos.test' } } } } });
   await prisma.saleItem.deleteMany({ where: { product: { sku: { startsWith: 'TEST-SKU-' } } } });
   await prisma.sale.deleteMany({ where: { user: { email: { contains: '@smartpos.test' } } } });
 

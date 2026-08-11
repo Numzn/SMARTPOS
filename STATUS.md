@@ -69,10 +69,11 @@ flowchart LR
 | Sandbox smoke script | Done | [`scripts/sandbox-smoke.js`](smart-pos-backend/scripts/sandbox-smoke.js) |
 
 **Deferred post-M4, but required for certification:** Imports, purchases §5.11, commercial/provisional
-invoices. The ZRA developer self-checklist marks imports (items 11\*, 12\*) and purchases (13\*, 14\*)
-**mandatory**, so this deferral blocks certification rather than merely postponing polish. Debit
-notes (21\*) are mandatory and entirely unimplemented. Scoped as Track C in
-[zra-self-checklist.md](smart-pos-backend/docs/zra-self-checklist.md).
+invoices, branches (select/customers/users), item list retrieval, stock item retrieval. The ZRA
+developer self-checklist marks imports (items 11\*, 12\*) and purchases (13\*, 14\*) **mandatory**, so
+this deferral blocks certification rather than merely postponing polish. Debit notes (21\*, mandatory)
+now have a working API route (`POST /api/sales/:id/debit-note`) — no frontend UI yet. Remaining gaps
+scoped as Track C in [zra-self-checklist.md](smart-pos-backend/docs/zra-self-checklist.md).
 
 ---
 

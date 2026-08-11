@@ -8,6 +8,7 @@ const {
   saleInclude,
 } = require('../lib/saleFiscal');
 const { refundSale, refundInclude } = require('../lib/saleRefund');
+const { debitNoteSale, debitNoteInclude } = require('../lib/saleDebitNote');
 const { authenticateToken, requirePermission } = require('../middleware/auth');
 const auditService = require('../services/auditService');
 
@@ -174,6 +175,62 @@ router.get('/:id/refunds', authenticateToken, requirePermission('sales:read'), a
   } catch (error) {
     console.error('Error fetching refunds:', error);
     res.status(500).json({ error: 'Failed to fetch refunds' });
+  }
+});
+
+/**
+ * POST /api/sales/:id/debit-note — fiscal debit note (VSDC rcptTyCd=D), value adjustment only
+ */
+router.post('/:id/debit-note', authenticateToken, requirePermission('sales:refund'), async (req, res) => {
+  try {
+    const outcome = await debitNoteSale(req.params.id, { ...req.body, userId: req.user.userId });
+
+    if (!outcome.success) {
+      return res.status(422).json({
+        error: outcome.fiscal?.error || 'Debit note submission failed',
+        debitNote: outcome.debitNote,
+        fiscal: outcome.fiscal,
+      });
+    }
+
+    auditService.safeLog(auditService.eventTypes.DEBIT_NOTE_CREATE, {
+      ...auditService.contextFromReq(req),
+      entityType: 'DEBIT_NOTE',
+      entityId: outcome.debitNote.id,
+      action: 'DEBIT_NOTE',
+      newValues: {
+        originalSaleId: req.params.id,
+        total: outcome.debitNote.total,
+        status: outcome.debitNote.status,
+        rcptNo: outcome.fiscal?.rcptNo || null,
+      },
+      description: `Debit note issued for sale ${req.params.id}: ${outcome.debitNote.id}`,
+    });
+
+    res.status(201).json({
+      debitNote: outcome.debitNote,
+      fiscal: outcome.fiscal,
+    });
+  } catch (error) {
+    console.error('Debit note error:', error);
+    res.status(error.status || 500).json({ error: error.message || 'Debit note failed' });
+  }
+});
+
+/**
+ * GET /api/sales/:id/debit-notes — list debit notes for a sale
+ */
+router.get('/:id/debit-notes', authenticateToken, requirePermission('sales:read'), async (req, res) => {
+  try {
+    const debitNotes = await prisma.debitNote.findMany({
+      where: { originalSaleId: req.params.id },
+      include: debitNoteInclude,
+      orderBy: { createdAt: 'desc' },
+    });
+    res.json(debitNotes);
+  } catch (error) {
+    console.error('Error fetching debit notes:', error);
+    res.status(500).json({ error: 'Failed to fetch debit notes' });
   }
 });
 

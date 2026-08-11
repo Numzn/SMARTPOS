@@ -200,9 +200,77 @@ async function buildRefundReceiptSource(refund, business) {
   };
 }
 
+async function buildDebitNoteReceiptSource(debitNote, business) {
+  const original = debitNote.sale || {};
+  const branch = original.branch || {};
+  const vsdc = debitNote.vsdcResponse;
+
+  return {
+    receiptType: 'DEBIT_NOTE',
+    originalReceiptNo: original.rcptNo || null,
+    merchant: {
+      brand: 'NUMZPAY',
+      logoUrl: business.logoUrl,
+      tradingName: business.tradingName,
+      tpin: business.tpin,
+      branchName: branch.name || original.branchId || 'main',
+      address: branch.address || '',
+      phone: branch.phone || null,
+    },
+    transaction: {
+      occurredAt: debitNote.createdAt,
+      cashier: debitNote.user?.name || debitNote.user?.email || 'Cashier',
+      receiptNo: debitNote.rcptNo,
+      fiscalInvoiceNo: debitNote.fiscalInvcNo,
+      itemCount: sumItemQty(mapSaleItems(debitNote.items)),
+    },
+    items: debitNote.items.map((line) => ({
+      name: line.product?.name || 'Item',
+      qty: line.quantity,
+      unitPrice: line.price,
+      lineTotal: line.total,
+    })),
+    totals: {
+      subtotal: debitNote.subtotal,
+      vat: debitNote.tax ?? 0,
+      vatBreakdown: computeVatBreakdown(debitNote.items),
+      discount: debitNote.discount ?? 0,
+      discountRate: computeDiscountRate(debitNote.discount ?? 0, debitNote.subtotal),
+      total: debitNote.total,
+    },
+    payment: {
+      method: formatPaymentLabel(debitNote.paymentMethod),
+      amountPaid: null,
+      change: null,
+    },
+    fiscal: {
+      mode: 'ONLINE',
+      submissionStatus: mapSubmissionStatus(debitNote.status),
+      submissionTime: debitNote.vsdcTimestamp,
+      sdcId: extractVsdcField(vsdc, 'sdcId', 'sdicId', 'zraSdcId'),
+      fiscalReceiptNo: debitNote.rcptNo,
+      receiptSignature: debitNote.rcptSign,
+      internalData: debitNote.intrlData,
+      verificationCode: extractVsdcField(vsdc, 'verificationCode', 'vfnCode'),
+      qrPayload: debitNote.qrCode,
+    },
+    customer: {
+      name: original.customerName,
+      tpin: original.customerTpin,
+      address: original.customer?.address || null,
+    },
+    footer: {
+      lines: Array.isArray(business.footerLines) ? business.footerLines : [],
+      showPoweredBy: business.showPoweredBy,
+      receiptVersion: business.receiptVersion,
+    },
+  };
+}
+
 module.exports = {
   buildSaleReceiptSource,
   buildRefundReceiptSource,
+  buildDebitNoteReceiptSource,
   loadBusinessContext,
   extractVsdcField,
 };

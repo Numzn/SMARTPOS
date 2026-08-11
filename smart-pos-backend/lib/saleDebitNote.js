@@ -1,167 +1,267 @@
 /**
- * Debit note (adjustment invoice) creation and VSDC submission.
- * PENDING → VSDC debit note (rcptTyCd=D) → COMPLETED
+ * Fiscal debit note lifecycle (VSDC Section 5.1, rcptTyCd='D').
+ * PENDING → VSDC debit note → COMPLETED. Value-adjustment only — unlike a
+ * refund, a debit note does not move stock (see lib/saleRefund.js for the
+ * mirror-image credit-note flow, which does restore stock).
  */
 
 const prisma = require('./prisma');
-const zraInvoice = require('../services/zraInvoice');
-const { createSnapshotFromSource } = require('./receipt/snapshot');
+const zraInvoiceService = require('../services/zraInvoice');
+const vsdcService = require('../services/vsdcService');
 
-const DebitNoteStatus = {
-  PENDING: 'PENDING',
-  COMPLETED: 'COMPLETED',
-  FAILED: 'FAILED'
+const debitNoteInclude = {
+  user: { select: { id: true, name: true, email: true } },
+  items: { include: { product: true } },
+  sale: {
+    include: {
+      saleItems: { include: { product: true } },
+      customer: true,
+    },
+  },
 };
 
-async function createDebitNote(originalSaleId, debitNoteData, userId, branchId = 'default') {
+function parseVsdcDate(value) {
+  if (!value) return null;
+  const d = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+async function createPendingDebitNote(originalSaleId, body) {
+  const { userId, reasonCode = '01', reason, items: bodyItems } = body;
+
+  if (!userId) {
+    const err = new Error('userId is required');
+    err.status = 400;
+    throw err;
+  }
+
+  if (!Array.isArray(bodyItems) || bodyItems.length === 0) {
+    const err = new Error('At least one adjustment line is required');
+    err.status = 400;
+    throw err;
+  }
+
   const originalSale = await prisma.sale.findUnique({
     where: { id: originalSaleId },
-    include: {
-      items: { include: { product: true } }
-    }
+    include: { saleItems: { include: { product: true } } },
   });
 
   if (!originalSale) {
-    throw new Error(`Original sale ${originalSaleId} not found`);
+    const err = new Error('Original sale not found');
+    err.status = 404;
+    throw err;
   }
 
-  if (originalSale.status !== 'COMPLETED' || !originalSale.fiscalInvcNo) {
-    throw new Error('Debit notes can only be created for completed fiscal sales');
+  if (originalSale.status !== 'COMPLETED' || !originalSale.rcptNo) {
+    const err = new Error('Only completed fiscal sales can carry a debit note');
+    err.status = 400;
+    throw err;
   }
 
-  const debitNote = await prisma.debitNote.create({
+  let subtotal = 0;
+  let taxTotal = 0;
+
+  const itemRows = bodyItems.map((line) => {
+    const saleItem = line.saleItemId
+      ? originalSale.saleItems.find((s) => s.id === line.saleItemId)
+      : null;
+
+    if (line.saleItemId && !saleItem) {
+      const err = new Error(`Sale line not found: ${line.saleItemId}`);
+      err.status = 400;
+      throw err;
+    }
+
+    const productId = line.productId || saleItem?.productId;
+    if (!productId) {
+      const err = new Error('productId (or a valid saleItemId) is required for each adjustment line');
+      err.status = 400;
+      throw err;
+    }
+
+    const quantity = parseInt(line.quantity, 10);
+    if (!quantity || quantity < 1) {
+      const err = new Error('Invalid adjustment quantity');
+      err.status = 400;
+      throw err;
+    }
+
+    const unitPrice = Number(line.price ?? saleItem?.price ?? 0);
+    const itemTotal = quantity * unitPrice;
+    const taxRate = (saleItem?.product?.taxRate ?? line.taxRate ?? 16) / 100;
+    const splyAmt = itemTotal;
+    const taxblAmt = splyAmt;
+    const taxAmt = taxblAmt * taxRate;
+    const totAmt = splyAmt + taxAmt;
+
+    subtotal += itemTotal;
+    taxTotal += taxAmt;
+
+    return {
+      saleItemId: saleItem?.id ?? null,
+      productId,
+      quantity,
+      price: unitPrice,
+      total: itemTotal,
+      pkg: saleItem?.pkg ?? 1,
+      qty: quantity,
+      prc: unitPrice,
+      splyAmt,
+      taxblAmt,
+      taxAmt,
+      totAmt,
+      // Carry forward the sale line's classification snapshot, same rationale
+      // as lib/saleRefund.js — a debit note must match what was originally
+      // sold, not what the product looks like today.
+      itemClsCd: saleItem?.itemClsCd ?? null,
+      taxType: saleItem?.taxType ?? null,
+    };
+  });
+
+  const total = subtotal + taxTotal;
+
+  return prisma.debitNote.create({
     data: {
       originalSaleId,
       userId,
-      status: DebitNoteStatus.PENDING,
-      reasonCode: debitNoteData.reasonCode || '01',
-      reason: debitNoteData.reason,
-      subtotal: debitNoteData.subtotal,
-      tax: debitNoteData.tax ?? 0,
-      discount: debitNoteData.discount ?? 0,
-      total: debitNoteData.total,
-      paymentMethod: debitNoteData.paymentMethod || 'CASH',
-      items: {
-        create: debitNoteData.items.map(item => ({
-          productId: item.productId,
-          saleItemId: item.saleItemId || null,
-          quantity: item.quantity,
-          price: item.price,
-          total: item.total,
-          pkg: item.pkg,
-          qty: item.qty,
-          prc: item.prc,
-          splyAmt: item.splyAmt,
-          taxblAmt: item.taxblAmt,
-          taxAmt: item.taxAmt,
-          totAmt: item.totAmt,
-          itemClsCd: item.itemClsCd,
-          taxType: item.taxType
-        }))
-      }
+      status: 'PENDING',
+      reasonCode,
+      reason: reason || null,
+      subtotal,
+      tax: taxTotal,
+      discount: 0,
+      total,
+      paymentMethod: originalSale.paymentMethod,
+      items: { create: itemRows },
     },
-    include: {
-      items: { include: { product: true } },
-      user: true,
-      sale: true
-    }
+    include: debitNoteInclude,
   });
-
-  return debitNote;
 }
 
-async function submitDebitNoteForFiscal(debitNoteId) {
-  const debitNote = await prisma.debitNote.findUnique({
-    where: { id: debitNoteId },
-    include: {
-      items: { include: { product: true } },
-      sale: true,
-      user: true
-    }
-  });
-
-  if (!debitNote) {
-    throw new Error(`Debit note ${debitNoteId} not found`);
-  }
-
-  if (debitNote.status !== 'PENDING') {
-    throw new Error(`Debit note is ${debitNote.status}, only PENDING notes can be submitted`);
-  }
-
-  const invoiceService = new zraInvoice.ZRAInvoiceService({
-    tpin: process.env.BUSINESS_TPIN,
-    bhfId: process.env.BRANCH_ID || '000',
-    sdcId: process.env.SDC_ID,
-    deviceSn: process.env.DEVICE_SERIAL
-  });
-
-  const vsdcPayload = {
-    receiptType: 'DEBIT_NOTE',
-    items: debitNote.items,
-    totals: {
-      subtotal: debitNote.subtotal,
-      tax: debitNote.tax,
-      discount: debitNote.discount,
-      total: debitNote.total
-    },
-    originalInvoiceNo: debitNote.sale.fiscalInvcNo,
-    reasonCode: debitNote.reasonCode,
-    reason: debitNote.reason
-  };
-
-  try {
-    const result = await invoiceService.submitDebitNote(vsdcPayload);
-
-    if (result.resultCd === '000') {
-      await completeDebitNoteAfterFiscalSuccess(debitNoteId, result, vsdcPayload);
-      return result;
-    } else {
-      throw new Error(`VSDC rejected debit note: ${result.resultMsg} (${result.resultCd})`);
-    }
-  } catch (error) {
-    await prisma.debitNote.update({
-      where: { id: debitNoteId },
-      data: {
-        status: DebitNoteStatus.FAILED,
-        fiscalError: error.message,
-        fiscalErrorCode: error.code
-      }
-    });
-    throw error;
-  }
-}
-
+/**
+ * Complete a debit note after confirmed VSDC success. No stock movement —
+ * unlike completeRefundAfterFiscalSuccess, a debit note is a pure value
+ * adjustment against an already-fulfilled sale.
+ */
 async function completeDebitNoteAfterFiscalSuccess(debitNoteId, zra, fiscalPayload = {}) {
   const debitNote = await prisma.debitNote.update({
     where: { id: debitNoteId },
     data: {
-      status: DebitNoteStatus.COMPLETED,
+      status: 'COMPLETED',
       rcptNo: zra.rcptNo,
       rcptSign: zra.rcptSign ?? null,
       intrlData: zra.intrlData ?? null,
       qrCode: zra.qrCode,
       vsdcTimestamp: new Date(),
+      vsdcRcptPbctDate: parseVsdcDate(zra.vsdcRcptPbctDate),
       vsdcRequest: fiscalPayload.vsdcRequest ?? undefined,
       vsdcResponse: fiscalPayload.vsdcResponse ?? undefined,
       fiscalError: null,
-      fiscalErrorCode: null
+      fiscalErrorCode: null,
     },
-    include: {
-      items: { include: { product: true } },
-      user: true,
-      sale: true
-    }
+    include: debitNoteInclude,
   });
 
-  // Create receipt snapshot for printing
-  await createSnapshotFromSource('DEBIT_NOTE', debitNoteId);
+  try {
+    const { createSnapshotFromSource } = require('./receipt/snapshot');
+    await createSnapshotFromSource('DEBIT_NOTE', debitNoteId);
+  } catch (snapErr) {
+    console.warn('[saleDebitNote] receipt snapshot failed:', snapErr.message);
+  }
 
   return debitNote;
 }
 
+async function finalizeDebitNoteFiscally(debitNoteId) {
+  const ready = await vsdcService.isDeviceReady();
+  if (!ready) {
+    const init = await vsdcService.ensureDeviceInitialized();
+    if (!init.success) {
+      const err = new Error(init.error || 'VSDC device not initialized');
+      err.status = 503;
+      throw err;
+    }
+  }
+
+  let debitNote = await prisma.debitNote.findUnique({
+    where: { id: debitNoteId },
+    include: debitNoteInclude,
+  });
+
+  if (!debitNote) {
+    const err = new Error('Debit note not found');
+    err.status = 404;
+    throw err;
+  }
+
+  if (debitNote.status === 'COMPLETED' && debitNote.rcptNo) {
+    return {
+      success: true,
+      debitNote,
+      fiscal: { success: true, rcptNo: debitNote.rcptNo, qrCode: debitNote.qrCode },
+    };
+  }
+
+  if (!['PENDING', 'FISCAL_FAILED', 'FISCAL_SUBMITTING'].includes(debitNote.status)) {
+    const err = new Error(`Debit note cannot be fiscalized in status ${debitNote.status}`);
+    err.status = 400;
+    throw err;
+  }
+
+  await prisma.debitNote.update({
+    where: { id: debitNoteId },
+    data: { status: 'FISCAL_SUBMITTING', fiscalError: null },
+  });
+
+  const fiscalResult = await zraInvoiceService.submitFiscalForDebitNote(debitNoteId);
+
+  if (!fiscalResult.success) {
+    const failed = await prisma.debitNote.update({
+      where: { id: debitNoteId },
+      data: {
+        status: 'FISCAL_FAILED',
+        fiscalError: fiscalResult.message || fiscalResult.error || 'ZRA debit note failed',
+        fiscalErrorCode: fiscalResult.code || null,
+        vsdcRequest: fiscalResult.vsdcRequest ?? undefined,
+        vsdcResponse: fiscalResult.vsdcResponse ?? undefined,
+      },
+      include: debitNoteInclude,
+    });
+
+    return {
+      success: false,
+      debitNote: failed,
+      fiscal: { success: false, error: failed.fiscalError, code: failed.fiscalErrorCode },
+    };
+  }
+
+  const zra = fiscalResult.zraResponse;
+  debitNote = await completeDebitNoteAfterFiscalSuccess(debitNoteId, zra, {
+    vsdcRequest: fiscalResult.vsdcRequest,
+    vsdcResponse: fiscalResult.vsdcResponse,
+  });
+
+  return {
+    success: true,
+    debitNote,
+    fiscal: {
+      success: true,
+      rcptNo: debitNote.rcptNo,
+      qrCode: debitNote.qrCode,
+      receiptNumber: debitNote.rcptNo,
+    },
+  };
+}
+
+async function debitNoteSale(originalSaleId, body) {
+  const pending = await createPendingDebitNote(originalSaleId, body);
+  return finalizeDebitNoteFiscally(pending.id);
+}
+
 module.exports = {
-  DebitNoteStatus,
-  createDebitNote,
-  submitDebitNoteForFiscal,
-  completeDebitNoteAfterFiscalSuccess
+  debitNoteInclude,
+  createPendingDebitNote,
+  finalizeDebitNoteFiscally,
+  completeDebitNoteAfterFiscalSuccess,
+  debitNoteSale,
 };

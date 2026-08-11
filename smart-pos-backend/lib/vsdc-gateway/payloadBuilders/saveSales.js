@@ -130,6 +130,7 @@ function buildSaveSalesPayload(invoiceData, vsdcCtx) {
   });
 
   const isCredit = invoiceData.receiptType === 'R';
+  const isDebit = invoiceData.receiptType === 'D';
   const cisInvcNo =
     invoiceData.cisInvcNo ||
     String(invoiceData.invoiceNumber || invoiceData.invcNo || '');
@@ -170,8 +171,8 @@ function buildSaveSalesPayload(invoiceData, vsdcCtx) {
     currencyTyCd: invoiceData.currencyTyCd || 'ZMW',
     exchangeRt: String(invoiceData.exchangeRt ?? 1),
     destnCountryCd: '',
-    dbtRsnCd: '',
-    invcAdjustReason: '',
+    dbtRsnCd: isDebit ? invoiceData.debitReasonCode || '01' : '',
+    invcAdjustReason: isDebit ? invoiceData.remark || '' : '',
     itemList,
   };
 

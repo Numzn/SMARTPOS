@@ -859,26 +859,183 @@ class ZRAInvoiceService {
     }
   }
 
-  async submitDebitNote(debitNoteData) {
-    const payload = {
-      tpin: this.tpin,
-      bhfId: this.bhfId,
-      rcptTyCd: this.receiptTypes.DEBIT_NOTE,
-      dbtRsnCd: debitNoteData.reasonCode || '01',
-      invcAdjustReason: debitNoteData.reason || '',
-      orgInvcNo: debitNoteData.originalInvoiceNo,
-      itemList: debitNoteData.items.map(item => ({
-        itemCd: item.productId,
-        itemClsCd: item.itemClsCd,
-        splyAmt: item.splyAmt,
-        taxAmt: item.taxAmt,
-        totAmt: item.totAmt
-      })),
-      exchgeRt: 1,
-      totals: debitNoteData.totals
-    };
+  /**
+   * Build the intermediate invoiceData shape (same contract as
+   * buildCreditNoteFromRefund) for a debit note — an invoice-value increase
+   * adjustment, VSDC rcptTyCd='D'. Mirrors the credit-note builder except for
+   * the debit-specific dbtRsnCd/invcAdjustReason fields (payloadBuilders/saveSales.js).
+   */
+  buildDebitNoteFromDebitNote(debitNote, originalSale, options = {}) {
+    const customerName = 'Walk-in Customer';
 
-    return this.submitInvoiceWithRetry(payload);
+    const items = debitNote.items.map((line) => {
+      const product = line.product;
+      const itemClassification = line.itemClsCd || getProductClassification(product);
+      if (!itemClassification) {
+        throw new Error(
+          `Product ${product.sku || product.name} is missing ZRA classification code`
+        );
+      }
+      return {
+        itemCode: product.sku || product.id,
+        itemClassification,
+        itemName: product.name,
+        barcode: product.barcode,
+        packageUnit: product.zraPackageUnit || product.unit || 'EA',
+        packageQuantity: line.pkg ?? 1,
+        quantityUnit: product.zraQuantityUnit || product.unit || 'EA',
+        quantity: line.qty,
+        unitPrice: line.prc,
+        supplyAmount: line.splyAmt,
+        discountRate: 0,
+        discountAmount: 0,
+        taxType: line.taxType || product.taxType || 'A',
+        taxableAmount: line.taxblAmt,
+        taxAmount: line.taxAmt,
+        totalAmount: line.totAmt,
+      };
+    });
+
+    const orgInvcNo = resolveOriginalInvcNo(originalSale);
+    const invcNo = options.invcNo ?? debitNote.fiscalInvcNo;
+    if (!invcNo) {
+      throw new Error('Fiscal invoice number not allocated');
+    }
+
+    return {
+      invoiceNumber: invcNo,
+      originalInvoiceNumber: orgInvcNo,
+      customerTpin: null,
+      customerName,
+      customerBranchId: '00',
+      salesType: this.salesTypes.NORMAL,
+      receiptType: this.receiptTypes.DEBIT_NOTE,
+      paymentMethod: debitNote.paymentMethod,
+      salesStatus: this.salesStatus.APPROVED,
+      confirmationDate: debitNote.createdAt,
+      salesDate: debitNote.createdAt,
+      debitReasonCode: debitNote.reasonCode,
+      remark: debitNote.reason || 'Debit note adjustment',
+      items,
+      totalTaxableAmount: items.reduce((s, i) => s + i.taxableAmount, 0),
+      totalTaxAmount: items.reduce((s, i) => s + i.taxAmount, 0),
+      totalAmount: debitNote.total,
+      registeredBy: debitNote.userId,
+      registeredByName: debitNote.user?.name || debitNote.user?.email || 'SYSTEM',
+    };
+  }
+
+  /**
+   * Submit a debit note to VSDC only — mirrors submitFiscalForRefund.
+   * Does not update DebitNote status (owned by lib/saleDebitNote.js).
+   */
+  async submitFiscalForDebitNote(debitNoteId) {
+    const debitNote = await this.prisma.debitNote.findUnique({
+      where: { id: debitNoteId },
+      include: {
+        items: { include: { product: true } },
+        user: { select: { id: true, name: true, email: true } },
+        sale: true,
+      },
+    });
+
+    if (!debitNote) {
+      return { success: false, message: 'Debit note not found', data: null };
+    }
+
+    if (debitNote.rcptNo) {
+      return {
+        success: true,
+        message: 'Debit note already submitted to ZRA',
+        zraResponse: {
+          rcptNo: debitNote.rcptNo,
+          qrCode: debitNote.qrCode,
+          rcptSign: debitNote.rcptSign,
+          intrlData: debitNote.intrlData,
+        },
+        vsdcRequest: debitNote.vsdcRequest,
+        vsdcResponse: debitNote.vsdcResponse,
+      };
+    }
+
+    if (!debitNote.sale?.rcptNo) {
+      return {
+        success: false,
+        message: 'Original sale has no fiscal receipt',
+        code: 'ORIGINAL_SALE_NOT_FISCAL',
+      };
+    }
+
+    const ready = await vsdcService.isDeviceReady();
+    if (!ready) {
+      const init = await vsdcService.ensureDeviceInitialized();
+      if (!init.success) {
+        return {
+          success: false,
+          message: init.error || 'VSDC device not initialized',
+          code: 'VSDC_NOT_INITIALIZED',
+        };
+      }
+    }
+
+    const fiscalInvcNo = debitNote.fiscalInvcNo || (await allocateFiscalInvcNo());
+    if (!debitNote.fiscalInvcNo) {
+      await this.prisma.debitNote.update({
+        where: { id: debitNoteId },
+        data: { fiscalInvcNo },
+      });
+      debitNote.fiscalInvcNo = fiscalInvcNo;
+    }
+
+    const invoiceData = this.buildDebitNoteFromDebitNote(
+      debitNote,
+      debitNote.sale,
+      { invcNo: fiscalInvcNo }
+    );
+    const vsdcRequest = invoiceData;
+
+    await this.prisma.debitNote.update({
+      where: { id: debitNoteId },
+      data: { vsdcRequest },
+    });
+
+    const result = await this.submitInvoiceWithRetry(invoiceData);
+
+    if (!result.success && result.code === '007') {
+      const recovered = await this.recoverDuplicateInvoice(fiscalInvcNo);
+      if (recovered) {
+        return {
+          success: true,
+          message: 'Debit note already recorded at ZRA (duplicate submission recovered)',
+          zraResponse: recovered.zraResponse,
+          vsdcRequest,
+          vsdcResponse: recovered.raw,
+        };
+      }
+    }
+
+    const vsdcResponse = result.success
+      ? result.zraResponse
+      : { error: result.error, code: result.code, resultMsg: result.error };
+
+    if (!result.success) {
+      return {
+        success: false,
+        message: result.error || 'ZRA debit note submission failed',
+        code: result.code,
+        vsdcRequest,
+        vsdcResponse,
+        zraResponse: result,
+      };
+    }
+
+    return {
+      success: true,
+      message: result.message || 'Debit note submitted successfully',
+      zraResponse: result.zraResponse,
+      vsdcRequest,
+      vsdcResponse,
+    };
   }
 }
 

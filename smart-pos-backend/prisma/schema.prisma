@@ -262,6 +262,7 @@ model DebitNote {
   intrlData      String?
   qrCode         String?
   vsdcTimestamp  DateTime?
+  vsdcRcptPbctDate DateTime?
   vsdcRequest    Json?
   vsdcResponse   Json?
   fiscalError    String?
@@ -692,6 +693,7 @@ model AuditLog {
 enum ReceiptSourceType {
   SALE
   CREDIT_NOTE
+  DEBIT_NOTE
 }
 
 enum AuditRiskLevel {
