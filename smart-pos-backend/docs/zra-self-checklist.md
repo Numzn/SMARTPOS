@@ -22,15 +22,16 @@
 | | Count |
 |---|---|
 | Checklist endpoints implemented against the **official** path | **5 of 17** |
-| Mandatory functional items passing | **17 of 27** |
+| Mandatory functional items passing | **18 of 27** |
 | Mandatory functional items partial | **2** |
-| Mandatory functional items failing | **8** |
+| Mandatory functional items failing | **7** |
 
-The single most important structural finding: **`VSDC_MODE=official` does not put device
-initialisation or item registration onto official paths.** Both have an official constant defined in
-`lib/vsdc-gateway/endpointAdapter.js` that is never passed to `path()`; the live calls use hardcoded
-mock paths. Only 6 of the 10 adapter keys are ever used (`codes`, `itemClass`, `salesSave`,
-`salesSelect`, `stockItems`, `stockMaster`) — verified by exhaustive grep of `lib/`, `services/`, `routes/`.
+The single most important remaining structural finding: **`VSDC_MODE=official` does not put item
+registration onto its official path.** `endpointAdapter.js` defines `itemSave`, but the live call in
+`services/itemManagement.js` uses a hardcoded mock path instead. (Device initialisation was believed to
+have the same problem — corrected 2026-08-11, see item 1\* below; it was already routed correctly.)
+7 of the 10 adapter keys are used (`initialize`, `codes`, `itemClass`, `salesSave`, `salesSelect`,
+`stockItems`, `stockMaster`) — verified by exhaustive grep of `lib/`, `services/`, `routes/`.
 
 ---
 
@@ -179,7 +180,7 @@ documents — no VSDC involvement."* `endpointAdapter.js:15` defines `purchaseGe
 | No. | Service check | Status | Evidence / gap |
 |-----|---------------|--------|----------------|
 | | **Device Initialisation** | | |
-| 1\* | Initialize with Smart Invoice via VSDC | ✖️ | Runs against mock path `/api/initialize`, not `/initializer/selectInitInfo`. See §2.2. |
+| 1\* | Initialize with Smart Invoice via VSDC | ✔️ | **Correction — this entry was stale.** `vsdcService.initialize()` (`services/vsdcService.js:157`) posts through `endpointAdapter.path('initialize')`, resolving to the real official path under `VSDC_MODE=official`. `this.endpoints.initialize = '/api/initialize'` (`:30`) is dead code, referenced nowhere. Both call sites (`routes/vsdc.js:25`, `lib/saleFiscal.js:370`) go through `ensureDeviceInitialized()` → `initialize()`, same correct path. Regression test: `tests/unit/vsdcOfficialRouting.unit.test.js:17-32`. Live-verified against Numzlab (2026-08-11): forced a fresh init (session file cleared) with `VSDC_MODE=official`, confirmed `POST /initializer/selectInitInfo` actually fired, `resultCd='000'`, response (`sdicId`, `mrcNo`, `intrlKey`, `signKey`, `cmcKey`) persisted to `vsdc_devices`; forced a network failure and confirmed graceful `{success:false}` with no crash; restarted the `smart-pos-backend` container and confirmed `isDeviceReady()` still returns `true` (state persisted in Postgres, not memory). Mandatory-field payload (`tpin`, `bhfId`, `dvcSrlNo`) cross-checked against `scripts/sandbox-smoke.js:63`, written independently for real-sandbox use — not verified against the literal spec PDF text (no PDF renderer in this environment). ⚠️ Real ZRA sandbox behavior (vs. mock) still unverified — no credentials. |
 | | **Get Code Data** | | |
 | 2\* | Retrieve code data (VSDC constants) | ✔️ | `lib/vsdc-gateway/codesSync.js:17-56`; route `routes/vsdc.js:69` |
 | | **Classification Codes** | | |
