@@ -214,6 +214,47 @@ class ZRACodesService {
     this.lastSyncDate = null
     return this.fetchAllCodes()
   }
+
+  /**
+   * Strict, fiscal-payload-facing lookup: resolves a default code from the
+   * synced ZraCode table for the given class, preferring `preferredCode` if
+   * present. Unlike getTaxTypes()/getUnitsOfMeasure() (which fall back to
+   * getDefaultTaxTypes()/getDefaultUnits() for UI/informational use), this
+   * throws rather than silently substituting a hardcoded value — callers
+   * building an actual VSDC item-registration payload must not submit a
+   * code that was never confirmed against the synced source of truth.
+   */
+  async resolveDefaultCode(codeType, preferredCode) {
+    let rows = await this.getCodesFromDatabase(codeType)
+    if (!rows.length) {
+      const sync = await this.fetchAllCodes()
+      if (!sync.success) {
+        throw new Error(
+          `ZRA ${codeType} codes have never been synced and sync failed (${sync.error}). ` +
+          `Run POST /api/vsdc/codes/sync before registering items.`
+        )
+      }
+      rows = await this.getCodesFromDatabase(codeType)
+    }
+    if (!rows.length) {
+      throw new Error(
+        `ZRA ${codeType} codes are synced but the code class returned zero rows. ` +
+        `Cannot resolve a default — check VSDC_MODE and the sync response.`
+      )
+    }
+    const preferred = rows.find((r) => r.code === preferredCode)
+    return preferred || rows[0]
+  }
+
+  async getDefaultTaxTypeCode() {
+    const row = await this.resolveDefaultCode('TAX_TYPES', 'A')
+    return row.code
+  }
+
+  async getDefaultUnitCode() {
+    const row = await this.resolveDefaultCode('UNIT_OF_MEASURE', 'EA')
+    return row.code
+  }
 }
 
 module.exports = new ZRACodesService()

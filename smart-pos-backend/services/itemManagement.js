@@ -1,6 +1,7 @@
 const prisma = require('../lib/prisma')
 const vsdcService = require('./vsdcService')
 const endpointAdapter = require('../lib/vsdc-gateway/endpointAdapter')
+const zraCodesService = require('./zraCodesService')
 const {
   markRegistrationSuccess,
   markRegistrationFailed,
@@ -15,28 +16,6 @@ class ItemManagementService {
   constructor() {
     this.maxRetries = 3
     this.retryDelay = 1000
-    
-    // ZRA Tax Types as per VSDC specification
-    this.taxTypes = {
-      STANDARD: 'A',     // 16% VAT
-      ZERO_RATED: 'B',   // 0% VAT
-      EXEMPT: 'C',       // Exempt from VAT
-      SPECIAL: 'D'       // Special rate
-    }
-    
-    // ZRA Package Units
-    this.packageUnits = {
-      EACH: 'EA',
-      KILOGRAM: 'KG',
-      GRAM: 'G',
-      LITER: 'L',
-      MILLILITER: 'ML',
-      METER: 'M',
-      CENTIMETER: 'CM',
-      PIECE: 'PC',
-      BOX: 'BX',
-      PACK: 'PK'
-    }
   }
 
   /**
@@ -45,13 +24,22 @@ class ItemManagementService {
   async saveItemToVSDC(productData) {
     try {
       console.log(`📝 Saving item to VSDC: ${productData.name}`)
-      
+
       // Validate required fields
       const validation = this.validateItemData(productData)
       if (!validation.isValid) {
         throw new Error(`Item validation failed: ${validation.errors.join(', ')}`)
       }
-      
+
+      // Codes not set explicitly on the product resolve against the synced
+      // ZraCode table (VSDC /code/selectCodes), not a hardcoded guess —
+      // this throws if codes have never been synced, rather than silently
+      // submitting a value ZRA was never confirmed to accept.
+      const [defaultTaxTyCd, defaultUnitCd] = await Promise.all([
+        productData.taxType ? null : zraCodesService.getDefaultTaxTypeCode(),
+        (productData.zraPackageUnit && productData.zraQuantityUnit) ? null : zraCodesService.getDefaultUnitCode(),
+      ])
+
       // Build VSDC compliant item payload
       const vsdcPayload = {
         tpin: process.env.BUSINESS_TPIN,
@@ -62,9 +50,9 @@ class ItemManagementService {
         itemNm: productData.name,
         itemStdNm: productData.name, // Standard name (same as name)
         orgnNatCd: 'ZM', // Origin country (Zambia)
-        pkgUnitCd: productData.zraPackageUnit || this.packageUnits.EACH,
-        qtyUnitCd: productData.zraQuantityUnit || this.packageUnits.EACH,
-        taxTyCd: productData.taxType || this.taxTypes.STANDARD,
+        pkgUnitCd: productData.zraPackageUnit || defaultUnitCd,
+        qtyUnitCd: productData.zraQuantityUnit || defaultUnitCd,
+        taxTyCd: productData.taxType || defaultTaxTyCd,
         btchNo: productData.batchNumber || null,
         bcd: productData.barcode || null,
         dftPrc: parseFloat(productData.price),
