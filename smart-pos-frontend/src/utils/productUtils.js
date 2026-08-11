@@ -9,6 +9,12 @@ export const validateProductForm = (productData) => {
     errors.price = 'Valid price is required';
   }
   if (!productData.categoryId) errors.categoryId = 'Category is required';
+  // Mirrors lib/productRegistration.js validateRegistrationFields on the
+  // backend (enforced there whenever ZRA_REGISTRATION_STRICT !== 'false',
+  // the default) — catch it client-side too instead of round-tripping.
+  if (!productData.zraClassificationCode) {
+    errors.zraClassificationCode = 'ZRA classification code is required — search and select one';
+  }
   if (productData.hasExpiry && (!productData.shelfLifeDays || parseInt(productData.shelfLifeDays) <= 0)) {
     errors.shelfLifeDays = 'Shelf life days required for perishable items';
   }

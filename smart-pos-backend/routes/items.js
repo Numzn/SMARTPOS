@@ -77,9 +77,17 @@ router.post('/sync', authenticateToken, requirePermission('zra:sync'), async (re
 // on demand if empty. Previously called itemManagementService's version,
 // which bypassed endpointAdapter entirely and hit a hardcoded mock-only
 // path (/api/codes/get) on every request instead of the synced data.
+//
+// ?q=&limit= drives the ClassificationPicker type-ahead (bounded, server-side
+// search via zraCodesService.searchItemClassifications). No query params
+// preserves the original unbounded "full usable list" behaviour for the
+// handful of internal/back-compat callers that still want everything.
 router.get('/classification-codes', authenticateToken, requirePermission('products:read'), async (req, res) => {
   try {
-    const result = await zraCodesService.getItemClassifications();
+    const { q, limit } = req.query;
+    const result = (q !== undefined || limit !== undefined)
+      ? await zraCodesService.searchItemClassifications({ q, limit })
+      : await zraCodesService.getItemClassifications();
 
     if (result.success) {
       res.json({

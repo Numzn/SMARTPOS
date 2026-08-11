@@ -129,6 +129,74 @@ class ZRACodesService {
     }
   }
 
+  // Server-side search for the ClassificationPicker UI — unlike
+  // getItemClassifications() above (which returns the whole usable set for
+  // internal/back-compat callers), this is built for a type-ahead: bounded
+  // result count, filters at the DB layer, and never returns a deprecated
+  // (useYn='N') code. `q` matches against both the ZRA code and its name so
+  // a user can search "cement" or "3011..." interchangeably.
+  async searchItemClassifications({ q, limit } = {}) {
+    try {
+      const take = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 50)
+      const term = String(q || '').trim()
+
+      // useYn === 'N' is explicitly deprecated; null/unset is usable (same
+      // rule as getItemClassifications) — `not: 'N'` alone would also drop
+      // NULL rows under SQL's three-valued logic, so it's spelled out as an OR.
+      const usableFilter = { OR: [{ useYn: null }, { useYn: { not: 'N' } }] }
+      const where = term
+        ? {
+            AND: [
+              usableFilter,
+              { OR: [{ code: { contains: term, mode: 'insensitive' } }, { name: { contains: term, mode: 'insensitive' } }] },
+            ],
+          }
+        : usableFilter
+
+      let rows = await this.prisma.zraClassificationCode.findMany({ where, orderBy: { code: 'asc' }, take })
+
+      // Only auto-sync when the table has genuinely never been populated —
+      // an empty *search* result (no match for the term) is a normal, valid
+      // outcome and must not trigger a sync loop.
+      if (rows.length === 0 && term === '') {
+        const total = await this.prisma.zraClassificationCode.count()
+        if (total === 0) {
+          await this.fetchAllCodes()
+          rows = await this.prisma.zraClassificationCode.findMany({ where, orderBy: { code: 'asc' }, take })
+        }
+      }
+
+      return {
+        success: true,
+        classifications: rows.map((item) => ({
+          code: item.code,
+          name: item.name,
+          level: item.level || 1,
+          taxTyCd: item.taxTyCd,
+          mjrTgYn: item.mjrTgYn,
+          useYn: item.useYn,
+        })),
+        message: `Found ${rows.length} item classification${rows.length === 1 ? '' : 's'}`,
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message,
+        classifications: [],
+      }
+    }
+  }
+
+  // Validates a code against the synced table before it's allowed onto a
+  // product — the enforcement half of "no arbitrary free-text classification
+  // codes." Called from routes/products.js on create/update.
+  async isUsableClassificationCode(code) {
+    if (!code) return false
+    const row = await this.prisma.zraClassificationCode.findUnique({ where: { code: String(code) } })
+    if (!row) return false
+    return row.useYn !== 'N'
+  }
+
   async getUnitsOfMeasure() {
     try {
       let units = await this.getCodesFromDatabase('UNIT_OF_MEASURE')

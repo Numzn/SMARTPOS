@@ -10,6 +10,21 @@ const {
   isRegistrationStrict,
   validateRegistrationFields,
 } = require('../lib/productRegistration');
+const zraCodesService = require('../services/zraCodesService');
+
+// Rejects a classification code that isn't a known, currently-usable
+// ZraClassificationCode row (i.e. it was never synced, or ZRA has since
+// marked it useYn='N'). Closes the free-text gap: the ClassificationPicker
+// UI only ever emits codes it got from the synced table, but the API is the
+// real enforcement boundary — any direct caller must be held to the same rule.
+async function assertUsableClassificationCode(code) {
+  if (!code) return null;
+  const usable = await zraCodesService.isUsableClassificationCode(code);
+  if (!usable) {
+    return `'${code}' is not a valid, ZRA-synced classification code. Choose one from the classification picker.`;
+  }
+  return null;
+}
 
 async function registerAfterSave(productId) {
   const registration = await registerProductWithVsdc(productId);
@@ -283,6 +298,14 @@ router.post('/', authenticateToken, requirePermission('products:write'), async (
       });
     }
 
+    const classificationError = await assertUsableClassificationCode(draftProduct.zraClassificationCode);
+    if (classificationError && isRegistrationStrict()) {
+      return res.status(400).json({
+        error: classificationError,
+        code: 'INVALID_CLASSIFICATION_CODE',
+      });
+    }
+
     // Check if SKU is unique
     const existingSku = await prisma.product.findUnique({
       where: { sku }
@@ -472,8 +495,16 @@ router.put('/:id', authenticateToken, requirePermission('products:write'), async
     }
 
     if (hasExpiry && (!shelfLifeDays || parseInt(shelfLifeDays) <= 0)) {
-      return res.status(400).json({ 
-        error: 'Shelf life days is required and must be greater than 0 when product has expiry' 
+      return res.status(400).json({
+        error: 'Shelf life days is required and must be greater than 0 when product has expiry'
+      });
+    }
+
+    const classificationError = await assertUsableClassificationCode(zraClassificationCode?.trim());
+    if (classificationError && isRegistrationStrict()) {
+      return res.status(400).json({
+        error: classificationError,
+        code: 'INVALID_CLASSIFICATION_CODE',
       });
     }
 

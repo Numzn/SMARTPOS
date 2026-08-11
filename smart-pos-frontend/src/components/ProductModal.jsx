@@ -1,5 +1,6 @@
 import Modal from './ui/Modal';
 import React from 'react';
+import ClassificationPicker from './products/ClassificationPicker';
 
 const ProductModal = ({ 
   showModal, 
@@ -195,14 +196,16 @@ const ProductModal = ({
           </div>
           
           <div>
-            <label className="block text-sm font-medium mb-1" htmlFor="productmodal-f9">ZRA Classification Code</label>
-            <input id="productmodal-f9"
-              type="text"
-              placeholder="Enter ZRA classification code"
-              value={productData.zraClassificationCode}
-              onChange={(e) => setProductData({ ...productData, zraClassificationCode: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            <label className="block text-sm font-medium mb-1" htmlFor="productmodal-f9">ZRA Classification Code *</label>
+            <ClassificationPicker
+              id="productmodal-f9"
+              value={productData.zraClassificationCode || null}
+              onChange={(code) => setProductData({ ...productData, zraClassificationCode: code || '' })}
+              error={errors.zraClassificationCode}
             />
+            {errors.zraClassificationCode && (
+              <p className="text-red-500 text-xs mt-1">{errors.zraClassificationCode}</p>
+            )}
           </div>
           
           <div>
