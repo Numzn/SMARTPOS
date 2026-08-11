@@ -168,6 +168,61 @@ app.post('/stockMaster/saveStockMaster', (req, res) => {
   res.json(ok({ itemList: req.body.itemList || [] }));
 });
 
+// Section 5.5/5.6 spec-verified endpoints (distinct from the legacy
+// /api/branch/save + /api/branch/get below, which target a fabricated
+// path — see smart-pos-backend/docs/zra-self-checklist.md item 4-7 notes).
+const MOCK_ZRA_BRANCHES = [
+  { tin: '1000000000', bhfId: '000', bhfNm: 'Headquarter', bhfSttsCd: '01', prvncNm: 'LUSAKA PROVINCE', dstrtNm: null, sctrNm: 'Lusaka', locDesc: null, mgrNm: 'SMART USER', mgrTelNo: '0977000000', mgrEmail: 'smartuser@email.org.zm', hqYn: 'Y' },
+];
+const mockZraCustomers = new Map(); // custTpin -> customer record
+
+const handleBranchesSelect = (req, res) => {
+  console.log('🏢 Mock VSDC selectBranches:', req.body.tpin, req.body.bhfId);
+  res.json(ok({ data: { bhfList: MOCK_ZRA_BRANCHES }, bhfList: MOCK_ZRA_BRANCHES }));
+};
+app.post('/branches/selectBranches', handleBranchesSelect);
+app.post('/api/branches/select', handleBranchesSelect);
+
+const handleBranchUserSave = (req, res) => {
+  console.log('👤 Mock VSDC saveBrancheUser:', req.body.userId, req.body.userNm);
+  res.json(ok(null));
+};
+app.post('/branches/saveBrancheUser', handleBranchUserSave);
+app.post('/api/branches/user/save', handleBranchUserSave);
+
+const handleBranchCustomerSave = (req, res) => {
+  console.log('🧑‍🤝‍🧑 Mock VSDC saveBrancheCustomers:', req.body.custTpin, req.body.custNm);
+  mockZraCustomers.set(req.body.custTpin, {
+    tpin: req.body.tpin,
+    bhfId: req.body.bhfId,
+    custNo: req.body.custNo,
+    custTpin: req.body.custTpin,
+    custNm: req.body.custNm,
+    adrs: req.body.adrs ?? null,
+    telNo: req.body.custNo ?? null,
+    email: req.body.email ?? null,
+    faxNo: req.body.faxNo ?? null,
+    useYn: req.body.useYn || 'Y',
+    remark: req.body.remark ?? null,
+    regrId: req.body.regrId ?? null,
+    regrNm: req.body.regrNm ?? null,
+    modrId: req.body.modrId ?? null,
+    modrNm: req.body.modrNm ?? null,
+  });
+  res.json(ok(null));
+};
+app.post('/branches/saveBrancheCustomers', handleBranchCustomerSave);
+app.post('/api/branches/customer/save', handleBranchCustomerSave);
+
+const handleCustomerSelect = (req, res) => {
+  console.log('🔍 Mock VSDC selectCustomer:', req.body.custmTpin);
+  const found = mockZraCustomers.get(req.body.custmTpin);
+  const custList = found ? [found] : [];
+  res.json(ok({ data: { custList }, custList }));
+};
+app.post('/customers/selectCustomer', handleCustomerSelect);
+app.post('/api/customers/select', handleCustomerSelect);
+
 app.post('/api/branch/save', (req, res) => {
   const bhfId = String(req.body.bhfId || '000').padStart(3, '0');
   console.log('🏢 Mock VSDC branch save:', bhfId, req.body.bhfNm);

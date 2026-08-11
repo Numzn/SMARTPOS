@@ -83,6 +83,29 @@ router.get('/export', authenticateToken, requirePermission('customers:read'), as
   }
 });
 
+/**
+ * GET /api/customers/zra-lookup?tpin=... — on-demand ZRA customer lookup
+ * (VSDC POST /customers/selectCustomer). Read-only; does not touch local
+ * data. Registered before /:id — a literal path must come first or /:id
+ * would swallow it (same reason /export sits above /:id already).
+ */
+router.get('/zra-lookup', authenticateToken, requirePermission('customers:read'), async (req, res) => {
+  try {
+    const tpin = req.query.tpin;
+    if (!tpin) {
+      return res.status(400).json({ success: false, error: 'tpin query parameter is required' });
+    }
+
+    const vsdcGateway = require('../lib/vsdc-gateway');
+    const result = await vsdcGateway.selectCustomer(String(tpin));
+
+    res.json({ success: true, found: result.found, customer: result.customer });
+  } catch (error) {
+    console.error('Error looking up ZRA customer:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to look up customer on ZRA' });
+  }
+});
+
 /** GET /api/customers/:id */
 router.get('/:id', authenticateToken, requirePermission('customers:read'), async (req, res) => {
   try {
@@ -229,6 +252,51 @@ router.delete('/:id', authenticateToken, requirePermission('customers:delete'), 
   } catch (error) {
     console.error('Error deactivating customer:', error.message);
     res.status(500).json({ success: false, error: 'Failed to deactivate customer' });
+  }
+});
+
+/**
+ * POST /api/customers/:id/zra-sync — push this customer to ZRA as a branch
+ * customer (VSDC POST /branches/saveBrancheCustomers). Only valid once the
+ * customer has a tpin — that's the actual business trigger per the spec
+ * (custTpin is a required field), not "sync every customer".
+ */
+router.post('/:id/zra-sync', authenticateToken, requirePermission('zra:sync'), async (req, res) => {
+  try {
+    const customer = await prisma.customer.findUnique({ where: { id: req.params.id } });
+    if (!customer) {
+      return res.status(404).json({ success: false, error: 'Customer not found' });
+    }
+    if (!customer.tpin) {
+      return res.status(400).json({
+        success: false,
+        error: 'Customer has no TPIN — cannot register as a ZRA branch customer (custTpin is required by the spec)',
+      });
+    }
+
+    const vsdcGateway = require('../lib/vsdc-gateway');
+    const actor = { id: actorId(req), name: req.user?.name, email: req.user?.email };
+
+    try {
+      await vsdcGateway.saveBranchCustomer(customer, actor);
+    } catch (zraError) {
+      return res.status(422).json({ success: false, error: zraError.message });
+    }
+
+    const updated = await prisma.customer.findUnique({ where: { id: customer.id } });
+
+    auditService.safeLog(auditService.eventTypes.CUSTOMER_ZRA_SYNC, {
+      ...auditService.contextFromReq(req),
+      entityType: 'CUSTOMER',
+      entityId: customer.id,
+      action: 'ZRA_SYNC',
+      description: `Customer synced to ZRA as branch customer: ${customer.name} (${customer.tpin})`,
+    });
+
+    res.json({ success: true, customer: updated, message: 'Customer registered with ZRA' });
+  } catch (error) {
+    console.error('Error syncing customer to ZRA:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to sync customer to ZRA' });
   }
 });
 

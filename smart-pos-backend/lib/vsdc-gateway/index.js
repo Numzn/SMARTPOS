@@ -6,6 +6,7 @@ const { buildSaveCreditNotePayload } = require('./payloadBuilders/saveCreditNote
 const { validateSaveSalesPayload } = require('./validators/saveSales');
 const { withRetry } = require('./retry');
 const codesSync = require('./codesSync');
+const branchSync = require('./branchSync');
 
 function ctx() {
   return { tpin: vsdcService.tpin, bhfId: vsdcService.bhfId };
@@ -148,5 +149,9 @@ module.exports = {
   submitInvoiceData,
   lookupInvoice,
   syncCodes: codesSync.syncAll,
+  selectBranches: branchSync.selectBranches,
+  saveBranchUser: branchSync.saveBranchUser,
+  saveBranchCustomer: branchSync.saveBranchCustomer,
+  selectCustomer: branchSync.selectCustomer,
   buildSaveSalesPayload,
 };

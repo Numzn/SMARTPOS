@@ -600,4 +600,54 @@ router.post('/:id/reset-password', authenticateToken, requireRole('ADMIN'), asyn
   }
 });
 
+/**
+ * POST /api/users/:id/zra-sync — register this staff account as a ZRA
+ * branch user (VSDC POST /branches/saveBrancheUser). Requires the user to
+ * already have a branch assigned — bhfId is a required field on that
+ * endpoint, so a user with no branch cannot be pushed.
+ */
+router.post('/:id/zra-sync', authenticateToken, requireRole('ADMIN'), async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.params.id },
+      include: { branch: { select: { bhfId: true } } },
+    });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    if (!user.branch?.bhfId) {
+      return res.status(400).json({
+        error: 'User has no assigned branch — cannot register as a ZRA branch user (bhfId is required by the spec)',
+      });
+    }
+
+    const vsdcGateway = require('../lib/vsdc-gateway');
+    const actor = { id: req.user?.userId, name: req.user?.name, email: req.user?.email };
+
+    try {
+      await vsdcGateway.saveBranchUser(user, actor);
+    } catch (zraError) {
+      return res.status(422).json({ error: zraError.message });
+    }
+
+    const updated = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { id: true, email: true, name: true, zraSyncedAt: true, zraSyncError: true },
+    });
+
+    auditService.safeLog(auditService.eventTypes.USER_ZRA_SYNC, {
+      ...auditService.contextFromReq(req),
+      entityType: 'USER',
+      entityId: user.id,
+      action: 'ZRA_SYNC',
+      description: `User synced to ZRA as branch user: ${user.email}`,
+    });
+
+    res.json({ success: true, user: updated, message: 'User registered with ZRA' });
+  } catch (error) {
+    console.error('Error syncing user to ZRA:', error.message);
+    res.status(500).json({ error: 'Failed to sync user to ZRA' });
+  }
+});
+
 module.exports = router;

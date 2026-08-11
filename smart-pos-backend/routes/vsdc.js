@@ -74,4 +74,35 @@ router.post('/codes/sync', authenticateToken, requirePermission('zra:sync'), asy
   }
 });
 
+/**
+ * POST /api/vsdc/branches/sync — pull ZRA's registered branch list
+ * (VSDC POST /branches/selectBranches) and store it as a reference
+ * snapshot on matching local Branch rows by bhfId. Does not overwrite
+ * operational Branch fields (name, province, etc.) — see
+ * schema.prisma Branch.zraBranchSnapshot for why.
+ */
+router.post('/branches/sync', authenticateToken, requirePermission('zra:sync'), async (req, res) => {
+  try {
+    const vsdcGateway = require('../lib/vsdc-gateway');
+    const ready = await vsdcGateway.ensureReady();
+    if (!ready.success) {
+      return res.status(503).json({ error: ready.error || 'VSDC not initialized' });
+    }
+    const result = await vsdcGateway.selectBranches();
+
+    const auditService = require('../services/auditService');
+    auditService.safeLog(auditService.eventTypes.BRANCH_ZRA_SYNC, {
+      ...auditService.contextFromReq(req),
+      entityType: 'BRANCH',
+      action: 'ZRA_SYNC',
+      description: `Pulled ${result.count} branch record(s) from ZRA, matched ${result.matched} locally`,
+    });
+
+    res.json({ message: 'Branch sync completed', ...result });
+  } catch (error) {
+    console.error('VSDC branches sync error:', error.message);
+    res.status(500).json({ error: error.message || 'Failed to sync branches' });
+  }
+});
+
 module.exports = router;

@@ -13,6 +13,15 @@ const OFFICIAL = {
   stockItems: '/stock/saveStockItems',
   stockMaster: '/stockMaster/saveStockMaster',
   purchaseGet: '/trnsPurchase/selectPurchases',
+  // Section 5.5 Branch Information + 5.6 Customer Information — endpoint
+  // names/paths verified directly against the spec PDF (pdftotext extraction),
+  // not inferred from prior code. Note branchUserSave is singular
+  // ("saveBrancheUser") per the spec, and customerSelect lives under
+  // /customers/, a different namespace than the other /branches/ endpoints.
+  branchesSelect: '/branches/selectBranches',
+  branchUserSave: '/branches/saveBrancheUser',
+  branchCustomerSave: '/branches/saveBrancheCustomers',
+  customerSelect: '/customers/selectCustomer',
 };
 
 const MOCK = {
@@ -26,6 +35,10 @@ const MOCK = {
   stockItems: '/api/stock/save',
   stockMaster: '/api/stock/save',
   purchaseGet: '/api/purchase/get',
+  branchesSelect: '/api/branches/select',
+  branchUserSave: '/api/branches/user/save',
+  branchCustomerSave: '/api/branches/customer/save',
+  customerSelect: '/api/customers/select',
 };
 
 function mode() {

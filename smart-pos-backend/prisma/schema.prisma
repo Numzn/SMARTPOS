@@ -36,6 +36,11 @@ model User {
   branchId         String?
   branch           Branch?   @relation(fields: [branchId], references: [code])
 
+  // VSDC branch-user sync (Section 5.5, POST /branches/saveBrancheUser)
+  zraSyncedAt      DateTime?
+  zraSyncError     String?
+  zraSyncResponse  Json?
+
   @@map("users")
 }
 
@@ -540,6 +545,16 @@ model Branch {
   zraRegistered         Boolean   @default(false)
   zraRegistrationDate   DateTime?
   zraRegistrationNumber String?
+
+  // VSDC branch retrieval (Section 5.5, POST /branches/selectBranches) — a
+  // read-verification snapshot of what ZRA has on file for this bhfId, kept
+  // separate from the operational name/province/district/etc. above rather
+  // than overwriting them: those fields are foreign-key-critical locally
+  // (sales.branchId, shifts, etc.) and ZRA's copy is a reference to compare
+  // against, not an authority that should silently mutate live records.
+  zraBranchSnapshot     Json?
+  zraSnapshotSyncedAt   DateTime?
+
   createdBy             String?
   updatedBy             String?
   deactivatedAt         DateTime?
@@ -869,6 +884,13 @@ model Customer {
   deactivatedBy String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+
+  // VSDC branch-customer sync (Section 5.5, POST /branches/saveBrancheCustomers) —
+  // only meaningful once `tpin` is set, since custTpin is a required field on
+  // that endpoint; a walk-in customer with no tpin is never pushed.
+  zraSyncedAt   DateTime?
+  zraSyncError  String?
+  zraSyncResponse Json?
 
   sales         Sale[]
 
