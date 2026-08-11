@@ -1,6 +1,6 @@
 # Smart Invoice VSDC — Developer Self-Checklist
 
-**System:** SmartPOS · **Version:** 1.0.0 · **Assessed:** 2026-08-10
+**System:** SmartPOS · **Version:** 1.0.0 · **Assessed:** 2026-08-11
 **Assessed against:** VSDC API Specification v1.0.8 (`docs/VSDC-API-Specification-Document-v1.0.8.pdf`)
 
 > **Status: NOT CERTIFIED. NOT SUBMITTED.**
@@ -206,7 +206,7 @@ documents — no VSDC involvement."* `endpointAdapter.js:15` defines `purchaseGe
 | 18\* | Invoice numbers cannot be modified or deleted | ✔️ | No PUT/PATCH/DELETE route for sales exists. `zraInvoice.js:439` guards `fiscalInvcNo` behind `if (!sale.fiscalInvcNo)`. |
 | 19\* | Tax invoice minimum features | ⚠️ | See §3.1 breakdown below — 16 of 18 sub-items present; 2 partial (title not bold, line amounts unlabelled) |
 | 20\* | Generate credit notes | ✔️ | `lib/saleRefund.js`; `rcptTyCd='R'` at `payloadBuilders/saveCreditNote.js:7`; `orgInvcNo` linked via `zraInvoice.js:343` |
-| 21\* | Generate debit notes | ✖️ | **No debit-note capability at all.** `receiptTypes` (`zraInvoice.js:27-31`) is `S`/`R`/`T` only — no `'D'`. `dbtRsnCd` and `invcAdjustReason` are hardcoded `''` (`saveSales.js:173-174`). No model, route or UI. |
+| 21\* | Generate debit notes | ✖️ | **Not reachable — no route exists.** Model (`DebitNote`, `DebitNoteItem` in `schema.prisma`) and a service layer (`lib/saleDebitNote.js`, `zraInvoice.js:864-877` `submitDebitNote()` with `rcptTyCd='D'`) were added, but there is no HTTP route mounting them, no UI, and no test coverage — nothing in the running app can create a debit note. `dbtRsnCd`/`invcAdjustReason` in the *sales* payload builder (`payloadBuilders/saveSales.js:173-174`, the ordinary sale path) are still hardcoded `''`; unaffected by the new debit-note-specific path. Applying the same standard used elsewhere in this document (unreachable code doesn't count), this stays ✖️ until a route exists and is tested. |
 | 22\* | Invoice details cannot be modified after generation | ✔️ | No update route reaches a fiscalized sale. Guard at `lib/saleFiscal.js:374-390`. ⚠️ `completeSaleAfterFiscalSuccess` (`:297`) has no internal status precondition — safe by convention, not construction. |
 | 23\* | Invoice details cannot be deleted after generation | ✔️ | No `sale.delete` / `saleItem.delete` outside tests |
 | 24\* | Reprints marked COPY/DUPLICATE | ✔️ | Marking works — `lib/receipt/snapshot.js:149-159`, rendered by `receiptSections.ts:4-8`, audit-logged at `routes/receipts.js:37`. Frontend tracks first-print state via `hasPrintedRef` (`CheckoutModal.jsx:197`, `RefundModal.jsx:130`) — first print passes `reprint: false`, reprints pass `true`. |
