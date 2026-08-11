@@ -27,6 +27,7 @@ model User {
   // Relations
   sales            Sale[]
   refunds          Refund[]
+  debitNotes       DebitNote[]
   stockAdjustments StockAdjustment[]
   stockMovements   StockMovement[]
   shifts           Shift[]
@@ -99,6 +100,7 @@ model Product {
   inventory             Inventory[]
   saleItems             SaleItem[]
   refundItems           RefundItem[]
+  debitNoteItems        DebitNoteItem[]
   stockAdjustments      StockAdjustment[]
   stockMovements        StockMovement[]
   InventoryItem         InventoryBatch[] @relation("ProductBatches") // Use InventoryBatch for consistency
@@ -156,6 +158,7 @@ model Sale {
   branch      Branch     @relation(fields: [branchId], references: [code])
   saleItems   SaleItem[]
   refunds     Refund[]   @relation("SaleRefunds")
+  debitNotes  DebitNote[]
   shift       Shift?     @relation(fields: [shiftId], references: [id])
   discountApprovedBy User? @relation("SaleDiscountApprovals", fields: [discountApprovedByUserId], references: [id])
   customer    Customer?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
