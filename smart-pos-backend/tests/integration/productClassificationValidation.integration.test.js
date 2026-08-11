@@ -24,7 +24,10 @@ function tokenFor(user) {
 // only ever emits a code it got back from the search endpoint, but the API is
 // the real enforcement boundary for "no arbitrary free-text classification
 // codes" — these tests hit routes/products.js directly, bypassing the UI
-// entirely, the way a scripted or malicious direct API call would.
+// entirely, the way a scripted or malicious direct API call would. Covers
+// only the classification field; tax type/package unit/quantity unit have
+// their own equivalent coverage in productZraCodeValidation.integration.test.js
+// (assertUsableStandardCode via the shared assertProductZraCodes gate).
 describe('POST/PUT /api/products — classification code validity gate', () => {
   const app = createTestApp('/api/products', productsRouter);
 
@@ -59,12 +62,10 @@ describe('POST/PUT /api/products — classification code validity gate', () => {
         price: 10,
         categoryId: category.id,
         zraClassificationCode: 'PRODVALID-MADE-UP-CODE',
-        zraPackageUnit: 'EA',
-        zraQuantityUnit: 'EA',
       });
 
     expect(res.status).toBe(400);
-    expect(res.body.code).toBe('INVALID_CLASSIFICATION_CODE');
+    expect(res.body.code).toBe('INVALID_ZRA_CODE');
 
     const created = await prisma.product.findUnique({ where: { sku: 'TEST-SKU-PRODVALID-1' } });
     expect(created).toBeNull();
@@ -91,7 +92,7 @@ describe('POST/PUT /api/products — classification code validity gate', () => {
       });
 
     expect(res.status).toBe(400);
-    expect(res.body.code).toBe('INVALID_CLASSIFICATION_CODE');
+    expect(res.body.code).toBe('INVALID_ZRA_CODE');
   });
 
   it('accepts product creation with a valid, synced, usable classification code', async () => {
@@ -113,8 +114,6 @@ describe('POST/PUT /api/products — classification code validity gate', () => {
         price: 10,
         categoryId: category.id,
         zraClassificationCode: 'PRODVALID-GOOD',
-        zraPackageUnit: 'EA',
-        zraQuantityUnit: 'EA',
       });
 
     expect(res.status).toBe(201);
@@ -143,7 +142,7 @@ describe('POST/PUT /api/products — classification code validity gate', () => {
       });
 
     expect(res.status).toBe(400);
-    expect(res.body.code).toBe('INVALID_CLASSIFICATION_CODE');
+    expect(res.body.code).toBe('INVALID_ZRA_CODE');
   });
 
   it('accepts product update that keeps an existing valid classification code', async () => {

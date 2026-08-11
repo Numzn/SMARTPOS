@@ -187,6 +187,9 @@ const ProductsPage = () => {
       isActive: product.isActive,
       // ZRA Compliance fields
       zraClassificationCode: product.zraClassificationCode || '',
+      taxType: product.taxType || '',
+      zraPackageUnit: product.zraPackageUnit || '',
+      zraQuantityUnit: product.zraQuantityUnit || '',
       vatCategoryCode: product.vatCategoryCode || 'STANDARD',
       exciseTaxCode: product.exciseTaxCode || '',
       hasExpiry: product.hasExpiry || false,

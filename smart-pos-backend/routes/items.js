@@ -112,6 +112,53 @@ router.get('/classification-codes', authenticateToken, requirePermission('produc
   }
 });
 
+// Tax type / package unit / quantity unit — small, bounded lists (unlike
+// classification's thousands of rows), so no search/pagination: just the
+// current usable set for the class, read from the synced ZraCode table
+// (populated by codesSync.js -> /code/selectCodes, class '04'/'17'/'10'
+// respectively — see zraCodesService.js's CODE_CLASS_MAP comment).
+router.get('/tax-types', authenticateToken, requirePermission('products:read'), async (req, res) => {
+  try {
+    const result = await zraCodesService.searchTaxTypes();
+    if (result.success) {
+      res.json({ success: true, codes: result.codes, message: result.message });
+    } else {
+      res.status(400).json({ success: false, error: result.error, code: 'TAX_TYPES_ERROR' });
+    }
+  } catch (error) {
+    console.error('Error getting tax types:', error);
+    res.status(500).json({ success: false, error: 'Failed to get tax types', code: 'TAX_TYPES_ERROR' });
+  }
+});
+
+router.get('/package-units', authenticateToken, requirePermission('products:read'), async (req, res) => {
+  try {
+    const result = await zraCodesService.searchPackagingUnits();
+    if (result.success) {
+      res.json({ success: true, codes: result.codes, message: result.message });
+    } else {
+      res.status(400).json({ success: false, error: result.error, code: 'PACKAGE_UNITS_ERROR' });
+    }
+  } catch (error) {
+    console.error('Error getting package units:', error);
+    res.status(500).json({ success: false, error: 'Failed to get package units', code: 'PACKAGE_UNITS_ERROR' });
+  }
+});
+
+router.get('/quantity-units', authenticateToken, requirePermission('products:read'), async (req, res) => {
+  try {
+    const result = await zraCodesService.searchQuantityUnits();
+    if (result.success) {
+      res.json({ success: true, codes: result.codes, message: result.message });
+    } else {
+      res.status(400).json({ success: false, error: result.error, code: 'QUANTITY_UNITS_ERROR' });
+    }
+  } catch (error) {
+    console.error('Error getting quantity units:', error);
+    res.status(500).json({ success: false, error: 'Failed to get quantity units', code: 'QUANTITY_UNITS_ERROR' });
+  }
+});
+
 // Bulk save multiple items to VSDC (requires products:write permission)
 router.post('/bulk-save', authenticateToken, requirePermission('products:write'), async (req, res) => {
   try {

@@ -12,9 +12,13 @@ const productRegistrationState = require('../../lib/productRegistrationState');
 productRegistrationState.markRegistrationSuccess = vi.fn().mockResolvedValue();
 productRegistrationState.markRegistrationFailed = vi.fn().mockResolvedValue();
 
-// TAX_TYPES -> codeClass '01', UNIT_OF_MEASURE -> codeClass '03' per
-// zraCodesService.js's CODE_CLASS_MAP — matches the real VSDC /code/selectCodes
-// grouping, confirmed against a live sync against Numzlab's mock VSDC.
+// TAX_TYPES -> codeClass '04', UNIT_OF_MEASURE -> codeClass '10' per
+// zraCodesService.js's CODE_CLASS_MAP — confirmed directly against the VSDC
+// API Spec v1.0.8 text (§5.2 sample response for tax type, §6.5 "refer to
+// class code 10" for units). Corrected 2026-08-11: this file previously
+// used '01'/'03', which matched mock-vsdc-server.js's old (also wrong)
+// values rather than the real spec — see zraCodesService.js's CODE_CLASS_MAP
+// comment for the full story.
 async function seedCode(codeClass, code, name) {
   await prisma.zraCode.upsert({
     where: { codeClass_code: { codeClass, code } },
@@ -64,8 +68,8 @@ describe('REGRESSION: zraCodesService resolves item-registration defaults from t
     );
   });
 
-  it('getDefaultTaxTypeCode reads the real synced code class (01), not a hardcoded object', async () => {
-    await seedCode('01', 'A', 'VAT Standard Rate');
+  it('getDefaultTaxTypeCode reads the real synced code class (04), not a hardcoded object', async () => {
+    await seedCode('04', 'A', 'Standard Rated');
 
     const code = await zraCodesService.getDefaultTaxTypeCode();
 
@@ -75,8 +79,8 @@ describe('REGRESSION: zraCodesService resolves item-registration defaults from t
     // whatever a real sync already wrote.
   });
 
-  it('getDefaultUnitCode reads the real synced code class (03), not a hardcoded object', async () => {
-    await seedCode('03', 'EA', 'Each');
+  it('getDefaultUnitCode reads the real synced code class (10), not a hardcoded object', async () => {
+    await seedCode('10', 'EA', 'Each');
 
     const code = await zraCodesService.getDefaultUnitCode();
 

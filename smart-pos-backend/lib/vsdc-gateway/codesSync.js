@@ -24,14 +24,37 @@ async function syncStandardCodes() {
     throw new Error(res.data?.resultMsg || 'code/selectCodes failed');
   }
 
-  const list = res.data?.data?.cdList || res.data?.cdList || res.data?.data || [];
-  const rows = Array.isArray(list) ? list : [];
+  // Real response shape (VSDC API Spec v1.0.8 §5.2 "Get Code Data", confirmed
+  // against the spec's own sample JSON): data.clsList[] groups codes by
+  // class — {cdCls, cdClsNm, dtlList: [{cd, cdNm}]}. There is no flat
+  // "cdList" anywhere in the spec text — a prior version of this parser
+  // assumed a flat array and would have silently imported zero codes
+  // against real ZRA (mock-vsdc-server.js was, until this fix, built to the
+  // same wrong flat shape, which is why that never surfaced against mock
+  // testing). The flat-list branch below is kept only as a defensive
+  // fallback, not the expected path.
+  const classGroups = res.data?.data?.clsList || res.data?.clsList;
+  const flatList = res.data?.data?.cdList || res.data?.cdList || res.data?.data;
+
+  const rows = [];
+  if (Array.isArray(classGroups)) {
+    for (const group of classGroups) {
+      const codeClass = group.cdCls || group.codeClass;
+      const details = Array.isArray(group.dtlList) ? group.dtlList : [];
+      for (const detail of details) {
+        rows.push({ ...detail, cdCls: codeClass });
+      }
+    }
+  } else if (Array.isArray(flatList)) {
+    rows.push(...flatList);
+  }
+
   let count = 0;
   for (const row of rows) {
     const code = row.cd || row.code || row.cdVal;
     const name = row.cdNm || row.name || row.cdDesc || '';
     if (!code) continue;
-    const codeClass = row.cdCls || row.codeClass || 'STANDARD';
+    const codeClass = String(row.cdCls || row.codeClass || 'STANDARD');
     await prisma.zraCode.upsert({
       where: { codeClass_code: { codeClass, code: String(code) } },
       create: {

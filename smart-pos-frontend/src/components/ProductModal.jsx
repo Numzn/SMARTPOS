@@ -1,6 +1,8 @@
 import Modal from './ui/Modal';
 import React from 'react';
 import ClassificationPicker from './products/ClassificationPicker';
+import ZraCodeSelect from './products/ZraCodeSelect';
+import { fetchTaxTypes, fetchPackageUnits, fetchQuantityUnits } from '../api/zraCodesApi';
 
 const ProductModal = ({ 
   showModal, 
@@ -28,6 +30,9 @@ const ProductModal = ({
       isActive: true,
       // ZRA Compliance fields
       zraClassificationCode: '',
+      taxType: '',
+      zraPackageUnit: '',
+      zraQuantityUnit: '',
       vatCategoryCode: 'STANDARD',
       exciseTaxCode: '',
       hasExpiry: false,
@@ -217,6 +222,45 @@ const ProductModal = ({
               onChange={(e) => setProductData({ ...productData, exciseTaxCode: e.target.value })}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1" htmlFor="productmodal-f14">ZRA Tax Type</label>
+            <ZraCodeSelect
+              id="productmodal-f14"
+              label="Tax type"
+              value={productData.taxType || null}
+              onChange={(code) => setProductData({ ...productData, taxType: code || '' })}
+              fetcher={fetchTaxTypes}
+              error={errors.taxType}
+            />
+            {errors.taxType && <p className="text-red-500 text-xs mt-1">{errors.taxType}</p>}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1" htmlFor="productmodal-f15">ZRA Package Unit</label>
+            <ZraCodeSelect
+              id="productmodal-f15"
+              label="Package unit"
+              value={productData.zraPackageUnit || null}
+              onChange={(code) => setProductData({ ...productData, zraPackageUnit: code || '' })}
+              fetcher={fetchPackageUnits}
+              error={errors.zraPackageUnit}
+            />
+            {errors.zraPackageUnit && <p className="text-red-500 text-xs mt-1">{errors.zraPackageUnit}</p>}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1" htmlFor="productmodal-f16">ZRA Quantity Unit</label>
+            <ZraCodeSelect
+              id="productmodal-f16"
+              label="Quantity unit"
+              value={productData.zraQuantityUnit || null}
+              onChange={(code) => setProductData({ ...productData, zraQuantityUnit: code || '' })}
+              fetcher={fetchQuantityUnits}
+              error={errors.zraQuantityUnit}
+            />
+            {errors.zraQuantityUnit && <p className="text-red-500 text-xs mt-1">{errors.zraQuantityUnit}</p>}
           </div>
 
           {/* Expiry Tracking */}

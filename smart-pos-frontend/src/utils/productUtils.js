@@ -62,6 +62,9 @@ export const getInitialProductData = () => ({
   isActive: true,
   // ZRA Compliance fields
   zraClassificationCode: '',
+  taxType: '',
+  zraPackageUnit: '',
+  zraQuantityUnit: '',
   vatCategoryCode: 'STANDARD',
   exciseTaxCode: '',
   hasExpiry: false,

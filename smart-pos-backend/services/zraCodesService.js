@@ -6,11 +6,29 @@ const prisma = require('../lib/prisma')
  * Reference: VSDC API Specification v1.0.8 Section 9.1
  */
 
+// Class numbers confirmed directly against VSDC API Spec v1.0.8 §6 "Code
+// Definition" (vsdc-extracted.txt) — not guessed. Corrected 2026-08-11:
+// TAX_TYPES was '01' (real: '04' — confirmed by the §5.2 sample response,
+// cdCls:"04"/cdClsNm:"Taxation Type"); UNIT_OF_MEASURE was '03' (real: '10'
+// — §6.5 "refer to class code 10 of /code/selectCodes"); PACKAGING_UNITS
+// was '04' (real: '17' — §6.4 "refer to class code 17", and '04' is
+// actually Tax Type, so the old value pointed at the wrong category
+// entirely). mock-vsdc-server.js was built to match these wrong numbers,
+// which is why prior mock-based verification never caught it.
+// ITEM_CLASSIFICATION is not a /code/selectCodes class at all — item
+// classification is a separate endpoint (/itemClass/selectItemsClass) into
+// a different table (ZraClassificationCode); '02' here was never used.
+//
+// CURRENCY_CODES/COUNTRY_CODES/INVOICE_TYPES/TRANSACTION_TYPES below are
+// NOT re-verified as part of this fix — they're dead entries (grep confirms
+// zero call sites) left at their original, unverified numbers. Spec section
+// 6.6 suggests currency's real class is '33', not '05' — flagged, not
+// fixed, since nothing reads these today and confirming the other three
+// would be scope creep beyond the tax/unit/packaging fix this required.
 const CODE_CLASS_MAP = {
-  TAX_TYPES: '01',
-  ITEM_CLASSIFICATION: '02',
-  UNIT_OF_MEASURE: '03',
-  PACKAGING_UNITS: '04',
+  TAX_TYPES: '04',
+  UNIT_OF_MEASURE: '10',
+  PACKAGING_UNITS: '17',
   CURRENCY_CODES: '05',
   COUNTRY_CODES: '06',
   INVOICE_TYPES: '07',
@@ -185,6 +203,73 @@ class ZRACodesService {
         classifications: [],
       }
     }
+  }
+
+  // Unlike ZraClassificationCode, ZraCode rows have no per-row deprecation
+  // flag — and neither does the real /code/selectCodes response for this
+  // data (confirmed against the spec text; standard-code entries are just
+  // {cd, cdNm}, no useYn). The practical equivalent of "exclude deprecated"
+  // here is "still present in the most recent sync for this class": a row
+  // the latest sync run didn't touch was, by implication, no longer in
+  // ZRA's response. Rows written by one sync loop land within milliseconds
+  // of each other, so a tolerance window (not exact timestamp equality)
+  // safely groups a single run together without needing a dedicated
+  // sync-run table.
+  static SYNC_FRESHNESS_TOLERANCE_MS = 5 * 60 * 1000
+
+  async getCurrentCodesForClass(codeClass) {
+    const rows = await this.prisma.zraCode.findMany({ where: { codeClass }, orderBy: { code: 'asc' } })
+    if (rows.length === 0) return rows
+    const maxSyncedAt = rows.reduce((max, r) => (r.syncedAt > max ? r.syncedAt : max), rows[0].syncedAt)
+    const cutoff = new Date(maxSyncedAt.getTime() - ZRACodesService.SYNC_FRESHNESS_TOLERANCE_MS)
+    return rows.filter((r) => r.syncedAt >= cutoff)
+  }
+
+  // Shared list-and-sync-on-demand logic for the three bounded standard-code
+  // selectors (tax type, package unit, quantity unit) — small enumerable
+  // lists, unlike classification's thousands of rows, so no search/pagination
+  // is needed here, just "give me the current usable set for this class."
+  async listCurrentStandardCodes(codeType) {
+    try {
+      const codeClass = CODE_CLASS_MAP[codeType] || codeType
+      let rows = await this.getCurrentCodesForClass(codeClass)
+      if (rows.length === 0) {
+        const sync = await this.fetchAllCodes()
+        if (sync.success) {
+          rows = await this.getCurrentCodesForClass(codeClass)
+        }
+      }
+      return {
+        success: true,
+        codes: rows.map((r) => ({ code: r.code, name: r.name })),
+        message: `Found ${rows.length} code${rows.length === 1 ? '' : 's'}`,
+      }
+    } catch (error) {
+      return { success: false, error: error.message, codes: [] }
+    }
+  }
+
+  async searchTaxTypes() {
+    return this.listCurrentStandardCodes('TAX_TYPES')
+  }
+
+  async searchPackagingUnits() {
+    return this.listCurrentStandardCodes('PACKAGING_UNITS')
+  }
+
+  async searchQuantityUnits() {
+    return this.listCurrentStandardCodes('UNIT_OF_MEASURE')
+  }
+
+  // Validates a taxType/zraPackageUnit/zraQuantityUnit value against the
+  // current synced set for its class — the backend enforcement half,
+  // independent of whichever UI selector sent it. codeType is one of the
+  // CODE_CLASS_MAP keys ('TAX_TYPES', 'PACKAGING_UNITS', 'UNIT_OF_MEASURE').
+  async isUsableStandardCode(codeType, code) {
+    if (!code) return false
+    const codeClass = CODE_CLASS_MAP[codeType] || codeType
+    const rows = await this.getCurrentCodesForClass(codeClass)
+    return rows.some((r) => r.code === String(code))
   }
 
   // Validates a code against the synced table before it's allowed onto a

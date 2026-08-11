@@ -20,15 +20,39 @@ const ok = (extra = {}) => ({
   ...extra,
 });
 
+// Class numbers and codes match the real VSDC API Spec v1.0.8 (§5.2 sample
+// response, §6.4/§6.5 "Code Definition" tables) — corrected 2026-08-11.
+// Previously this used '01'/'03'/'04' with a flat cdList shape, neither of
+// which matches the real spec; see zraCodesService.js's CODE_CLASS_MAP
+// comment for the full explanation. Real /code/selectCodes has no per-code
+// tax-rate field (dtlList entries are just {cd, cdNm}) — taxRt below is
+// deliberately omitted for real classes to avoid inventing a value ZRA
+// doesn't actually send here.
 const MOCK_CODES = [
-  { cdCls: '01', cd: 'A', cdNm: 'VAT Standard Rate', taxRt: 16 },
-  { cdCls: '01', cd: 'B', cdNm: 'VAT Zero Rate', taxRt: 0 },
-  { cdCls: '01', cd: 'C', cdNm: 'VAT Exempt', taxRt: 0 },
-  { cdCls: '03', cd: 'EA', cdNm: 'Each', cdDesc: 'Unit each' },
-  { cdCls: '03', cd: 'KG', cdNm: 'Kilogram', cdDesc: 'Kilogram' },
-  { cdCls: '04', cd: 'BX', cdNm: 'Box', cdDesc: 'Box' },
-  { cdCls: '05', cd: 'ZMW', cdNm: 'Zambian Kwacha', cdDesc: 'Local currency' },
+  // Tax Type — class '04'
+  { cdCls: '04', cd: 'A', cdNm: 'Standard Rated' },
+  { cdCls: '04', cd: 'B', cdNm: 'MTV' },
+  { cdCls: '04', cd: 'C1', cdNm: 'Exports' },
+  { cdCls: '04', cd: 'D', cdNm: 'Exempt' },
+  // Units of measure (quantity unit) — class '10'
+  { cdCls: '10', cd: 'EA', cdNm: 'Each' },
+  { cdCls: '10', cd: 'KG', cdNm: 'Kilo-Gramme' },
+  { cdCls: '10', cd: 'L', cdNm: 'Litre' },
+  // Packaging Unit — class '17'
+  { cdCls: '17', cd: 'BX', cdNm: 'Box' },
+  { cdCls: '17', cd: 'BA', cdNm: 'Barrel' },
+  { cdCls: '17', cd: 'AM', cdNm: 'Ampoule' },
+  // Currency — class number not re-verified against spec (unused by any
+  // route today; see zraCodesService.js comment), left as before.
+  { cdCls: '05', cd: 'ZMW', cdNm: 'Zambian Kwacha' },
 ];
+
+const CODE_CLASS_NAMES = {
+  '04': 'Taxation Type',
+  '10': 'Unit of measures',
+  '17': 'Packaging Unit',
+  '05': 'Currency',
+};
 
 const MOCK_CLASSIFICATIONS = [
   { itemClsCd: '50100000', itemClsNm: 'General retail', itemClsLvl: 1, taxTyCd: 'A', mjrTgYn: 'Y', useYn: 'Y' },
@@ -111,9 +135,23 @@ const handleSelectSales = (req, res) => {
 app.post('/trnsSales/selectSales', handleSelectSales);
 app.post('/api/sales/select', handleSelectSales);
 
+// Real /code/selectCodes groups codes by class: data.clsList[] of
+// {cdCls, cdClsNm, dtlList: [{cd, cdNm}]} — see codesSync.js for the parser
+// this now needs to match. Built from the flat MOCK_CODES above so the
+// legacy /api/codes/get/:type route below can keep using a flat filter.
 const handleCodes = (req, res) => {
   console.log('📋 Mock VSDC codes select');
-  res.json(ok({ data: { cdList: MOCK_CODES }, cdList: MOCK_CODES }));
+  const byClass = new Map();
+  for (const row of MOCK_CODES) {
+    if (!byClass.has(row.cdCls)) byClass.set(row.cdCls, []);
+    byClass.get(row.cdCls).push({ cd: row.cd, cdNm: row.cdNm });
+  }
+  const clsList = Array.from(byClass.entries()).map(([cdCls, dtlList]) => ({
+    cdCls,
+    cdClsNm: CODE_CLASS_NAMES[cdCls] || cdCls,
+    dtlList,
+  }));
+  res.json(ok({ data: { clsList } }));
 };
 
 app.post('/code/selectCodes', handleCodes);

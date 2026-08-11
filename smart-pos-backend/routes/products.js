@@ -26,6 +26,36 @@ async function assertUsableClassificationCode(code) {
   return null;
 }
 
+// taxType/zraPackageUnit/zraQuantityUnit are, deliberately, NOT required —
+// unlike classification code, forcing these on every save would break the
+// 200+ existing products created before this UI existed (confirmed live:
+// virtually all have these fields unset and rely on registration-time
+// default resolution, which stays intact — see zraCodesService.js
+// resolveDefaultCode/getDefaultTaxTypeCode/getDefaultUnitCode). But if a
+// value IS submitted, it must be a real, currently-synced code for the
+// right class — the API is the enforcement boundary, independent of
+// whichever selector (or a direct API call) sent it.
+async function assertUsableStandardCode(codeType, code, label) {
+  if (!code) return null;
+  const usable = await zraCodesService.isUsableStandardCode(codeType, code);
+  if (!usable) {
+    return `'${code}' is not a valid, ZRA-synced ${label}.`;
+  }
+  return null;
+}
+
+async function assertProductZraCodes({ zraClassificationCode, taxType, zraPackageUnit, zraQuantityUnit }) {
+  const errors = (
+    await Promise.all([
+      assertUsableClassificationCode(zraClassificationCode),
+      assertUsableStandardCode('TAX_TYPES', taxType, 'tax type'),
+      assertUsableStandardCode('PACKAGING_UNITS', zraPackageUnit, 'package unit'),
+      assertUsableStandardCode('UNIT_OF_MEASURE', zraQuantityUnit, 'quantity unit'),
+    ])
+  ).filter(Boolean);
+  return errors;
+}
+
 async function registerAfterSave(productId) {
   const registration = await registerProductWithVsdc(productId);
   if (!registration.success && isRegistrationStrict()) {
@@ -248,6 +278,7 @@ router.post('/', authenticateToken, requirePermission('products:write'), async (
       // ZRA Compliance fields
       vatCategoryCode,
       zraClassificationCode,
+      taxType,
       exciseTaxCode,
       hasExpiry,
       shelfLifeDays,
@@ -298,11 +329,23 @@ router.post('/', authenticateToken, requirePermission('products:write'), async (
       });
     }
 
-    const classificationError = await assertUsableClassificationCode(draftProduct.zraClassificationCode);
-    if (classificationError && isRegistrationStrict()) {
+    // Validity-if-present, not required — see assertUsableStandardCode's
+    // comment for why taxType/zraPackageUnit/zraQuantityUnit aren't forced.
+    // Checked against what was actually submitted, not draftProduct's
+    // padded-with-'EA' copy above (that padding exists only to satisfy the
+    // pre-existing presence check and must not be validated as if the user
+    // chose it).
+    const zraCodeErrors = await assertProductZraCodes({
+      zraClassificationCode: draftProduct.zraClassificationCode,
+      taxType: taxType || null,
+      zraPackageUnit: req.body.zraPackageUnit?.trim() || null,
+      zraQuantityUnit: req.body.zraQuantityUnit?.trim() || null,
+    });
+    if (zraCodeErrors.length > 0 && isRegistrationStrict()) {
       return res.status(400).json({
-        error: classificationError,
-        code: 'INVALID_CLASSIFICATION_CODE',
+        error: zraCodeErrors.join('; '),
+        details: zraCodeErrors,
+        code: 'INVALID_ZRA_CODE',
       });
     }
 
@@ -335,8 +378,16 @@ router.post('/', authenticateToken, requirePermission('products:write'), async (
           vatCategoryCode: vatCategoryCode || 'STANDARD',
           zraClassificationCode: zraClassificationCode?.trim() || null,
           zraItemClassification: zraClassificationCode?.trim() || null,
-          zraPackageUnit: req.body.zraPackageUnit || 'EA',
-          zraQuantityUnit: req.body.zraQuantityUnit || 'EA',
+          // No hardcoded 'EA' fallback here (unlike the generic `unit` field
+          // below, which is a separate, pre-existing concept) — a ZRA
+          // package/quantity unit the user never chose should stay null,
+          // not silently claim 'EA' was confirmed. Registration-time
+          // resolution (zraCodesService.resolveDefaultCode) still supplies
+          // a real synced default when these are null; see item 2*/8* in
+          // zra-self-checklist.md.
+          zraPackageUnit: req.body.zraPackageUnit?.trim() || null,
+          zraQuantityUnit: req.body.zraQuantityUnit?.trim() || null,
+          taxType: taxType || null,
           unit: req.body.unit || 'EA',
           exciseTaxCode: exciseTaxCode?.trim() || null,
           hasExpiry: hasExpiry || false,
@@ -344,7 +395,7 @@ router.post('/', authenticateToken, requirePermission('products:write'), async (
           // Inventory
           minStockLevel: minStockLevel ? parseInt(minStockLevel) : 0
         },
-        include: { 
+        include: {
           category: true,
           InventoryItem: true
         }
@@ -469,6 +520,7 @@ router.put('/:id', authenticateToken, requirePermission('products:write'), async
       // ZRA Compliance fields
       vatCategoryCode,
       zraClassificationCode,
+      taxType,
       exciseTaxCode,
       hasExpiry,
       shelfLifeDays,
@@ -500,11 +552,17 @@ router.put('/:id', authenticateToken, requirePermission('products:write'), async
       });
     }
 
-    const classificationError = await assertUsableClassificationCode(zraClassificationCode?.trim());
-    if (classificationError && isRegistrationStrict()) {
+    const zraCodeErrors = await assertProductZraCodes({
+      zraClassificationCode: zraClassificationCode?.trim(),
+      taxType: taxType || null,
+      zraPackageUnit: req.body.zraPackageUnit?.trim() || null,
+      zraQuantityUnit: req.body.zraQuantityUnit?.trim() || null,
+    });
+    if (zraCodeErrors.length > 0 && isRegistrationStrict()) {
       return res.status(400).json({
-        error: classificationError,
-        code: 'INVALID_CLASSIFICATION_CODE',
+        error: zraCodeErrors.join('; '),
+        details: zraCodeErrors,
+        code: 'INVALID_ZRA_CODE',
       });
     }
 
@@ -549,8 +607,12 @@ router.put('/:id', authenticateToken, requirePermission('products:write'), async
         vatCategoryCode: vatCategoryCode || 'STANDARD',
         zraClassificationCode: zraClassificationCode?.trim() || null,
         zraItemClassification: zraClassificationCode?.trim() || null,
-        zraPackageUnit: req.body.zraPackageUnit || existingProduct.zraPackageUnit || 'EA',
-        zraQuantityUnit: req.body.zraQuantityUnit || existingProduct.zraQuantityUnit || 'EA',
+        // No hardcoded 'EA' fallback — see the create route's comment above
+        // this same field for why. Falls back to the existing stored value
+        // (edit-mode preservation) and then null, never a guessed literal.
+        zraPackageUnit: req.body.zraPackageUnit?.trim() || existingProduct.zraPackageUnit || null,
+        zraQuantityUnit: req.body.zraQuantityUnit?.trim() || existingProduct.zraQuantityUnit || null,
+        taxType: taxType || existingProduct.taxType || null,
         exciseTaxCode: exciseTaxCode?.trim() || null,
         zraRegistrationStatus: 'PENDING',
         zraRegistrationError: null,
