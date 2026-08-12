@@ -66,73 +66,27 @@ async function submitInvoiceData(invoiceData) {
     const body = result.data?.data ? { ...result.data, ...result.data.data } : result.data;
     const zraResponse = mapSaleResponse(body);
 
-    let stockSyncErrors = [];
-    if (!isCredit) {
-      stockSyncErrors = await postSaleStock(payload, body);
-    }
-
+    // Stock reporting for this sale is NOT done here. It used to be (see
+    // git history for postSaleStock, removed 2026-08-12) — but that ran in
+    // parallel with services/stockSyncService.js's syncAfterSale(), which
+    // fires separately from lib/saleFiscal.js's completeSaleAfterFiscalSuccess()
+    // for the exact same sale. Confirmed via full call-graph trace: every
+    // completed sale was submitting stock movement data to VSDC *twice*,
+    // through two different malformed payloads with contradictory sarTyCd
+    // direction codes (one tagged a sale as "incoming purchase"). Removed
+    // the gateway-level duplicate; stockSyncService (wired to sales,
+    // refunds, adjustments, inventory-core, and expiry) is now the single
+    // source of truth for stock reporting, with its own audit logging.
     return {
       success: true,
       message: 'Sales submitted',
       zraResponse,
       payload,
       raw: result.data,
-      stockSyncErrors,
     };
   } catch (err) {
     return { success: false, error: err.message, code: 'TRANSPORT_ERROR', payload };
   }
-}
-
-async function postSaleStock(salesPayload, responseData) {
-  const errors = [];
-  try {
-    const stockPath = endpointAdapter.path('stockItems');
-    const masterPath = endpointAdapter.path('stockMaster');
-    const c = ctx();
-    const sarNo = responseData.rcptNo || salesPayload.cisInvcNo || Date.now();
-
-    for (const item of salesPayload.itemList || []) {
-      const stockBody = {
-        tpin: c.tpin,
-        bhfId: c.bhfId,
-        itemCd: item.itemCd,
-        sarTyCd: '11',
-        sarNo: String(sarNo),
-        qty: -Math.abs(Number(item.qty || 0)),
-        totItemCnt: 1,
-        regrId: 'SYSTEM',
-        regrNm: 'SYSTEM',
-        modrId: 'SYSTEM',
-        modrNm: 'SYSTEM',
-      };
-      try {
-        await transport.authenticatedPost(stockPath, stockBody);
-      } catch (e) {
-        console.error(`[vsdc-gateway] stock item post failed for ${item.itemCd}:`, e.message);
-        errors.push({ itemCd: item.itemCd, error: e.message });
-      }
-    }
-
-    const masterBody = {
-      tpin: c.tpin,
-      bhfId: c.bhfId,
-      itemList: (salesPayload.itemList || []).map((item) => ({
-        itemCd: item.itemCd,
-        qty: -Math.abs(Number(item.qty || 0)),
-      })),
-    };
-    try {
-      await transport.authenticatedPost(masterPath, masterBody);
-    } catch (e) {
-      console.error('[vsdc-gateway] stock master post failed:', e.message);
-      errors.push({ itemCd: 'MASTER', error: e.message });
-    }
-  } catch (e) {
-    console.warn('[vsdc-gateway] post-sale stock skipped:', e.message);
-    errors.push({ itemCd: null, error: e.message });
-  }
-  return errors;
 }
 
 async function lookupInvoice(invcNo) {

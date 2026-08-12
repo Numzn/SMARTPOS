@@ -46,4 +46,15 @@ describe('endpointAdapter', () => {
       );
     }
   });
+
+  it('REGRESSION: MOCK.stockMaster is distinct from MOCK.stockItems — found 2026-08-12 by live verification, not by any unit test', () => {
+    // Before this fix, MOCK.stockMaster aliased MOCK.stockItems's own path
+    // ('/api/stock/save' for both), so in mock mode submitStockMaster's
+    // request silently landed on the stockItems handler instead of its own.
+    // Every existing unit test mocked vsdcService.makeAuthenticatedRequest
+    // directly — below this resolution layer — so none of them could have
+    // caught a same-URL collision here; only a real request through the
+    // actual mock server did.
+    expect(endpointAdapter.MOCK.stockMaster).not.toBe(endpointAdapter.MOCK.stockItems);
+  });
 });

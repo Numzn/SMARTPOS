@@ -708,8 +708,24 @@ class VSDCService {
     )
   }
 
+  // yyyyMMdd (date only, no time) — the format saveStockItems' ocrnDt uses
+  // per the spec's own sample ("ocrnDt": "20240509"), distinct from the
+  // yyyyMMddHHmmss format most other endpoints use.
+  formatVsdcDate(date = new Date()) {
+    return this.formatVsdcDateTime(date).slice(0, 8)
+  }
+
   /**
-   * Submit stock IO to VSDC (Section 6.2).
+   * Submit stock IO to VSDC — POST /stock/saveStockItems (Section 6.14).
+   * Payload shape confirmed directly against the spec's own request sample
+   * (vsdc-extracted.txt) — corrected 2026-08-12: the previous version sent
+   * itemCd/qty as flat top-level fields with no itemList wrapper and was
+   * missing several required top-level fields (orgSarNo, regTyCd,
+   * totTaxblAmt/totTaxAmt/totAmt), which a real ZRA sandbox would reject
+   * outright. stockPayload's pkgUnitCd/qtyUnitCd/vatCatCd/prc/splyAmt/
+   * taxblAmt/taxAmt/totAmt are expected pre-resolved by the caller (see
+   * services/stockSyncService.js toVsdcPayload) — this method only shapes
+   * and sends the wire payload, it doesn't resolve business defaults.
    */
   async submitStockIo(stockPayload) {
     const ready = await this.ensureDeviceInitialized()
@@ -717,19 +733,51 @@ class VSDCService {
       throw new Error(ready.error || 'VSDC not initialized')
     }
 
+    const qty = stockPayload.qty ?? stockPayload.quantity ?? 0
+    const prc = stockPayload.prc ?? stockPayload.unitCost ?? 0
+    const splyAmt = stockPayload.splyAmt ?? Number((qty * prc).toFixed(2))
+    const taxblAmt = stockPayload.taxblAmt ?? splyAmt
+    const taxAmt = stockPayload.taxAmt ?? 0
+    const totAmt = stockPayload.totAmt ?? splyAmt
+    const sarTyCd = stockPayload.sarTyCd || stockPayload.vsdcCode || '11'
+
     const vsdcBody = {
       tpin: this.tpin,
       bhfId: this.bhfId,
-      itemCd: stockPayload.itemCd,
-      sarTyCd: stockPayload.sarTyCd || stockPayload.vsdcCode || '02',
       sarNo: stockPayload.sarNo || stockPayload.referenceId || stockPayload.movementId,
-      qty: stockPayload.qty ?? stockPayload.quantity,
-      ocrnDt: stockPayload.ocrnDt || this.formatVsdcDateTime(stockPayload.occurredAt || new Date()),
+      orgSarNo: stockPayload.orgSarNo ?? 0,
+      regTyCd: stockPayload.regTyCd || 'M', // Manual — CIS-originated, not retrieved via getPurchase (§6.11)
+      custTpin: stockPayload.custTpin ?? null,
+      custNm: stockPayload.custNm ?? null,
+      custBhfId: stockPayload.custBhfId ?? null,
+      sarTyCd,
+      ocrnDt: stockPayload.ocrnDt || this.formatVsdcDate(stockPayload.occurredAt || new Date()),
       totItemCnt: 1,
+      totTaxblAmt: taxblAmt,
+      totTaxAmt: taxAmt,
+      totAmt,
+      remark: stockPayload.remark ?? null,
       regrId: 'SYSTEM',
       regrNm: 'SYSTEM',
       modrId: 'SYSTEM',
       modrNm: 'SYSTEM',
+      itemList: [
+        {
+          itemSeq: 1,
+          itemCd: stockPayload.itemCd,
+          itemClsCd: stockPayload.itemClsCd ?? null,
+          itemNm: stockPayload.itemNm ?? null,
+          pkgUnitCd: stockPayload.pkgUnitCd,
+          qty,
+          qtyUnitCd: stockPayload.qtyUnitCd,
+          prc,
+          splyAmt,
+          taxblAmt,
+          vatCatCd: stockPayload.vatCatCd,
+          taxAmt,
+          totAmt,
+        },
+      ],
     }
 
     const response = await this.makeAuthenticatedRequest(
@@ -740,6 +788,43 @@ class VSDCService {
 
     if (!response.success || response.data?.resultCd !== '000') {
       throw new Error(response.data?.resultMsg || 'VSDC stock save failed')
+    }
+
+    return response.data
+  }
+
+  /**
+   * Submit resulting stock quantities to VSDC — POST
+   * /stockMaster/saveStockMaster (Section 6.14). Spec dependency: this
+   * should follow every saveStockItems call, carrying the *remaining*
+   * quantity (rsdQty) per item, not a delta. Field name confirmed against
+   * the spec's own request sample: stockItemList, not itemList (a
+   * previous, now-removed caller sent the wrong field name here).
+   */
+  async submitStockMaster(items) {
+    const ready = await this.ensureDeviceInitialized()
+    if (!ready.success) {
+      throw new Error(ready.error || 'VSDC not initialized')
+    }
+
+    const vsdcBody = {
+      tpin: this.tpin,
+      bhfId: this.bhfId,
+      regrId: 'SYSTEM',
+      regrNm: 'SYSTEM',
+      modrId: 'SYSTEM',
+      modrNm: 'SYSTEM',
+      stockItemList: (items || []).map((item) => ({ itemCd: item.itemCd, rsdQty: item.rsdQty })),
+    }
+
+    const response = await this.makeAuthenticatedRequest(
+      'POST',
+      endpointAdapter.path('stockMaster'),
+      vsdcBody
+    )
+
+    if (!response.success || response.data?.resultCd !== '000') {
+      throw new Error(response.data?.resultMsg || 'VSDC stock master save failed')
     }
 
     return response.data

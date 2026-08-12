@@ -83,17 +83,12 @@ class ZRAInvoiceService {
 
       await this.updateLocalInvoice(invoiceData, invoiceResponse)
 
-      if (gatewayResult.stockSyncErrors?.length) {
-        await auditService.logEvent(auditService.eventTypes.STOCK_SYNC, {
-          entityType: 'INVOICE',
-          entityId: invoiceData.invoiceNumber,
-          action: 'ZRA_STOCK_SYNC',
-          success: false,
-          errorMessage: gatewayResult.stockSyncErrors.map((e) => `${e.itemCd}: ${e.error}`).join('; '),
-          description: `Post-sale VSDC stock sync failed for invoice ${invoiceData.invoiceNumber}`,
-          metadata: { stockSyncErrors: gatewayResult.stockSyncErrors },
-        }).catch(() => null)
-      }
+      // Stock sync for this sale happens separately, after the sale is
+      // marked COMPLETED — see services/stockSyncService.js and
+      // lib/saleFiscal.js's completeSaleAfterFiscalSuccess(). It used to
+      // also be attempted here (gatewayResult.stockSyncErrors, removed
+      // 2026-08-12), duplicating and contradicting that path — see
+      // lib/vsdc-gateway/index.js's submitInvoiceData for the full story.
 
       await auditService.logEvent(auditService.eventTypes.INVOICE_SUBMIT, {
         entityType: 'INVOICE',

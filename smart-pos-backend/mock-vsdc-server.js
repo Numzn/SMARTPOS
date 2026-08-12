@@ -198,23 +198,34 @@ app.post('/api/items/sync', (req, res) => {
   res.json(ok({ itemList: [] }));
 });
 
+// Real /stock/saveStockItems response is just {resultCd,resultMsg,resultDt,
+// data:null} per the spec's own sample — corrected 2026-08-12, this used to
+// echo back itemCd/sarNo fields that don't exist in the real response,
+// which is exactly the kind of self-consistent-but-wrong mock that let the
+// itemList-wrapper bug ship unnoticed (see services/vsdcService.js
+// submitStockIo).
 const handleStockSave = (req, res) => {
-  console.log('📊 Mock VSDC stock save:', req.body.itemCd, req.body.qty);
-  res.json(
-    ok({
-      itemCd: req.body.itemCd,
-      sarNo: req.body.sarNo || `MOCK-SAR-${Date.now()}`,
-    })
-  );
+  const items = req.body.itemList || [];
+  console.log('📊 Mock VSDC stock save:', req.body.sarTyCd, items.map((i) => i.itemCd).join(','));
+  res.json(ok({ data: null }));
 };
 
 app.post('/api/stock/save', handleStockSave);
 app.post('/stock/saveStockItems', handleStockSave);
 
-app.post('/stockMaster/saveStockMaster', (req, res) => {
-  console.log('📊 Mock VSDC stock master save:', (req.body.itemList || []).length, 'items');
-  res.json(ok({ itemList: req.body.itemList || [] }));
-});
+// Real field name is stockItemList, not itemList (§6.14 sample request) —
+// corrected 2026-08-12, this previously expected the same wrong field name
+// the old caller sent, masking the mismatch.
+const handleStockMasterSave = (req, res) => {
+  const items = req.body.stockItemList || [];
+  console.log('📊 Mock VSDC stock master save:', items.length, 'items');
+  res.json(ok({ data: null }));
+};
+
+app.post('/stockMaster/saveStockMaster', handleStockMasterSave);
+// Mock-mode path (endpointAdapter.js MOCK.stockMaster) — was aliased to
+// stockItems' own path until 2026-08-12, see that file's comment.
+app.post('/api/stock/master/save', handleStockMasterSave);
 
 // Section 5.5/5.6 spec-verified endpoints (distinct from the legacy
 // /api/branch/save + /api/branch/get below, which target a fabricated

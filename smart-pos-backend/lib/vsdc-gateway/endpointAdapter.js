@@ -36,8 +36,15 @@ const MOCK = {
   itemComposition: '/api/items/composition/save',
   salesSave: '/api/invoice/submit',
   salesSelect: '/api/sales/select',
+  // stockMaster used to alias stockItems' own path — pre-existing bug
+  // (predates this session), caught 2026-08-12 by live verification: in
+  // mock mode, submitStockMaster's request was silently landing on the
+  // stockItems handler instead. No test caught it because every existing
+  // unit test mocks vsdcService.makeAuthenticatedRequest directly, below
+  // this resolution layer — only a real call through the actual mock
+  // server surfaced it.
   stockItems: '/api/stock/save',
-  stockMaster: '/api/stock/save',
+  stockMaster: '/api/stock/master/save',
   purchaseGet: '/api/purchase/get',
   branchesSelect: '/api/branches/select',
   branchUserSave: '/api/branches/user/save',
