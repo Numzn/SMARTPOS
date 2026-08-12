@@ -3,6 +3,7 @@ import React from 'react';
 import ClassificationPicker from './products/ClassificationPicker';
 import ZraCodeSelect from './products/ZraCodeSelect';
 import { fetchTaxTypes, fetchPackageUnits, fetchQuantityUnits } from '../api/zraCodesApi';
+import { getRegistrationStatusBadge } from '../utils/productUtils';
 
 const ProductModal = ({ 
   showModal, 
@@ -335,6 +336,26 @@ const ProductModal = ({
                 <p className="text-sm text-gray-600 mt-1">
                   To modify inventory levels, use the <strong>Inventory Management</strong> page.
                 </p>
+              </div>
+            </div>
+          )}
+
+          {/* ZRA Registration Status - Only show for Edit mode */}
+          {isEdit && selectedProduct && (
+            <div className="md:col-span-2">
+              <h4 className="font-medium text-gray-900 mb-2 border-b pb-2">🏛️ ZRA Registration Status</h4>
+              <div className="bg-gray-50 p-3 rounded-md">
+                {(() => {
+                  const reg = getRegistrationStatusBadge(selectedProduct.zraRegistrationStatus);
+                  return (
+                    <span className={`inline-flex px-2 py-1 text-xs rounded-full ${reg.className}`}>
+                      {reg.label}
+                    </span>
+                  );
+                })()}
+                {selectedProduct.zraRegistrationStatus === 'FAILED' && selectedProduct.zraRegistrationError && (
+                  <p className="text-xs text-red-600 mt-2">{selectedProduct.zraRegistrationError}</p>
+                )}
               </div>
             </div>
           )}

@@ -20,6 +20,7 @@ import {
   Truck,
   ShoppingCart,
   Wallet,
+  Satellite,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -38,6 +39,7 @@ const NAV_ITEMS = [
   { name: 'Users', href: '/users', icon: Users, show: (p) => p.viewUsers },
   { name: 'Settings', href: '/settings', icon: Settings, show: (p) => p.viewSettings || p.manageSettings },
   { name: 'Printers', href: '/printers', icon: Printer, show: (p) => p.viewSettings || p.manageSettings },
+  { name: 'ZRA Sync', href: '/zra-sync', icon: Satellite, show: (p) => p.viewZRAStatus },
 ];
 
 const MainLayout = () => {

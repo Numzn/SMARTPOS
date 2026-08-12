@@ -111,6 +111,14 @@ export const getRegistrationStatusBadge = (status) => {
   }
 };
 
+/**
+ * Create/update product responses are shaped asymmetrically: create returns
+ * {product, inventory, registration, message}, update returns a flat spread
+ * {...productWithReg, registration, message} with no `product` wrapper
+ * (see routes/products.js). This normalizes both to the saved product.
+ */
+export const getSavedProductFromResult = (result) => result?.product || result;
+
 export const isProductLowStock = (product) => {
   const stock = product?.stock ?? 0;
   if (stock <= 0) return false;

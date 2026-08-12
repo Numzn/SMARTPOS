@@ -25,6 +25,7 @@ const CashRegisterPage = lazy(() => import('./pages/CashRegisterPage'));
 const CustomersPage = lazy(() => import('./pages/CustomersPage'));
 const SuppliersPage = lazy(() => import('./pages/SuppliersPage'));
 const PurchaseOrdersPage = lazy(() => import('./pages/PurchaseOrdersPage'));
+const ZraSyncPage = lazy(() => import('./pages/ZraSyncPage'));
 
 const RouteFallback = () => (
   <div className="p-10 text-center text-gray-500" role="status" aria-live="polite">
@@ -66,6 +67,7 @@ function App() {
               <Route path="users" element={<UsersPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="printers" element={<PrintersPage />} />
+              <Route path="zra-sync" element={<ZraSyncPage />} />
             </Route>
 
             {/* Catch all redirect */}

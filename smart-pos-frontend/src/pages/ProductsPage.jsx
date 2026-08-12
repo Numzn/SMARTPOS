@@ -5,14 +5,15 @@ import ProductModal from '../components/ProductModal';
 import ProductsTable from '../components/ProductsTable';
 import ItemCompositionModal from '../components/products/ItemCompositionModal';
 import { productApi, categoryApi, inventoryApi } from '../services/productService';
-import { 
-  validateProductForm, 
-  filterProducts, 
-  getInitialProductData, 
-  vatCategories, 
-  getInventoryInfo, 
-  getStockStatus, 
-  navigateToInventory 
+import {
+  validateProductForm,
+  filterProducts,
+  getInitialProductData,
+  vatCategories,
+  getInventoryInfo,
+  getStockStatus,
+  navigateToInventory,
+  getSavedProductFromResult
 } from '../utils/productUtils';
 
 const ProductsPage = () => {
@@ -115,7 +116,16 @@ const ProductsPage = () => {
       setShowAddModal(false);
       resetProductData();
       fetchProducts();
-      alert(result.message || 'Product created successfully!');
+      const saved = getSavedProductFromResult(result);
+      if (saved?.zraRegistrationStatus === 'FAILED') {
+        alert(
+          `Product saved, but ZRA registration failed: ${
+            saved.zraRegistrationError || 'Unknown error'
+          }. You can retry from the product list.`
+        );
+      } else {
+        alert(result.message || 'Product created successfully!');
+      }
     } catch (error) {
       console.error('Error creating product:', error);
       alert(`Error: ${error.message}`);
@@ -134,7 +144,16 @@ const ProductsPage = () => {
       setSelectedProduct(null);
       resetProductData();
       fetchProducts();
-      alert(result.message || 'Product updated successfully!');
+      const saved = getSavedProductFromResult(result);
+      if (saved?.zraRegistrationStatus === 'FAILED') {
+        alert(
+          `Product saved, but ZRA registration failed: ${
+            saved.zraRegistrationError || 'Unknown error'
+          }. You can retry from the product list.`
+        );
+      } else {
+        alert(result.message || 'Product updated successfully!');
+      }
     } catch (error) {
       console.error('Error updating product:', error);
       alert(`Error: ${error.message}`);

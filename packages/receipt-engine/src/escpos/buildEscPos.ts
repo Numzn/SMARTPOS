@@ -95,7 +95,9 @@ export function buildEscPosCommands(viewModel: ReceiptViewModel): Uint8Array {
   }
 
   parts.push(center(vm.merchant.tradingName, enc));
+  parts.push(cmd(ESC, 0x45, 1));
   parts.push(center(receiptTitle(vm), enc));
+  parts.push(cmd(ESC, 0x45, 0));
   parts.push(divider());
   parts.push(line(`Store: ${vm.merchant.tradingName}`, enc));
   parts.push(line(`TPIN: ${vm.merchant.tpin}`, enc));
@@ -114,6 +116,7 @@ export function buildEscPosCommands(viewModel: ReceiptViewModel): Uint8Array {
   }
   parts.push(divider('-'));
 
+  parts.push(line('  Qty   Price       Total', enc));
   for (const item of vm.items) {
     parts.push(line(item.name, enc));
     parts.push(

@@ -199,6 +199,42 @@ router.post('/codes/sync', authenticateToken, requirePermission('zra:sync'), asy
 });
 
 /**
+ * GET /api/vsdc/codes/status — last-synced summary for ZRA codes (item 2*).
+ * Codes sync is upsert-all-on-demand (lib/vsdc-gateway/codesSync.js), not
+ * incremental — there is no cursor row to read, so this aggregates directly
+ * off ZraCode/ZraClassificationCode.syncedAt rather than inventing cursor
+ * infrastructure that doesn't match the sync semantics.
+ */
+router.get('/codes/status', authenticateToken, requirePermission('zra:read'), async (req, res) => {
+  try {
+    const [standardAgg, classAgg, byClass] = await Promise.all([
+      prisma.zraCode.aggregate({ _max: { syncedAt: true }, _count: { _all: true } }),
+      prisma.zraClassificationCode.aggregate({ _max: { syncedAt: true }, _count: { _all: true } }),
+      prisma.zraCode.groupBy({ by: ['codeClass'], _count: { _all: true }, _max: { syncedAt: true } }),
+    ]);
+    res.json({
+      standard: {
+        count: standardAgg._count._all,
+        lastSyncedAt: standardAgg._max.syncedAt,
+        byClass: byClass.map((g) => ({
+          codeClass: g.codeClass,
+          count: g._count._all,
+          lastSyncedAt: g._max.syncedAt,
+        })),
+      },
+      classification: {
+        count: classAgg._count._all,
+        lastSyncedAt: classAgg._max.syncedAt,
+      },
+      everSynced: Boolean(standardAgg._max.syncedAt || classAgg._max.syncedAt),
+    });
+  } catch (error) {
+    console.error('VSDC codes status error:', error.message);
+    res.status(500).json({ error: 'Failed to get codes sync status' });
+  }
+});
+
+/**
  * POST /api/vsdc/branches/sync — pull ZRA's registered branch list
  * (VSDC POST /branches/selectBranches) and store it as a reference
  * snapshot on matching local Branch rows by bhfId. Does not overwrite

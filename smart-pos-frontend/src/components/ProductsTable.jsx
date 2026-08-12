@@ -81,11 +81,25 @@ const ProductsTable = ({
                       {(() => {
                         const reg = getRegistrationStatusBadge(product.zraRegistrationStatus);
                         return (
-                          <div className={`inline-flex px-2 py-1 rounded-full ${reg.className}`}>
-                            {reg.label}
+                          <div className="flex items-center gap-2">
+                            <span className={`inline-flex px-2 py-1 rounded-full ${reg.className}`}>
+                              {reg.label}
+                            </span>
+                            {product.zraRegistrationStatus === 'FAILED' && (
+                              <button
+                                type="button"
+                                onClick={() => onEdit(product)}
+                                className="text-blue-600 hover:text-blue-800 underline"
+                              >
+                                Retry
+                              </button>
+                            )}
                           </div>
                         );
                       })()}
+                      {product.zraRegistrationError && (
+                        <div className="text-red-600">{product.zraRegistrationError}</div>
+                      )}
                       <div className="text-gray-500">
                         VAT: {product.vatCategoryCode || 'STANDARD'}
                       </div>

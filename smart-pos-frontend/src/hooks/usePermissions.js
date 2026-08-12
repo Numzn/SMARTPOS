@@ -67,7 +67,8 @@ export const usePermissions = () => {
     
     // ZRA operations
     submitToZRA: hasPermission('zra:submit'),
-    viewZRAStatus: hasPermission('zra:read')
+    viewZRAStatus: hasPermission('zra:read'),
+    syncZRA: hasPermission('zra:sync')
   };
 
   return {
