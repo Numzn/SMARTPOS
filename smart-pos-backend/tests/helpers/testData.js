@@ -264,7 +264,26 @@ async function cleanupTestData() {
   await prisma.stockAdjustment.deleteMany({
     where: { product: { sku: { startsWith: 'TEST-SKU-' } } },
   });
+  // ProductComposition.parentProductId/componentProductId are both Restrict —
+  // same reasoning as stockAdjustment above, on both sides of the relation.
+  // Matched by category, not sku prefix: a product created with sku:null
+  // (e.g. a "no SKU" validation fixture) would never match a sku-prefix
+  // filter, leaving it — and its category — orphaned and failing the next
+  // category deleteMany with an FK violation on an unrelated test run.
+  await prisma.productComposition.deleteMany({
+    where: {
+      OR: [
+        { parentProduct: { category: { name: { startsWith: 'Test Category ' } } } },
+        { componentProduct: { category: { name: { startsWith: 'Test Category ' } } } },
+      ],
+    },
+  });
   await prisma.product.deleteMany({ where: { sku: { startsWith: 'TEST-SKU-' } } });
+  // Catches products left behind by the sku-prefix filter above (sku:null
+  // fixtures, or a custom sku that doesn't follow the TEST-SKU- convention)
+  // as long as they're attached to a test-created category — which nearly
+  // all test products are.
+  await prisma.product.deleteMany({ where: { category: { name: { startsWith: 'Test Category ' } } } });
   await prisma.category.deleteMany({ where: { name: { startsWith: 'Test Category ' } } });
   // Shift deletion cascades to shift_cash_movements; must happen before the
   // user delete below (Shift.userId is onDelete: Restrict).

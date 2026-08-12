@@ -2,7 +2,9 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 
 const vsdcService = require('../../services/vsdcService.js');
 const itemManagementService = require('../../services/itemManagement.js');
+const itemCompositionService = require('../../services/itemCompositionService.js');
 const endpointAdapter = require('../../lib/vsdc-gateway/endpointAdapter.js');
+const testData = require('../helpers/testData.js');
 
 const originalMode = process.env.VSDC_MODE;
 
@@ -44,6 +46,25 @@ describe('official VSDC_MODE routes call sites through endpointAdapter, not a ha
     expect(requestSpy).toHaveBeenCalled();
     expect(requestSpy.mock.calls[0][1]).toBe(endpointAdapter.path('itemSave'));
     expect(requestSpy.mock.calls[0][1]).toBe('/items/saveItem');
+  });
+
+  it('REGRESSION: itemCompositionService.addComponent posts to endpointAdapter.path("itemComposition")', async () => {
+    process.env.VSDC_MODE = 'official';
+    vsdcService.isInitialized = true;
+    const requestSpy = vi
+      .spyOn(vsdcService, 'makeAuthenticatedRequest')
+      .mockResolvedValue({ success: true, data: { resultCd: '000' } });
+    const category = await testData.createTestCategory();
+    const parent = await testData.createTestProduct({ categoryId: category.id });
+    const component = await testData.createTestProduct({ categoryId: category.id });
+
+    await itemCompositionService.addComponent(parent.id, component.id, 1);
+
+    expect(requestSpy).toHaveBeenCalled();
+    expect(requestSpy.mock.calls[0][1]).toBe(endpointAdapter.path('itemComposition'));
+    expect(requestSpy.mock.calls[0][1]).toBe('/items/saveItemComposition');
+
+    await testData.cleanupTestData();
   });
 
   it('REGRESSION: vsdcService.submitStockIo() posts to endpointAdapter.path("stockItems")', async () => {

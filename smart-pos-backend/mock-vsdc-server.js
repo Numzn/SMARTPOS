@@ -183,6 +183,16 @@ const handleItemSave = (req, res) => {
 app.post('/api/items/save', handleItemSave);
 app.post('/items/saveItem', handleItemSave);
 
+// Save Item Composition (spec §6.5, OPTIONAL) — response has data:null per
+// the spec's own sample, unlike item save which echoes itemCd/itemNm.
+const handleItemComposition = (req, res) => {
+  console.log('🧩 Mock VSDC item composition save:', req.body.itemCd, '<-', req.body.cpstItemCd, 'x', req.body.cpstQty);
+  res.json(ok({ data: null }));
+};
+
+app.post('/items/saveItemComposition', handleItemComposition);
+app.post('/api/items/composition/save', handleItemComposition);
+
 app.post('/api/items/sync', (req, res) => {
   console.log('🔄 Mock VSDC items sync');
   res.json(ok({ itemList: [] }));

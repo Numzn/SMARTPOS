@@ -8,6 +8,9 @@ const OFFICIAL = {
   itemClass: '/itemClass/selectItemsClass',
   itemSave: '/items/saveItem',
   itemUpdate: '/items/updateItem',
+  // Section 6.5 — OPTIONAL per spec, unlike itemSave. Links a finished
+  // product to one raw-material/component item + quantity per call.
+  itemComposition: '/items/saveItemComposition',
   salesSave: '/trnsSales/saveSales',
   salesSelect: '/trnsSales/selectSales',
   stockItems: '/stock/saveStockItems',
@@ -30,6 +33,7 @@ const MOCK = {
   itemClass: '/api/itemClass/get',
   itemSave: '/api/items/save',
   itemUpdate: '/api/items/save',
+  itemComposition: '/api/items/composition/save',
   salesSave: '/api/invoice/submit',
   salesSelect: '/api/sales/select',
   stockItems: '/api/stock/save',

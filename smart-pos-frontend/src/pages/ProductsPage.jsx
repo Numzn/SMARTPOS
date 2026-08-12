@@ -3,6 +3,7 @@ import ProductImportModal from '../components/products/ProductImportModal';
 import { productImportApi } from '../services/productImportService';
 import ProductModal from '../components/ProductModal';
 import ProductsTable from '../components/ProductsTable';
+import ItemCompositionModal from '../components/products/ItemCompositionModal';
 import { productApi, categoryApi, inventoryApi } from '../services/productService';
 import { 
   validateProductForm, 
@@ -26,6 +27,7 @@ const ProductsPage = () => {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [errors, setErrors] = useState({});
   const [productData, setProductData] = useState(getInitialProductData());
+  const [compositionProduct, setCompositionProduct] = useState(null);
 
   const fetchProducts = async () => {
     try {
@@ -365,7 +367,14 @@ const ProductsPage = () => {
               getStockStatus={getStockStatusForProduct}
               onEdit={openEditModal}
               onDelete={handleDeleteProduct}
+              onComposition={setCompositionProduct}
               navigateToInventory={navigateToInventory}
+            />
+
+            <ItemCompositionModal
+              open={Boolean(compositionProduct)}
+              onClose={() => setCompositionProduct(null)}
+              product={compositionProduct}
             />
 
             {exportError && (

@@ -112,8 +112,34 @@ model Product {
   purchaseOrderItems    PurchaseOrderItem[]
   goodsReceivedNoteItems GoodsReceivedNoteItem[]
   supplierReturnItems   SupplierReturnItem[]
-  
+  compositionsAsParent    ProductComposition[] @relation("CompositionParent")
+  compositionsAsComponent ProductComposition[] @relation("CompositionComponent")
+
   @@map("products")
+}
+
+// VSDC Item Composition (Section 6.5, /items/saveItemComposition, OPTIONAL
+// per spec) — a bill-of-materials line: `quantity` of `componentProduct` used
+// per unit of `parentProduct`. One row per component; a finished product with
+// several ingredients has several rows sharing the same parentProductId.
+model ProductComposition {
+  id                    String   @id @default(cuid())
+  parentProductId       String
+  componentProductId    String
+  quantity              Float
+
+  zraRegistrationStatus ZraRegistrationStatus @default(PENDING)
+  zraRegisteredAt       DateTime?
+  zraRegistrationError  String?
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  parentProduct    Product @relation("CompositionParent", fields: [parentProductId], references: [id])
+  componentProduct Product @relation("CompositionComponent", fields: [componentProductId], references: [id])
+
+  @@unique([parentProductId, componentProductId])
+  @@map("product_compositions")
 }
 
 model Sale {

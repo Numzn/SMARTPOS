@@ -11,6 +11,7 @@ const {
   validateRegistrationFields,
 } = require('../lib/productRegistration');
 const zraCodesService = require('../services/zraCodesService');
+const itemCompositionService = require('../services/itemCompositionService');
 
 // Rejects a classification code that isn't a known, currently-usable
 // ZraClassificationCode row (i.e. it was never synced, or ZRA has since
@@ -737,7 +738,15 @@ router.delete('/:id', authenticateToken, requirePermission('products:delete'), a
       await tx.stockAdjustment.deleteMany({
         where: { productId: id }
       });
-      
+
+      // Delete composition rows on both sides — this product may be a
+      // finished product with its own components, or a component used in
+      // someone else's composition (no VSDC delete call exists for this;
+      // see itemCompositionService.js).
+      await tx.productComposition.deleteMany({
+        where: { OR: [{ parentProductId: id }, { componentProductId: id }] }
+      });
+
       // Finally delete the product
       await tx.product.delete({
         where: { id }
@@ -802,5 +811,58 @@ router.get('/search/:query', async (req, res) => {
     res.status(500).json({ error: 'Failed to search products' });
   }
 });
+
+// Item Composition (VSDC Section 6.5, item 9* — OPTIONAL per spec).
+// Sub-resource of a specific product: "what is product :id made of".
+router.get('/:id/composition', authenticateToken, requirePermission('products:read'), async (req, res) => {
+  try {
+    const components = await itemCompositionService.listComponents(req.params.id);
+    res.json({ success: true, components });
+  } catch (error) {
+    console.error('Error listing item composition:', error);
+    res.status(500).json({ success: false, error: 'Failed to list item composition' });
+  }
+});
+
+router.post('/:id/composition', authenticateToken, requirePermission('products:write'), async (req, res) => {
+  try {
+    const { componentProductId, quantity } = req.body;
+    if (!componentProductId || quantity === undefined || quantity === null) {
+      return res.status(400).json({
+        success: false,
+        error: 'componentProductId and quantity are required',
+        code: 'INVALID_INPUT',
+      });
+    }
+    const component = await itemCompositionService.addComponent(req.params.id, componentProductId, quantity);
+    res.status(201).json({ success: true, component });
+  } catch (error) {
+    console.error('Error adding item composition component:', error);
+    res.status(400).json({
+      success: false,
+      error: error.message,
+      code: 'ITEM_COMPOSITION_SAVE_FAILED',
+      compositionId: error.compositionId || null,
+    });
+  }
+});
+
+router.delete(
+  '/:id/composition/:compositionId',
+  authenticateToken,
+  requirePermission('products:write'),
+  async (req, res) => {
+    try {
+      await itemCompositionService.removeComponent(req.params.compositionId);
+      res.json({ success: true, message: 'Component removed' });
+    } catch (error) {
+      console.error('Error removing item composition component:', error);
+      if (error.code === 'P2025') {
+        return res.status(404).json({ success: false, error: 'Composition row not found' });
+      }
+      res.status(500).json({ success: false, error: 'Failed to remove component' });
+    }
+  }
+);
 
 module.exports = router;

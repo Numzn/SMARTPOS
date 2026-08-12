@@ -6,9 +6,10 @@ const ProductsTable = ({
   categories, 
   getInventoryInfo, 
   getStockStatus, 
-  onEdit, 
-  onDelete, 
-  navigateToInventory 
+  onEdit,
+  onDelete,
+  onComposition,
+  navigateToInventory
 }) => {
   return (
     <div className="bg-white rounded-lg shadow">
@@ -112,6 +113,12 @@ const ProductsTable = ({
                         className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-xs"
                       >
                         ✏️ Edit
+                      </button>
+                      <button
+                        onClick={() => onComposition(product)}
+                        className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded text-xs"
+                      >
+                        🧩 Composition
                       </button>
                       <button
                         onClick={() => onDelete(product.id)}
