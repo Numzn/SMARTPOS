@@ -19,6 +19,13 @@ const OFFICIAL = {
   // stockItems/stockMaster. "GET STOCK ITEMS" §, request POST tpin/bhfId/
   // lastReqDt.
   stockItemsSelect: '/stock/selectStockItems',
+  // Item 10* — confirmed OPTIONAL per spec text (not mandatory), unlike
+  // itemSave. "GET ITEMS" §, request POST tpin/bhfId/lastReqDt, response
+  // data.itemList[] — a CONFIRMED JSON sample exists for this endpoint
+  // (unlike stockItemsSelect's inferred shape). Do not confuse with the
+  // adjacent singular /items/selectItem (lookup by itemCd, no lastReqDt,
+  // a different endpoint, out of scope here).
+  itemsSelect: '/items/selectItems',
   purchaseGet: '/trnsPurchase/selectPurchases',
   // Section 5.5 Branch Information + 5.6 Customer Information — endpoint
   // names/paths verified directly against the spec PDF (pdftotext extraction),
@@ -50,6 +57,7 @@ const MOCK = {
   stockItems: '/api/stock/save',
   stockMaster: '/api/stock/master/save',
   stockItemsSelect: '/api/stock/select',
+  itemsSelect: '/api/items/select',
   purchaseGet: '/api/purchase/get',
   branchesSelect: '/api/branches/select',
   branchUserSave: '/api/branches/user/save',

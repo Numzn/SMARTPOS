@@ -30,7 +30,6 @@ class VSDCService {
       initialize: '/api/initialize',
       initializePdf: '/initializer/selectInitInfo',
       itemSave: '/api/items/save',
-      itemsSync: '/api/items/sync',
       stockSave: '/api/stock/save',
       stockSync: '/api/stock/sync',
       branchSave: '/api/branch/save',

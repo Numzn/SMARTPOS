@@ -47,11 +47,6 @@ class ItemClassificationService {
     };
   }
 
-  /** Pull item master updates from VSDC into local products. */
-  async synchronizeItems(options = {}) {
-    return itemManagementService.syncItemsFromVSDC(options.lastRequestDate || options.lastReqDt || null);
-  }
-
   /** Suggest classification + tax type from product metadata (no VSDC call). */
   async classifyProduct(productData) {
     const classification =

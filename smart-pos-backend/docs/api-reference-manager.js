@@ -108,7 +108,7 @@ class APIReferenceManager {
         },
         "item_management": {
           "page": "Section 6.1",
-          "endpoints": ["/api/items/save", "/api/items/sync"],
+          "endpoints": ["/api/items/save", "/api/vsdc/items/retrieve"],
           "implementation_status": "completed",
           "priority": "HIGH",
           "description": "Item registration and synchronization with ZRA",

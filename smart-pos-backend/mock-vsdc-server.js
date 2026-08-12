@@ -193,11 +193,6 @@ const handleItemComposition = (req, res) => {
 app.post('/items/saveItemComposition', handleItemComposition);
 app.post('/api/items/composition/save', handleItemComposition);
 
-app.post('/api/items/sync', (req, res) => {
-  console.log('🔄 Mock VSDC items sync');
-  res.json(ok({ itemList: [] }));
-});
-
 // Real /stock/saveStockItems response is just {resultCd,resultMsg,resultDt,
 // data:null} per the spec's own sample — corrected 2026-08-12, this used to
 // echo back itemCd/sarNo fields that don't exist in the real response,
@@ -305,6 +300,86 @@ const handleStockItemsSelect = (req, res) => {
 
 app.post('/stock/selectStockItems', handleStockItemsSelect);
 app.post('/api/stock/select', handleStockItemsSelect);
+
+// Item 10* — GET ITEMS (/items/selectItems). Unlike item 28*'s stock
+// retrieval, the spec DOES have a confirmed JSON response sample for this
+// endpoint — this mock's shape (data.itemList[]) matches that sample
+// directly, not an inference. One item matches a real seeded SKU
+// (COKE500) so the itemCd -> local Product match path is exercised; the
+// other doesn't, to exercise the "no local product" skip/report path —
+// same approach as handleStockItemsSelect above.
+const handleItemsSelect = (req, res) => {
+  console.log('📥 Mock VSDC items select, lastReqDt:', req.body.lastReqDt);
+  res.json(
+    ok({
+      data: {
+        itemList: [
+          {
+            tpin: req.body.tpin,
+            itemCd: 'COKE500',
+            itemClsCd: 'BVRG001',
+            itemTyCd: '2',
+            itemNm: 'Coca-Cola 500ml',
+            itemStdNm: 'Coca-Cola 500ml',
+            orgnNatCd: 'ZM',
+            pkgUnitCd: 'EA',
+            qtyUnitCd: 'EA',
+            vatCatCd: 'A',
+            iplCatCd: null,
+            tlCatCd: null,
+            exciseTxCatCd: null,
+            btchNo: null,
+            regBhfId: req.body.bhfId,
+            bcd: '5449000000996',
+            dftPrc: 10,
+            manufacturerTpin: null,
+            manufacturerItemCd: null,
+            rrp: 10,
+            svcChargeYn: 'N',
+            rentalYn: 'N',
+            addInfo: null,
+            sftyQty: 0,
+            isrcAplcbYn: 'N',
+            ZRAModYn: 'N',
+            useYn: 'Y',
+          },
+          {
+            tpin: req.body.tpin,
+            itemCd: 'ZRA-UNKNOWN-SKU-1',
+            itemClsCd: '50101500',
+            itemTyCd: '2',
+            itemNm: 'Unknown Item',
+            itemStdNm: 'Unknown Item',
+            orgnNatCd: 'ZM',
+            pkgUnitCd: 'EA',
+            qtyUnitCd: 'EA',
+            vatCatCd: 'A',
+            iplCatCd: null,
+            tlCatCd: null,
+            exciseTxCatCd: null,
+            btchNo: null,
+            regBhfId: req.body.bhfId,
+            bcd: null,
+            dftPrc: 5,
+            manufacturerTpin: null,
+            manufacturerItemCd: null,
+            rrp: 5,
+            svcChargeYn: 'N',
+            rentalYn: 'N',
+            addInfo: null,
+            sftyQty: 0,
+            isrcAplcbYn: 'N',
+            ZRAModYn: 'N',
+            useYn: 'Y',
+          },
+        ],
+      },
+    })
+  );
+};
+
+app.post('/items/selectItems', handleItemsSelect);
+app.post('/api/items/select', handleItemsSelect);
 
 // Section 5.5/5.6 spec-verified endpoints (distinct from the legacy
 // /api/branch/save + /api/branch/get below, which target a fabricated

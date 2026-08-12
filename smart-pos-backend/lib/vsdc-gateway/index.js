@@ -8,6 +8,7 @@ const { withRetry } = require('./retry');
 const codesSync = require('./codesSync');
 const branchSync = require('./branchSync');
 const stockRetrieveSync = require('./stockRetrieveSync');
+const itemsRetrieveSync = require('./itemsRetrieveSync');
 
 function ctx() {
   return { tpin: vsdcService.tpin, bhfId: vsdcService.bhfId };
@@ -109,5 +110,6 @@ module.exports = {
   saveBranchCustomer: branchSync.saveBranchCustomer,
   selectCustomer: branchSync.selectCustomer,
   retrieveStockItems: stockRetrieveSync.retrieveAndSync,
+  retrieveItems: itemsRetrieveSync.retrieveAndSync,
   buildSaveSalesPayload,
 };

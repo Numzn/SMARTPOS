@@ -120,6 +120,67 @@ router.get('/stock/retrieve/status', authenticateToken, requirePermission('zra:r
 });
 
 /**
+ * POST /api/vsdc/items/retrieve — item 10*, pull item master records ZRA
+ * already has (POST /items/selectItems) and snapshot them onto matching
+ * local Products. See lib/vsdc-gateway/itemsRetrieveSync.js for why this
+ * writes to Product.zraItemSnapshot rather than overwriting operational
+ * fields, and why no dedup step is needed here (idempotent overwrite, not
+ * an event log like item 28*'s stock retrieval).
+ */
+router.post('/items/retrieve', authenticateToken, requirePermission('zra:sync'), async (req, res) => {
+  try {
+    const branchId = req.body?.branchId || DEFAULT_BRANCH;
+    const vsdcGateway = require('../lib/vsdc-gateway');
+    const ready = await vsdcGateway.ensureReady();
+    if (!ready.success) {
+      return res.status(503).json({ error: ready.error || 'VSDC not initialized' });
+    }
+    const result = await vsdcGateway.retrieveItems({ branchId });
+
+    const auditService = require('../services/auditService');
+    auditService.safeLog(auditService.eventTypes.ITEM_SYNC, {
+      ...auditService.contextFromReq(req),
+      entityType: 'PRODUCT',
+      action: 'ZRA_RETRIEVE',
+      success: result.success,
+      errorMessage: result.success ? null : result.error,
+      description: result.success
+        ? `Retrieved item records from ZRA: ${result.updated} updated, ${result.unmatched} unmatched`
+        : `ZRA item retrieval failed: ${result.error}`,
+    });
+
+    if (!result.success) {
+      return res.status(502).json({ message: 'Item retrieval failed', ...result });
+    }
+    res.json({ message: 'Item retrieval completed', ...result });
+  } catch (error) {
+    console.error('VSDC item retrieve error:', error.message);
+    res.status(500).json({ error: error.message || 'Failed to retrieve items from VSDC' });
+  }
+});
+
+/**
+ * GET /api/vsdc/items/retrieve/status — cursor + last-run status, per branch.
+ */
+router.get('/items/retrieve/status', authenticateToken, requirePermission('zra:read'), async (req, res) => {
+  try {
+    const branchId = req.query.branchId || DEFAULT_BRANCH;
+    const cursor = await prisma.itemRetrievalCursor.findUnique({ where: { branchId } });
+    res.json({
+      branchId,
+      lastReqDt: cursor?.lastReqDt || null,
+      lastSyncedAt: cursor?.lastSyncedAt || null,
+      lastSyncError: cursor?.lastSyncError || null,
+      lastImportedCount: cursor?.lastImportedCount ?? 0,
+      everSynced: Boolean(cursor?.lastSyncedAt),
+    });
+  } catch (error) {
+    console.error('VSDC item retrieve status error:', error.message);
+    res.status(500).json({ error: 'Failed to get item retrieval status' });
+  }
+});
+
+/**
  * POST /api/vsdc/codes/sync — sync ZRA codes + classifications via gateway
  */
 router.post('/codes/sync', authenticateToken, requirePermission('zra:sync'), async (req, res) => {

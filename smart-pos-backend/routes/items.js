@@ -40,38 +40,6 @@ router.post('/save', authenticateToken, requirePermission('products:write'), asy
   }
 });
 
-// Sync items from VSDC (requires zra:sync permission) - FIXES COMPLIANCE GAP
-router.post('/sync', authenticateToken, requirePermission('zra:sync'), async (req, res) => {
-  try {
-    const { lastReqDt } = req.body;
-    
-    console.log('🔄 Starting item sync from VSDC...');
-    const result = await itemManagementService.syncItemsFromVSDC(lastReqDt);
-    
-    if (result.success) {
-      res.json({
-        success: true,
-        itemsCount: result.itemsCount,
-        syncResults: result.syncResults,
-        message: result.message
-      });
-    } else {
-      res.status(400).json({
-        success: false,
-        error: result.error,
-        code: result.code
-      });
-    }
-  } catch (error) {
-    console.error('Error syncing items from VSDC:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to sync items from VSDC',
-      code: 'ITEM_SYNC_ERROR'
-    });
-  }
-});
-
 // Get ZRA item classification codes — reads the synced ZraClassificationCode
 // table (populated by codesSync.js -> /itemClass/selectItemsClass), syncing
 // on demand if empty. Previously called itemManagementService's version,

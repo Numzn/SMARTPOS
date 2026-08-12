@@ -96,7 +96,19 @@ model Product {
   zraRegisteredAt       DateTime?
   zraRegistrationError  String?
   vsdcItemResponse      Json?
-  
+
+  // Item 10* (POST /items/selectItems) retrieval — a read-only reconciliation
+  // snapshot of what ZRA has on file for this itemCd, mirroring
+  // Branch.zraBranchSnapshot: kept separate from the operational fields
+  // above (name, price, barcode, etc.) rather than overwriting them, since
+  // ZRA's copy is a reference to compare against, not an authority that
+  // should silently mutate a live catalog record. Unlike item 28*'s stock
+  // retrieval, this endpoint returns one row per itemCd (an item master
+  // list, not an event log), so no separate idempotency key/dedup table is
+  // needed — this column is simply overwritten on every sync.
+  zraItemSnapshot       Json?
+  zraSnapshotSyncedAt   DateTime?
+
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
   
@@ -574,6 +586,23 @@ model StockRetrievalCursor {
   updatedAt         DateTime @updatedAt
 
   @@map("stock_retrieval_cursors")
+}
+
+// Item 10* (POST /items/selectItems) sync cursor — one row per branch,
+// structurally identical to StockRetrievalCursor and kept as its own model
+// for the same reason: this is bookkeeping for the retrieval PROCESS (what
+// lastReqDt to send next, did the last run succeed), not item data itself,
+// and needs to persist across restarts.
+model ItemRetrievalCursor {
+  id                String    @id @default(cuid())
+  branchId          String    @unique
+  lastReqDt         String    // yyyyMMddHHmmss sent on the most recent successful call
+  lastSyncedAt      DateTime?
+  lastSyncError     String?
+  lastImportedCount Int       @default(0)
+  updatedAt         DateTime  @updatedAt
+
+  @@map("item_retrieval_cursors")
 }
 
 // Business branch (VSDC Section 7.1) — code matches inventory.branchId / sale.branchId

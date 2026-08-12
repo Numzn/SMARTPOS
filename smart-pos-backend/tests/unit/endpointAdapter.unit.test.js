@@ -36,6 +36,7 @@ describe('endpointAdapter', () => {
     expect(endpointAdapter.path('salesSelect')).toBe('/trnsSales/selectSales');
     expect(endpointAdapter.path('stockItems')).toBe('/stock/saveStockItems');
     expect(endpointAdapter.path('stockMaster')).toBe('/stockMaster/saveStockMaster');
+    expect(endpointAdapter.path('itemsSelect')).toBe('/items/selectItems');
     expect(endpointAdapter.path('purchaseGet')).toBe('/trnsPurchase/selectPurchases');
   });
 
