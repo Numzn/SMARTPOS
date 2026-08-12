@@ -2,7 +2,9 @@ const express = require('express');
 const router = express.Router();
 const vsdcService = require('../services/vsdcService');
 const stockSyncService = require('../services/stockSyncService');
+const prisma = require('../lib/prisma');
 const { authenticateToken, requirePermission } = require('../middleware/auth');
+const { DEFAULT_BRANCH } = require('../lib/inventoryStock');
 
 /**
  * GET /api/vsdc/status — device init status (no secrets exposed)
@@ -53,6 +55,67 @@ router.post('/stock/sync', authenticateToken, requirePermission('zra:sync'), asy
   } catch (error) {
     console.error('VSDC stock sync error:', error.message);
     res.status(500).json({ error: 'Failed to sync stock to VSDC' });
+  }
+});
+
+/**
+ * POST /api/vsdc/stock/retrieve — item 28*, pull stock records ZRA already
+ * has (POST /stock/selectStockItems) and reconcile them locally. Distinct
+ * from /stock/sync above, which pushes OUR pending movements TO VSDC —
+ * this pulls the other direction. See lib/vsdc-gateway/stockRetrieveSync.js
+ * for why retrieved records are reconciliation-only, never applied as
+ * inventory changes.
+ */
+router.post('/stock/retrieve', authenticateToken, requirePermission('zra:sync'), async (req, res) => {
+  try {
+    const branchId = req.body?.branchId || DEFAULT_BRANCH;
+    const vsdcGateway = require('../lib/vsdc-gateway');
+    const ready = await vsdcGateway.ensureReady();
+    if (!ready.success) {
+      return res.status(503).json({ error: ready.error || 'VSDC not initialized' });
+    }
+    const result = await vsdcGateway.retrieveStockItems({ branchId });
+
+    const auditService = require('../services/auditService');
+    auditService.safeLog(auditService.eventTypes.STOCK_SYNC, {
+      ...auditService.contextFromReq(req),
+      entityType: 'STOCK_MOVEMENT',
+      action: 'ZRA_RETRIEVE',
+      success: result.success,
+      errorMessage: result.success ? null : result.error,
+      description: result.success
+        ? `Retrieved stock records from ZRA: ${result.imported} imported, ${result.skipped} already known, ${result.unmatched} unmatched`
+        : `ZRA stock retrieval failed: ${result.error}`,
+    });
+
+    if (!result.success) {
+      return res.status(502).json({ message: 'Stock retrieval failed', ...result });
+    }
+    res.json({ message: 'Stock retrieval completed', ...result });
+  } catch (error) {
+    console.error('VSDC stock retrieve error:', error.message);
+    res.status(500).json({ error: error.message || 'Failed to retrieve stock from VSDC' });
+  }
+});
+
+/**
+ * GET /api/vsdc/stock/retrieve/status — cursor + last-run status, per branch.
+ */
+router.get('/stock/retrieve/status', authenticateToken, requirePermission('zra:read'), async (req, res) => {
+  try {
+    const branchId = req.query.branchId || DEFAULT_BRANCH;
+    const cursor = await prisma.stockRetrievalCursor.findUnique({ where: { branchId } });
+    res.json({
+      branchId,
+      lastReqDt: cursor?.lastReqDt || null,
+      lastSyncedAt: cursor?.lastSyncedAt || null,
+      lastSyncError: cursor?.lastSyncError || null,
+      lastImportedCount: cursor?.lastImportedCount ?? 0,
+      everSynced: Boolean(cursor?.lastSyncedAt),
+    });
+  } catch (error) {
+    console.error('VSDC stock retrieve status error:', error.message);
+    res.status(500).json({ error: 'Failed to get stock retrieval status' });
   }
 });
 

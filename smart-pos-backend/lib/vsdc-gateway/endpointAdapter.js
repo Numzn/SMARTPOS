@@ -15,6 +15,10 @@ const OFFICIAL = {
   salesSelect: '/trnsSales/selectSales',
   stockItems: '/stock/saveStockItems',
   stockMaster: '/stockMaster/saveStockMaster',
+  // Item 28* — confirmed OPTIONAL per spec text (not mandatory), unlike
+  // stockItems/stockMaster. "GET STOCK ITEMS" §, request POST tpin/bhfId/
+  // lastReqDt.
+  stockItemsSelect: '/stock/selectStockItems',
   purchaseGet: '/trnsPurchase/selectPurchases',
   // Section 5.5 Branch Information + 5.6 Customer Information — endpoint
   // names/paths verified directly against the spec PDF (pdftotext extraction),
@@ -45,6 +49,7 @@ const MOCK = {
   // server surfaced it.
   stockItems: '/api/stock/save',
   stockMaster: '/api/stock/master/save',
+  stockItemsSelect: '/api/stock/select',
   purchaseGet: '/api/purchase/get',
   branchesSelect: '/api/branches/select',
   branchUserSave: '/api/branches/user/save',

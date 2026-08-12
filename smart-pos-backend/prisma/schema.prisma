@@ -536,22 +536,44 @@ model StockMovement {
   supplierInfo      String?
   
   // User Information
-  userId            String
+  // Nullable as of item 28* (2026-08-12) — a record retrieved from ZRA via
+  // selectStockItems has no local SmartPOS operator to attribute it to.
+  // Every locally-originated movement (sale/adjustment/etc.) still sets
+  // this; only RECONCILED rows leave it null.
+  userId            String?
 
   // VSDC stock sync (Section 6.2)
   zraSyncedAt       DateTime?
   zraSyncError      String?
   zraSyncResponse   Json?
-  
+
   createdAt         DateTime            @default(now())
-  
+
   // Relations
   // Relations
   product           Product             @relation(fields: [productId], references: [id])
-  user              User                @relation(fields: [userId], references: [id])
+  user              User?               @relation(fields: [userId], references: [id])
   batch             InventoryBatch?     @relation(fields: [batchId], references: [id])
-  
+
   @@map("stock_movements")
+}
+
+// Item 28* (POST /stock/selectStockItems) sync cursor — one row per branch.
+// Deliberately its own small model, not a new StockMovement field: this is
+// bookkeeping for the retrieval PROCESS (what lastReqDt to send next, did
+// the last run succeed), not stock data itself, and needs to persist
+// across restarts (an in-memory cursor, like zraCodesService.js's
+// lastSyncDate, would silently reset to a stale default on every deploy).
+model StockRetrievalCursor {
+  id                String   @id @default(cuid())
+  branchId          String   @unique
+  lastReqDt         String   // yyyyMMddHHmmss sent on the most recent successful call
+  lastSyncedAt      DateTime?
+  lastSyncError     String?
+  lastImportedCount Int      @default(0)
+  updatedAt         DateTime @updatedAt
+
+  @@map("stock_retrieval_cursors")
 }
 
 // Business branch (VSDC Section 7.1) — code matches inventory.branchId / sale.branchId
@@ -880,6 +902,14 @@ enum StockMovementType {
   RECOUNT           // Physical stock count adjustment
   PRODUCTION_IN     // Manufactured/assembled items
   PRODUCTION_OUT    // Raw materials used in production
+  // Item 28* (POST /stock/selectStockItems, OPTIONAL per spec). A record
+  // retrieved FROM ZRA, not created by a local operational event — the
+  // response has no direction/sarTyCd equivalent (confirmed against the
+  // spec text; this endpoint's response fields don't include one), so
+  // whether it represents an increase or decrease can't be safely
+  // inferred. Stored as a reconciliation snapshot only; never applied to
+  // Inventory.currentStock. See services/stockRetrieveSync.js.
+  RECONCILED
 }
 
 enum PurchaseOrderStatus {

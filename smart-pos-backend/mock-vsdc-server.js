@@ -227,6 +227,85 @@ app.post('/stockMaster/saveStockMaster', handleStockMasterSave);
 // stockItems' own path until 2026-08-12, see that file's comment.
 app.post('/api/stock/master/save', handleStockMasterSave);
 
+// Item 28* — GET STOCK ITEMS (/stock/selectStockItems). The extracted spec
+// text has the full response FIELD LIST for this endpoint but no actual
+// JSON response sample (the sample shown adjacent to it in the PDF is for
+// a different, unrelated Import Item endpoint — a page-layout artifact,
+// not this endpoint's data). This mock's nested shape (record-level fields
+// + itemList[]) is the most defensible inference available — grounded in
+// the field list's own two-tier structure and how the paired saveStockItems
+// endpoint is shaped — not a confirmed real shape. services/
+// stockRetrieveSync.js's parser is deliberately defensive about this for
+// the same reason. One item matches a real seeded SKU (COKE500) so the
+// itemCd -> local Product match path is exercised; the other doesn't, to
+// exercise the "no local product" skip path.
+const handleStockItemsSelect = (req, res) => {
+  console.log('📥 Mock VSDC stock items select, lastReqDt:', req.body.lastReqDt);
+  res.json(
+    ok({
+      stockList: [
+        {
+          sarNo: 9001,
+          custTpin: req.body.tpin,
+          custBhfId: req.body.bhfId,
+          ocrnDt: '20260801103000',
+          totItemCnt: 1,
+          totTaxblAmt: 20,
+          totTaxAmt: 3.2,
+          totAmt: 23.2,
+          remark: 'Mock reconciliation record',
+          itemList: [
+            {
+              itemSeq: 1,
+              itemCd: 'COKE500',
+              itemClsCd: 'BVRG001',
+              itemNm: 'Coca-Cola 500ml',
+              pkgUnitCd: 'EA',
+              qty: 2,
+              prc: 10,
+              splyAmt: 20,
+              taxblAmt: 20,
+              vatCatCd: 'A',
+              vatAmt: 3.2,
+              totAmt: 23.2,
+            },
+          ],
+        },
+        {
+          sarNo: 9002,
+          custTpin: req.body.tpin,
+          custBhfId: req.body.bhfId,
+          ocrnDt: '20260801104500',
+          totItemCnt: 1,
+          totTaxblAmt: 5,
+          totTaxAmt: 0.8,
+          totAmt: 5.8,
+          remark: 'Mock record for an item not registered locally',
+          itemList: [
+            {
+              itemSeq: 1,
+              itemCd: 'ZRA-UNKNOWN-SKU-1',
+              itemClsCd: '50101500',
+              itemNm: 'Unknown Item',
+              pkgUnitCd: 'EA',
+              qty: 1,
+              prc: 5,
+              splyAmt: 5,
+              taxblAmt: 5,
+              vatCatCd: 'A',
+              vatAmt: 0.8,
+              totAmt: 5.8,
+            },
+          ],
+        },
+      ],
+    })
+  );
+};
+
+app.post('/stock/selectStockItems', handleStockItemsSelect);
+app.post('/api/stock/select', handleStockItemsSelect);
+
 // Section 5.5/5.6 spec-verified endpoints (distinct from the legacy
 // /api/branch/save + /api/branch/get below, which target a fabricated
 // path — see smart-pos-backend/docs/zra-self-checklist.md item 4-7 notes).
