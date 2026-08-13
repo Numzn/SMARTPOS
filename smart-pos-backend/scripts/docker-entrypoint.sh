@@ -19,6 +19,9 @@ if (!url) { console.error('DATABASE_URL missing'); process.exit(1); }
 })();
 "
 
+echo "[entrypoint] generating prisma client..."
+npx prisma generate
+
 echo "[entrypoint] applying prisma migrations..."
 npx prisma migrate deploy
 

@@ -27,7 +27,7 @@ services:
     volumes:
       - smart_pos_pg_data:/var/lib/postgresql/data
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-smartpos} -d ${POSTGRES_DB:-smartpos}"]
       interval: 5s
@@ -40,13 +40,20 @@ services:
       dockerfile: smart-pos-backend/Dockerfile
     container_name: smart-pos-mock-vsdc
     restart: unless-stopped
-    command: ["node", "mock-vsdc-server.js"]
+    # Dev bind-mount: edits to smart-pos-backend/ on the host take effect on
+    # a container restart (nodemon watches and auto-restarts on file save),
+    # no image rebuild needed. node_modules stays whatever was baked into
+    # the image at last build — only source files are live.
+    volumes:
+      - ./smart-pos-backend:/app/smart-pos-backend
+    command: ["npx", "nodemon", "mock-vsdc-server.js"]
     environment:
       MOCK_VSDC_PORT: 8090
     # Mock VSDC doesn't need the database; skip the entrypoint's migrate/seed.
     entrypoint: ["/sbin/tini", "--"]
     ports:
-      - "${MOCK_VSDC_PORT:-8090}:8090"
+      - "127.0.0.1:${MOCK_VSDC_PORT:-8090}:8090"
+      - "172.17.0.1:${MOCK_VSDC_PORT:-8090}:8090"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/health"]
       interval: 10s
@@ -75,8 +82,13 @@ services:
       BUSINESS_TPIN: ${BUSINESS_TPIN:-1000000000}
       BRANCH_ID: ${BRANCH_ID:-000}
       SEED_ON_BOOT: ${SEED_ON_BOOT:-true}
+    # Dev bind-mount — see mock-vsdc's identical comment above.
+    volumes:
+      - ./smart-pos-backend:/app/smart-pos-backend
+    command: ["npx", "nodemon", "index.js"]
     ports:
-      - "${BACKEND_PORT:-4000}:4000"
+      - "127.0.0.1:${BACKEND_PORT:-4000}:4000"
+      - "172.17.0.1:${BACKEND_PORT:-4000}:4000"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4000/api/health"]
       interval: 10s
@@ -97,7 +109,8 @@ services:
       backend:
         condition: service_started
     ports:
-      - "${FRONTEND_PORT:-8080}:80"
+      - "127.0.0.1:${FRONTEND_PORT:-8080}:80"
+      - "172.17.0.1:${FRONTEND_PORT:-8080}:80"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
       interval: 15s
