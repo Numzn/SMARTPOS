@@ -27,6 +27,10 @@ async function receiveStock(
     userId,
     referenceType = 'PURCHASE',
     referenceId = null,
+    // Item 12* (customs import approval) reuses this same weighted-average/
+    // batch/movement logic for IMPORT_IN, the only other caller besides the
+    // default PURCHASE_IN — additive, existing callers are unaffected.
+    movementType = 'PURCHASE_IN',
   }
 ) {
   const qty = Math.abs(parseInt(quantity, 10));
@@ -85,7 +89,7 @@ async function receiveStock(
     data: {
       productId,
       branchId,
-      movementType: 'PURCHASE_IN',
+      movementType,
       quantity: qty,
       previousStock,
       newStock,

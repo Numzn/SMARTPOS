@@ -11,6 +11,8 @@ const stockRetrieveSync = require('./stockRetrieveSync');
 const itemsRetrieveSync = require('./itemsRetrieveSync');
 const purchaseSaveSync = require('./purchaseSaveSync');
 const purchaseRetrieveSync = require('./purchaseRetrieveSync');
+const importRetrieveSync = require('./importRetrieveSync');
+const importDecisionSync = require('./importDecisionSync');
 
 function ctx() {
   return { tpin: vsdcService.tpin, bhfId: vsdcService.bhfId };
@@ -115,5 +117,7 @@ module.exports = {
   retrieveItems: itemsRetrieveSync.retrieveAndSync,
   submitPurchases: purchaseSaveSync.syncPendingGrns,
   retrievePurchases: purchaseRetrieveSync.retrieveAndSync,
+  retrieveImports: importRetrieveSync.retrieveAndSync,
+  decideImportItem: importDecisionSync.decideImportItem,
   buildSaveSalesPayload,
 };

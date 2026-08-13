@@ -28,6 +28,7 @@ const PRODUCT_SELECT = {
 // (quantity sign) to the nearest equivalent (Adjustment in/out) in
 // sarTyCdFor() below, rather than a fabricated table entry.
 const MOVEMENT_TYPE_TO_VSDC = {
+  IMPORT_IN: '01',
   PURCHASE_IN: '02',
   SALE_OUT: '11',
   ADJUSTMENT_IN: '06',

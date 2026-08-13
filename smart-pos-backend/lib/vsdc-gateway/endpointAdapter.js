@@ -38,6 +38,14 @@ const OFFICIAL = {
   // reintroduce a plural "savePurchases", which docs/zra-self-checklist.md
   // had wrong until corrected alongside this build.
   purchaseSave: '/trnsPurchase/savePurchase',
+  // Item 11* — confirmed MANDATORY. "GET IMPORTS" §, request POST tpin/
+  // bhfId/lastReqDt (+ optional dclRefNum filter, unused here). Response
+  // data.itemList[] — flat, unlike item 14*'s nested saleList[].itemList[].
+  importsSelect: '/imports/selectImportItems',
+  // Item 12* — confirmed MANDATORY. "UPDATE IMPORT ITEMS" §, request keyed
+  // by tpin/bhfId/taskCd/dclDe with a nested importItemList[] of per-line
+  // approve('3')/reject('4') decisions (spec §6.17).
+  importsUpdate: '/imports/updateImportItems',
   // Section 5.5 Branch Information + 5.6 Customer Information — endpoint
   // names/paths verified directly against the spec PDF (pdftotext extraction),
   // not inferred from prior code. Note branchUserSave is singular
@@ -71,6 +79,8 @@ const MOCK = {
   itemsSelect: '/api/items/select',
   purchaseSelect: '/api/purchase/select',
   purchaseSave: '/api/purchase/save',
+  importsSelect: '/api/imports/select',
+  importsUpdate: '/api/imports/update',
   branchesSelect: '/api/branches/select',
   branchUserSave: '/api/branches/user/save',
   branchCustomerSave: '/api/branches/customer/save',

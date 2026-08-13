@@ -568,6 +568,87 @@ const handleSelectPurchases = (req, res) => {
 app.post('/trnsPurchase/selectTrnsPurchaseSales', handleSelectPurchases);
 app.post('/api/purchase/select', handleSelectPurchases);
 
+// Item 11* — GET IMPORTS (/imports/selectImportItems). Flat data.itemList[]
+// (unlike Get Purchases' nested saleList[].itemList[]) — a confirmed JSON
+// sample exists for this shape in the spec. Note the response sample's own
+// field name is "imptItemsttsCd" (lowercase tts), while the separate
+// Update Import Items REQUEST table uses "imptItemSttsCd" (capital S) for
+// the same concept — a real casing inconsistency in the spec text itself,
+// not a typo introduced here; importRetrieveSync.js accepts either. One
+// fixture item matches a real seeded SKU (COKE500) so a reviewer approving
+// it can point at an existing product; the other doesn't, exercising the
+// "needs a new/different product" path.
+const handleSelectImportItems = (req, res) => {
+  console.log('📥 Mock VSDC select import items, lastReqDt:', req.body.lastReqDt);
+  res.json(
+    ok({
+      data: {
+        itemList: [
+          {
+            taskCd: '4561614',
+            dclDe: '20260801',
+            itemSeq: 1,
+            dclNo: 'C3460-2026TZDL',
+            hsCd: '22029900000',
+            itemNm: 'Coca-Cola 500ml Import Batch',
+            imptItemsttsCd: '2',
+            orgnNatCd: 'ZA',
+            exptNatCd: 'ZA',
+            pkg: 500,
+            pkgUnitCd: 'EA',
+            qty: 500,
+            qtyUnitCd: 'EA',
+            totWt: 275.5,
+            netWt: 250.0,
+            spplrNm: 'Mock Import Supplier (ZA)',
+            agntNm: 'Mock Clearing Agent',
+            invcFcurAmt: 1250.0,
+            invcFcurCd: 'ZAR',
+            invcFcurExcrt: 0.68,
+            dclRefNum: 'CX1100096839',
+          },
+          {
+            taskCd: '4561615',
+            dclDe: '20260802',
+            itemSeq: 1,
+            dclNo: 'C3461-2026TZDL',
+            hsCd: '85176200000',
+            itemNm: 'Unknown Import Item',
+            imptItemsttsCd: '2',
+            orgnNatCd: 'CN',
+            exptNatCd: 'CN',
+            pkg: 10,
+            pkgUnitCd: 'EA',
+            qty: 10,
+            qtyUnitCd: 'EA',
+            totWt: 15.2,
+            netWt: 14.0,
+            spplrNm: 'Mock Unknown Supplier (CN)',
+            agntNm: 'Mock Clearing Agent',
+            invcFcurAmt: 800.0,
+            invcFcurCd: 'USD',
+            invcFcurExcrt: 24.5,
+            dclRefNum: 'CX1100096840',
+          },
+        ],
+      },
+    })
+  );
+};
+app.post('/imports/selectImportItems', handleSelectImportItems);
+app.post('/api/imports/select', handleSelectImportItems);
+
+// Item 12* — UPDATE IMPORT ITEMS (/imports/updateImportItems). Response
+// per the field table is {resultCd,resultMsg,resultDt,data:null} — same
+// minimal no-echo shape as Save Purchase/saveItemComposition.
+const handleUpdateImportItems = (req, res) => {
+  const line = (req.body.importItemList || [])[0] || {};
+  console.log('📋 Mock VSDC update import item:', req.body.taskCd, line.itemCd, 'status:', line.imptItemSttsCd);
+  res.json(ok({ data: null }));
+};
+app.post('/imports/updateImportItems', handleUpdateImportItems);
+app.post('/api/imports/update', handleUpdateImportItems);
+
 app.post('/api/branch/save', (req, res) => {
   const bhfId = String(req.body.bhfId || '000').padStart(3, '0');
   console.log('🏢 Mock VSDC branch save:', bhfId, req.body.bhfNm);

@@ -126,6 +126,7 @@ model Product {
   supplierReturnItems   SupplierReturnItem[]
   compositionsAsParent    ProductComposition[] @relation("CompositionParent")
   compositionsAsComponent ProductComposition[] @relation("CompositionComponent")
+  decidedImportItems      RetrievedImportItem[]
 
   @@map("products")
 }
@@ -662,6 +663,87 @@ model RetrievedPurchase {
   @@map("retrieved_purchases")
 }
 
+// Item 11* (POST /imports/selectImportItems) sync cursor — one row per
+// branch, structurally identical to StockRetrievalCursor/
+// PurchaseRetrievalCursor and kept as its own model for the same reason
+// those are.
+model ImportRetrievalCursor {
+  id                String    @id @default(cuid())
+  branchId          String    @unique
+  lastReqDt         String    // yyyyMMddHHmmss sent on the most recent successful call
+  lastSyncedAt      DateTime?
+  lastSyncError     String?
+  lastImportedCount Int       @default(0)
+  updatedAt         DateTime  @updatedAt
+
+  @@map("import_retrieval_cursors")
+}
+
+enum ImportItemDecision {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// Item 11*/12* — a customs import declaration line ZRA has on file
+// (ASYCUDA data), retrieved via /imports/selectImportItems. Unlike item
+// 14*'s RetrievedPurchase, this one DOES get a local disposition: a human
+// (or an API caller acting on their behalf, no UI built yet — same as
+// every other sync feature this session) must decide per line whether to
+// approve it (assigning a local Product, submitted to ZRA via
+// /imports/updateImportItems with imptItemSttsCd='3', then applied as a
+// real IMPORT_IN StockMovement) or reject it (imptItemSttsCd='4', spec:
+// "disregarded imported items will not [be saved in stock]" — no local
+// stock effect). Dedup/identity key is (taskCd, itemSeq) — the customs
+// declaration's own task code + line sequence, the natural identifier the
+// spec provides, mirroring how sarNo/the purchase composite key were used
+// for items 28*/14*.
+model RetrievedImportItem {
+  id             String   @id @default(cuid())
+  branchId       String   @default("main")
+  taskCd         String
+  dclDe          String?
+  itemSeq        Int
+  dclNo          String?
+  hsCd           String?
+  itemNm         String?
+  imptItemSttsCd String?  // ZRA's own current status at retrieval time (informational only — not the local decision)
+  orgnNatCd      String?
+  exptNatCd      String?
+  pkg            Float?
+  pkgUnitCd      String?
+  qty            Float?
+  qtyUnitCd      String?
+  totWt          Float?
+  netWt          Float?
+  spplrNm        String?
+  agntNm         String?
+  invcFcurAmt    Float?
+  invcFcurCd     String?
+  invcFcurExcrt  Float?
+  dclRefNum      String?
+  retrievedAt    DateTime @default(now())
+
+  // Local review decision — see model comment.
+  decision            ImportItemDecision @default(PENDING)
+  decidedAt            DateTime?
+  decidedBy             String?
+  decidedProductId      String?
+  remark                String?
+
+  // VSDC decision-sync (POST /imports/updateImportItems) outcome.
+  zraDecisionSyncedAt   DateTime?
+  zraDecisionSyncError  String?
+  zraDecisionSyncResponse Json?
+
+  decidedProduct Product? @relation(fields: [decidedProductId], references: [id])
+
+  @@unique([taskCd, itemSeq])
+  @@index([branchId])
+  @@index([decision])
+  @@map("retrieved_import_items")
+}
+
 // Business branch (VSDC Section 7.1) — code matches inventory.branchId / sale.branchId
 model Branch {
   id                    String    @id @default(cuid())
@@ -996,6 +1078,12 @@ enum StockMovementType {
   // inferred. Stored as a reconciliation snapshot only; never applied to
   // Inventory.currentStock. See services/stockRetrieveSync.js.
   RECONCILED
+  // Item 12* (POST /imports/updateImportItems) — a customs import
+  // declaration line the taxpayer approved ("imptItemSttsCd:'3'"), applied
+  // as real stock the same way PURCHASE_IN is, once a local Product has
+  // been assigned to it. VSDC sarTyCd '01' (Import-in), see
+  // services/stockSyncService.js's MOVEMENT_TYPE_TO_VSDC.
+  IMPORT_IN
 }
 
 enum PurchaseOrderStatus {

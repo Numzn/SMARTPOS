@@ -275,6 +275,133 @@ router.get('/purchases/retrieve/status', authenticateToken, requirePermission('z
 });
 
 /**
+ * POST /api/vsdc/imports/retrieve — item 11*, pull customs import
+ * declarations ZRA has on file (POST /imports/selectImportItems). Mirrors
+ * items 28*, 10*, and 14*'s retrieve route pairs. Separate from item 12*'s
+ * decide step below — retrieval never auto-decides anything.
+ */
+router.post('/imports/retrieve', authenticateToken, requirePermission('zra:sync'), async (req, res) => {
+  try {
+    const branchId = req.body?.branchId || DEFAULT_BRANCH;
+    const vsdcGateway = require('../lib/vsdc-gateway');
+    const ready = await vsdcGateway.ensureReady();
+    if (!ready.success) {
+      return res.status(503).json({ error: ready.error || 'VSDC not initialized' });
+    }
+    const result = await vsdcGateway.retrieveImports({ branchId });
+
+    const auditService = require('../services/auditService');
+    auditService.safeLog(auditService.eventTypes.PURCHASE_SYNC, {
+      ...auditService.contextFromReq(req),
+      entityType: 'RETRIEVED_IMPORT_ITEM',
+      action: 'ZRA_RETRIEVE',
+      success: result.success,
+      errorMessage: result.success ? null : result.error,
+      description: result.success
+        ? `Retrieved import declaration lines from ZRA: ${result.imported} imported, ${result.skipped} already known`
+        : `ZRA import retrieval failed: ${result.error}`,
+    });
+
+    if (!result.success) {
+      return res.status(502).json({ message: 'Import retrieval failed', ...result });
+    }
+    res.json({ message: 'Import retrieval completed', ...result });
+  } catch (error) {
+    console.error('VSDC import retrieve error:', error.message);
+    res.status(500).json({ error: error.message || 'Failed to retrieve imports from VSDC' });
+  }
+});
+
+/**
+ * GET /api/vsdc/imports/retrieve/status — cursor + last-run status, per branch.
+ */
+router.get('/imports/retrieve/status', authenticateToken, requirePermission('zra:read'), async (req, res) => {
+  try {
+    const branchId = req.query.branchId || DEFAULT_BRANCH;
+    const cursor = await prisma.importRetrievalCursor.findUnique({ where: { branchId } });
+    res.json({
+      branchId,
+      lastReqDt: cursor?.lastReqDt || null,
+      lastSyncedAt: cursor?.lastSyncedAt || null,
+      lastSyncError: cursor?.lastSyncError || null,
+      lastImportedCount: cursor?.lastImportedCount ?? 0,
+      everSynced: Boolean(cursor?.lastSyncedAt),
+    });
+  } catch (error) {
+    console.error('VSDC import retrieve status error:', error.message);
+    res.status(500).json({ error: 'Failed to get import retrieval status' });
+  }
+});
+
+/**
+ * GET /api/vsdc/imports — list retrieved import declaration lines, so a
+ * reviewer (or an API caller acting for one — no UI built yet, same as
+ * every other sync feature this session) can see what's pending a
+ * decision. Filterable by ?decision=PENDING (default: all).
+ */
+router.get('/imports', authenticateToken, requirePermission('zra:read'), async (req, res) => {
+  try {
+    const where = {};
+    if (req.query.decision) where.decision = req.query.decision;
+    if (req.query.branchId) where.branchId = req.query.branchId;
+    const items = await prisma.retrievedImportItem.findMany({
+      where,
+      include: { decidedProduct: { select: { id: true, name: true, sku: true } } },
+      orderBy: { retrievedAt: 'desc' },
+      take: 200,
+    });
+    res.json({ items, total: items.length });
+  } catch (error) {
+    console.error('VSDC imports list error:', error.message);
+    res.status(500).json({ error: 'Failed to list import items' });
+  }
+});
+
+/**
+ * POST /api/vsdc/imports/:id/decide — item 12*, approve or reject one
+ * retrieved import declaration line (POST /imports/updateImportItems).
+ * Body: { decision: 'APPROVED'|'REJECTED', productId, remark? }. A
+ * product is required for both decisions — see
+ * lib/vsdc-gateway/importDecisionSync.js for why. Approval credits real
+ * stock (IMPORT_IN) and triggers the existing stock-push follow-up;
+ * rejection has no stock effect.
+ */
+router.post('/imports/:id/decide', authenticateToken, requirePermission('zra:sync'), async (req, res) => {
+  try {
+    const { decision, productId, remark } = req.body || {};
+    const vsdcGateway = require('../lib/vsdc-gateway');
+    const ready = await vsdcGateway.ensureReady();
+    if (!ready.success) {
+      return res.status(503).json({ error: ready.error || 'VSDC not initialized' });
+    }
+
+    const actor = { id: req.user?.userId || req.user?.id || null, name: req.user?.email || 'SYSTEM' };
+    const result = await vsdcGateway.decideImportItem(req.params.id, { decision, productId, remark, actor });
+
+    const auditService = require('../services/auditService');
+    auditService.safeLog(auditService.eventTypes.PURCHASE_SYNC, {
+      ...auditService.contextFromReq(req),
+      entityType: 'RETRIEVED_IMPORT_ITEM',
+      entityId: req.params.id,
+      action: 'ZRA_IMPORT_DECISION',
+      success: result.ok,
+      errorMessage: result.ok ? null : result.error,
+      description: result.ok
+        ? `Import item ${decision?.toLowerCase()}${result.skipped ? ' (already decided)' : ''}`
+        : `Import item decision failed: ${result.error}`,
+    });
+
+    if (!result.ok) {
+      return res.status(result.error === 'Import item not found' ? 404 : 400).json(result);
+    }
+    res.json({ message: 'Import item decision recorded', ...result });
+  } catch (error) {
+    console.error('VSDC import decide error:', error.message);
+    res.status(500).json({ error: error.message || 'Failed to record import item decision' });
+  }
+});
+
+/**
  * POST /api/vsdc/codes/sync — sync ZRA codes + classifications via gateway
  */
 router.post('/codes/sync', authenticateToken, requirePermission('zra:sync'), async (req, res) => {
