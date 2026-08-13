@@ -139,6 +139,60 @@ async function createTestPurchaseOrder({ supplierId, branchId = DEFAULT_BRANCH_C
   });
 }
 
+/**
+ * Direct GRN creation for tests that need a persisted GoodsReceivedNote +
+ * items without exercising the full PO SENT->receive transaction machinery
+ * (lib/purchasing.js), which is already covered by its own tests. Optionally
+ * pairs a matching StockMovement per item (referenceType:'PURCHASE_ORDER',
+ * referenceId: grn.id) to exercise purchaseSaveSync.js's stock-push
+ * dependency trigger.
+ */
+async function createTestGoodsReceivedNote({
+  supplierId,
+  branchId = DEFAULT_BRANCH_CODE,
+  items,
+  withStockMovements = false,
+}) {
+  const suffix = uniqueSuffix();
+  const grn = await prisma.goodsReceivedNote.create({
+    data: {
+      grnNumber: `TEST-GRN-${suffix}`,
+      supplierId,
+      branchId,
+      items: {
+        create: items.map((item) => ({
+          productId: item.productId,
+          quantityReceived: item.quantityReceived,
+          unitCost: item.unitCost,
+        })),
+      },
+    },
+    include: { items: true, supplier: true },
+  });
+
+  if (withStockMovements) {
+    for (const item of grn.items) {
+      await prisma.stockMovement.create({
+        data: {
+          productId: item.productId,
+          branchId,
+          movementType: 'PURCHASE_IN',
+          quantity: item.quantityReceived,
+          previousStock: 0,
+          newStock: item.quantityReceived,
+          unitCost: item.unitCost,
+          totalCost: item.quantityReceived * item.unitCost,
+          referenceType: 'PURCHASE_ORDER',
+          referenceId: grn.id,
+          reason: 'Test GRN receipt',
+        },
+      });
+    }
+  }
+
+  return grn;
+}
+
 async function createTestShift({
   userId,
   branchId = DEFAULT_BRANCH_CODE,
@@ -308,6 +362,7 @@ module.exports = {
   createTestCustomer,
   createTestSupplier,
   createTestPurchaseOrder,
+  createTestGoodsReceivedNote,
   cleanupTestData,
   DEFAULT_BRANCH_CODE,
 };

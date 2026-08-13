@@ -26,7 +26,18 @@ const OFFICIAL = {
   // adjacent singular /items/selectItem (lookup by itemCd, no lastReqDt,
   // a different endpoint, out of scope here).
   itemsSelect: '/items/selectItems',
-  purchaseGet: '/trnsPurchase/selectPurchases',
+  // Item 14* — confirmed MANDATORY per spec text (unlike stockItemsSelect/
+  // itemsSelect, which are optional). "GET PURCHASES" §, request POST
+  // tpin/bhfId/lastReqDt, response data.saleList[].itemList[] — one level
+  // deeper than every other retrieve endpoint (stockItemsSelect/itemsSelect
+  // are both a flat data.<x>List[]). Replaces the old dead/wrong
+  // `purchaseGet` key (0 call sites, wrong path '/trnsPurchase/selectPurchases').
+  purchaseSelect: '/trnsPurchase/selectTrnsPurchaseSales',
+  // Item 13* — confirmed MANDATORY. Spec text consistently uses the
+  // SINGULAR "savePurchase" (4 occurrences in the source PDF) — do not
+  // reintroduce a plural "savePurchases", which docs/zra-self-checklist.md
+  // had wrong until corrected alongside this build.
+  purchaseSave: '/trnsPurchase/savePurchase',
   // Section 5.5 Branch Information + 5.6 Customer Information — endpoint
   // names/paths verified directly against the spec PDF (pdftotext extraction),
   // not inferred from prior code. Note branchUserSave is singular
@@ -58,7 +69,8 @@ const MOCK = {
   stockMaster: '/api/stock/master/save',
   stockItemsSelect: '/api/stock/select',
   itemsSelect: '/api/items/select',
-  purchaseGet: '/api/purchase/get',
+  purchaseSelect: '/api/purchase/select',
+  purchaseSave: '/api/purchase/save',
   branchesSelect: '/api/branches/select',
   branchUserSave: '/api/branches/user/save',
   branchCustomerSave: '/api/branches/customer/save',

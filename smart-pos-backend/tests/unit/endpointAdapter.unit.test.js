@@ -37,7 +37,8 @@ describe('endpointAdapter', () => {
     expect(endpointAdapter.path('stockItems')).toBe('/stock/saveStockItems');
     expect(endpointAdapter.path('stockMaster')).toBe('/stockMaster/saveStockMaster');
     expect(endpointAdapter.path('itemsSelect')).toBe('/items/selectItems');
-    expect(endpointAdapter.path('purchaseGet')).toBe('/trnsPurchase/selectPurchases');
+    expect(endpointAdapter.path('purchaseSelect')).toBe('/trnsPurchase/selectTrnsPurchaseSales');
+    expect(endpointAdapter.path('purchaseSave')).toBe('/trnsPurchase/savePurchase');
   });
 
   it('REGRESSION: every MOCK path is distinct from its OFFICIAL counterpart, so mock and official runs are distinguishable', () => {

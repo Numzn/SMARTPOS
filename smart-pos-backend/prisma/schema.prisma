@@ -605,6 +605,63 @@ model ItemRetrievalCursor {
   @@map("item_retrieval_cursors")
 }
 
+// Item 14* (POST /trnsPurchase/selectTrnsPurchaseSales) sync cursor — one
+// row per branch, structurally identical to StockRetrievalCursor/
+// ItemRetrievalCursor and kept as its own model for the same reason: this
+// is bookkeeping for the retrieval PROCESS, not purchase data itself, and
+// needs to persist across restarts.
+model PurchaseRetrievalCursor {
+  id                String    @id @default(cuid())
+  branchId          String    @unique
+  lastReqDt         String    // yyyyMMddHHmmss sent on the most recent successful call
+  lastSyncedAt      DateTime?
+  lastSyncError     String?
+  lastImportedCount Int       @default(0)
+  updatedAt         DateTime  @updatedAt
+
+  @@map("purchase_retrieval_cursors")
+}
+
+// Item 14* — purchase transactions ZRA already has on file, reported
+// against our TPIN by suppliers' own VSDCs (regTyCd='A') or previously
+// self-reported by us (regTyCd='M', what item 13*'s purchaseSaveSync.js
+// submits). Deliberately NOT related to GoodsReceivedNote: a regTyCd='A'
+// record has no natural local business document to attach to, and forcing
+// a match by date/amount/supplier heuristics would be a fabricated join,
+// not a discovered one. Dedup key is the natural supplier-side reference
+// the spec provides, mirroring how sarNo was item 28*'s dedup key. itemList
+// kept as raw Json, not flattened into a child table — nothing downstream
+// needs to query into individual retrieved lines relationally.
+// Known limitation: spplrTpin/spplrBhfId/spplrInvcNo are all nullable
+// (unconfirmed-required in the response spec table), and Postgres treats
+// multiple NULLs in a unique constraint as distinct — a response missing
+// one of these would dedup incorrectly. Accepted, documented, not silently
+// papered over (same honesty standard as item 27*'s "tax amounts honestly 0").
+model RetrievedPurchase {
+  id          String   @id @default(cuid())
+  branchId    String   @default("main")
+  spplrTpin   String?
+  spplrNm     String?
+  spplrBhfId  String?
+  spplrInvcNo String?
+  rcptTyCd    String?
+  pmtTyCd     String?
+  cfmDt       String?
+  salesDt     String?
+  stockRlsDt  String?
+  totItemCnt  Int?
+  totTaxblAmt Float?
+  totTaxAmt   Float?
+  totAmt      Float?
+  remark      String?
+  itemList    Json
+  retrievedAt DateTime @default(now())
+
+  @@unique([spplrTpin, spplrBhfId, spplrInvcNo])
+  @@index([branchId])
+  @@map("retrieved_purchases")
+}
+
 // Business branch (VSDC Section 7.1) — code matches inventory.branchId / sale.branchId
 model Branch {
   id                    String    @id @default(cuid())
@@ -1073,6 +1130,15 @@ model GoodsReceivedNote {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
+  // VSDC purchase sync (item 13*, POST /trnsPurchase/savePurchase — spec's
+  // own path is singular, corrected here from a stale plural claim in
+  // docs/zra-self-checklist.md). Same trio already used by StockMovement/
+  // User/Customer for their own VSDC sync tracking. cisInvcNo sent to ZRA
+  // is grnNumber itself — no separate field needed for it.
+  zraSyncedAt     DateTime?
+  zraSyncError    String?
+  zraSyncResponse Json?
+
   purchaseOrder PurchaseOrder?          @relation(fields: [purchaseOrderId], references: [id])
   supplier      Supplier                @relation(fields: [supplierId], references: [id], onDelete: Restrict)
   branch        Branch                  @relation(fields: [branchId], references: [code])
@@ -1081,6 +1147,7 @@ model GoodsReceivedNote {
   @@index([purchaseOrderId])
   @@index([supplierId])
   @@index([branchId])
+  @@index([zraSyncedAt])
   @@map("goods_received_notes")
 }
 

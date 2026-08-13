@@ -436,6 +436,138 @@ const handleCustomerSelect = (req, res) => {
 app.post('/customers/selectCustomer', handleCustomerSelect);
 app.post('/api/customers/select', handleCustomerSelect);
 
+// Item 13* — SAVE PURCHASES (/trnsPurchase/savePurchase, singular — the
+// checklist doc had this wrong as plural before this build). Real response
+// per the field table is {resultCd,resultMsg,resultDt,data:null} — no
+// echoed data, same minimal shape as saveItemComposition/saveStockItems.
+// The spec's own JSON SAMPLE for this endpoint includes remark/regrNm/
+// regrId/modrNm/modrId/taxTyCd fields absent from the field table — a
+// known copy-paste artifact (same class as item 28*'s stock-retrieve
+// sample) — not implemented in either direction.
+const handleSavePurchase = (req, res) => {
+  const items = req.body.itemList || [];
+  console.log('🧾 Mock VSDC save purchase:', req.body.cisInvcNo, items.length, 'item(s)');
+  res.json(ok({ data: null }));
+};
+app.post('/trnsPurchase/savePurchase', handleSavePurchase);
+app.post('/api/purchase/save', handleSavePurchase);
+
+// Item 14* — GET PURCHASES (/trnsPurchase/selectTrnsPurchaseSales). Two
+// levels deep: data.saleList[] (headers) each with itemList[] — one
+// nesting level deeper than handleStockItemsSelect/handleItemsSelect. One
+// header's item matches a real seeded SKU (COKE500) to exercise the
+// downstream code path consistently with the other retrieve mocks; the
+// other doesn't, to exercise the "no local match" path (matching is only
+// relevant if a caller chooses to correlate — purchaseRetrieveSync.js
+// itself never matches against local data by design).
+const handleSelectPurchases = (req, res) => {
+  console.log('📥 Mock VSDC select purchases, lastReqDt:', req.body.lastReqDt);
+  res.json(
+    ok({
+      data: {
+        saleList: [
+          {
+            spplrTpin: '2000000000',
+            spplrNm: 'Mock Beverage Supplier',
+            spplrBhfId: '000',
+            spplrInvcNo: 4501,
+            rcptTyCd: 'P',
+            pmtTyCd: '02',
+            cfmDt: '20260801102000',
+            salesDt: '20260801',
+            stockRlsDt: null,
+            totItemCnt: 1,
+            totTaxblAmt: 20,
+            totTaxAmt: 3.2,
+            totAmt: 23.2,
+            remark: 'Mock purchase record',
+            itemList: [
+              {
+                itemSeq: 1,
+                itemCd: 'COKE500',
+                itemClsCd: 'BVRG001',
+                itemNm: 'Coca-Cola 500ml',
+                bcd: '600130800002',
+                pkgUnitCd: 'EA',
+                pkg: 0,
+                qtyUnitCd: 'EA',
+                qty: 2,
+                prc: 10,
+                splyAmt: 20,
+                dcRt: 0,
+                dcAmt: 0,
+                vatCatCd: 'A',
+                iplCatCd: null,
+                tlCatCd: null,
+                exciseTxCatCd: null,
+                vatTaxblAmt: 20,
+                exciseTaxblAmt: 0,
+                iplTaxblAmt: 0,
+                tlTaxblAmt: 0,
+                taxblAmt: 20,
+                vatAmt: 3.2,
+                iplAmt: 0,
+                tlAmt: 0,
+                exciseTxAmt: 0,
+                totAmt: 23.2,
+              },
+            ],
+          },
+          {
+            spplrTpin: '2000000001',
+            spplrNm: 'Mock Unregistered Supplier',
+            spplrBhfId: null,
+            spplrInvcNo: 9002,
+            rcptTyCd: 'P',
+            pmtTyCd: '01',
+            cfmDt: '20260801113000',
+            salesDt: '20260801',
+            stockRlsDt: null,
+            totItemCnt: 1,
+            totTaxblAmt: 5,
+            totTaxAmt: 0.8,
+            totAmt: 5.8,
+            remark: 'Mock record for an item not registered locally',
+            itemList: [
+              {
+                itemSeq: 1,
+                itemCd: 'ZRA-UNKNOWN-SKU-1',
+                itemClsCd: '50101500',
+                itemNm: 'Unknown Item',
+                bcd: null,
+                pkgUnitCd: 'EA',
+                pkg: 0,
+                qtyUnitCd: 'EA',
+                qty: 1,
+                prc: 5,
+                splyAmt: 5,
+                dcRt: 0,
+                dcAmt: 0,
+                vatCatCd: 'A',
+                iplCatCd: null,
+                tlCatCd: null,
+                exciseTxCatCd: null,
+                vatTaxblAmt: 5,
+                exciseTaxblAmt: 0,
+                iplTaxblAmt: 0,
+                tlTaxblAmt: 0,
+                taxblAmt: 5,
+                vatAmt: 0.8,
+                iplAmt: 0,
+                tlAmt: 0,
+                exciseTxAmt: 0,
+                totAmt: 5.8,
+              },
+            ],
+          },
+        ],
+      },
+    })
+  );
+};
+app.post('/trnsPurchase/selectTrnsPurchaseSales', handleSelectPurchases);
+app.post('/api/purchase/select', handleSelectPurchases);
+
 app.post('/api/branch/save', (req, res) => {
   const bhfId = String(req.body.bhfId || '000').padStart(3, '0');
   console.log('🏢 Mock VSDC branch save:', bhfId, req.body.bhfNm);

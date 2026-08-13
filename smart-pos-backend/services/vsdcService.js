@@ -35,7 +35,6 @@ class VSDCService {
       branchSave: '/api/branch/save',
       branchGet: '/api/branch/get',
       invoiceSubmit: '/api/invoice/submit',
-      purchaseGet: '/api/purchase/get',
       codesGet: '/api/codes/get'
     }
   }
