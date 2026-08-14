@@ -18,12 +18,17 @@ model User {
   email       String    @unique
   name        String?
   password    String
+  // Supervisor/manager/admin step-up PIN (bcrypt hash, same convention as
+  // `password`) — used by till-lock reversals and discount approvals instead
+  // of re-entering a full password at the register. Nullable: cashiers never
+  // set one.
+  pinHash     String?
   role        Role      @default(CASHIER)
   isActive    Boolean   @default(true)
   lastLoginAt DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
-  
+
   // Relations
   sales            Sale[]
   refunds          Refund[]
@@ -33,6 +38,8 @@ model User {
   shifts           Shift[]
   shiftCashMovements ShiftCashMovement[]
   discountApprovals Sale[] @relation("SaleDiscountApprovals")
+  cartSessions      CashierCartSession[]
+  approvalsGiven    SupervisorApproval[]
   branchId         String?
   branch           Branch?   @relation(fields: [branchId], references: [code])
 
@@ -127,6 +134,7 @@ model Product {
   compositionsAsParent    ProductComposition[] @relation("CompositionParent")
   compositionsAsComponent ProductComposition[] @relation("CompositionComponent")
   decidedImportItems      RetrievedImportItem[]
+  cashierCartLines        CashierCartLine[]
 
   @@map("products")
 }
@@ -384,8 +392,99 @@ model SaleItem {
   // Relations
   sale      Sale    @relation(fields: [saleId], references: [id])
   product   Product @relation(fields: [productId], references: [id])
-  
+
   @@map("sale_items")
+}
+
+// Item 15* of the "POS Control" work — the till-lock transaction control.
+// Deliberately NOT a fiscal document: never touches VSDC, never gets a
+// SaleStatus. It's operational state for one cashier's in-progress till
+// transaction, consumed atomically when POST /api/sales/checkout succeeds
+// (see lib/saleFiscal.js's createPendingSale). "Suspended sales" were
+// explicitly ruled out before for fiscal-document reasons (lib/shift.js) —
+// this is a different kind of thing, closer to a shopping-cart record.
+model CashierCartSession {
+  id        String                   @id @default(cuid())
+  userId    String
+  branchId  String
+  status    CashierCartSessionStatus @default(OPEN)
+  createdAt DateTime                 @default(now())
+  updatedAt DateTime                 @updatedAt
+
+  user  User               @relation(fields: [userId], references: [id])
+  lines CashierCartLine[]
+
+  @@map("cashier_cart_sessions")
+}
+
+enum CashierCartSessionStatus {
+  OPEN
+  CONSUMED
+  ABANDONED
+}
+
+// Current committed state of one (session, product) line — NOT a history
+// log. A reversal updates quantity/status here; the historical fact of what
+// was reversed, by whom, and why lives in AuditLog's TILL_LINE_REVERSAL
+// event, not on this row.
+model CashierCartLine {
+  id        String              @id @default(cuid())
+  sessionId String
+  productId String
+  quantity  Int
+  unitPrice Float
+  status    CashierCartLineStatus @default(ACTIVE)
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  session CashierCartSession @relation(fields: [sessionId], references: [id])
+  product Product            @relation(fields: [productId], references: [id])
+
+  @@unique([sessionId, productId])
+  @@map("cashier_cart_lines")
+}
+
+enum CashierCartLineStatus {
+  ACTIVE
+  REVERSED
+}
+
+// Short-lived, single-use, action-bound supervisor authorization. Deliberately
+// NOT a reusable credential — it authorizes exactly one specific action on
+// one specific session/target and is consumed atomically inside the same
+// transaction as that action (see lib/approval.js).
+model SupervisorApproval {
+  id               String                @id @default(cuid())
+  approverUserId   String
+  actionType       SupervisorActionType
+  // Nullable: real till-lock actions (line reversal, cart-wide discount from
+  // the cashier UI) always bind to a real CashierCartSession, but the
+  // pre-existing per-line discount-approval path (createPendingSale called
+  // directly, e.g. the bare admin-only sale-creation route or discount-math
+  // tests) has no till session at all — sessionId: null there, consistently
+  // on both the minted ticket and the consuming check.
+  sessionId        String?
+  targetProductId  String?
+  targetQuantity   Int?
+  targetDiscountAmount Float?
+  authMethod       SupervisorAuthMethod
+  expiresAt        DateTime
+  consumedAt       DateTime?
+  createdAt        DateTime              @default(now())
+
+  approver User @relation(fields: [approverUserId], references: [id])
+
+  @@map("supervisor_approvals")
+}
+
+enum SupervisorActionType {
+  LINE_REVERSAL
+  ORDER_DISCOUNT
+}
+
+enum SupervisorAuthMethod {
+  PIN
+  PASSWORD
 }
 
 // ZRA Invoice tracking model for full compliance
@@ -989,6 +1088,7 @@ model ZraClassificationCode {
 enum Role {
   ADMIN
   MANAGER
+  SUPERVISOR
   CASHIER
   VIEWER
 }

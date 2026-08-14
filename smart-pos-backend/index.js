@@ -24,6 +24,8 @@ const supplierRoutes = require('./routes/suppliers');
 const purchaseOrderRoutes = require('./routes/purchaseOrders');
 const goodsReceivedNoteRoutes = require('./routes/goodsReceivedNotes');
 const supplierReturnRoutes = require('./routes/supplierReturns');
+const tillLockRoutes = require('./routes/tillLock');
+const tillApprovalRoutes = require('./routes/tillApprovals');
 const auditService = require('./services/auditService');
 
 dotenv.config();
@@ -59,6 +61,8 @@ app.use('/api/suppliers', supplierRoutes);
 app.use('/api/purchase-orders', purchaseOrderRoutes);
 app.use('/api/goods-received-notes', goodsReceivedNoteRoutes);
 app.use('/api/supplier-returns', supplierReturnRoutes);
+app.use('/api/till', tillLockRoutes);
+app.use('/api/till', tillApprovalRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

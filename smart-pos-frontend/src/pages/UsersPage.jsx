@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import UserModal, { EMPTY_USER } from '../components/users/UserModal';
 import UsersTable from '../components/users/UsersTable';
 import ResetPasswordModal from '../components/users/ResetPasswordModal';
+import SetPinModal from '../components/users/SetPinModal';
 import { userApi } from '../services/userService';
 import { usePermissions } from '../hooks/usePermissions';
 
@@ -25,6 +26,9 @@ const UsersPage = () => {
 
   const [resetTarget, setResetTarget] = useState(null);
   const [issuedPassword, setIssuedPassword] = useState('');
+
+  const [pinTarget, setPinTarget] = useState(null);
+  const [issuedPin, setIssuedPin] = useState('');
 
   const load = useCallback(async () => {
     if (!isAdmin) {
@@ -121,6 +125,12 @@ const UsersPage = () => {
       setIssuedPassword(res?.temporaryPassword || newPassword || '');
     }, 'Could not reset password');
 
+  const handleSetPin = (pin) =>
+    run(async () => {
+      const res = await userApi.setPin(pinTarget.id, pin);
+      setIssuedPin(res?.temporaryPin || pin || '');
+    }, 'Could not set PIN');
+
   if (!isAdmin) {
     return (
       <div className="space-y-4 p-4 sm:p-6">
@@ -172,6 +182,10 @@ const UsersPage = () => {
           setIssuedPassword('');
           setResetTarget(user);
         }}
+        onSetPin={(user) => {
+          setIssuedPin('');
+          setPinTarget(user);
+        }}
         onToggleActive={handleToggleActive}
       />
 
@@ -196,6 +210,18 @@ const UsersPage = () => {
         loading={saving}
         onSubmit={handleResetPassword}
         issuedPassword={issuedPassword}
+      />
+
+      <SetPinModal
+        show={Boolean(pinTarget)}
+        user={pinTarget}
+        onClose={() => {
+          setPinTarget(null);
+          setIssuedPin('');
+        }}
+        loading={saving}
+        onSubmit={handleSetPin}
+        issuedPin={issuedPin}
       />
     </div>
   );

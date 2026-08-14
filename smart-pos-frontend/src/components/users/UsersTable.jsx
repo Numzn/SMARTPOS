@@ -1,8 +1,10 @@
 import React from 'react';
+import { PIN_ELIGIBLE_ROLES } from '../../services/userService';
 
 const roleColors = {
   ADMIN: 'bg-purple-100 text-purple-700',
   MANAGER: 'bg-blue-100 text-blue-700',
+  SUPERVISOR: 'bg-indigo-100 text-indigo-700',
   CASHIER: 'bg-green-100 text-green-700',
   VIEWER: 'bg-gray-100 text-gray-700',
 };
@@ -13,7 +15,7 @@ const formatDateTime = (value) => {
   return Number.isNaN(d.getTime()) ? 'Never' : d.toLocaleString();
 };
 
-const UsersTable = ({ users, currentUserId, onEdit, onResetPassword, onToggleActive }) => {
+const UsersTable = ({ users, currentUserId, onEdit, onResetPassword, onSetPin, onToggleActive }) => {
   if (!users.length) {
     return (
       <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">No users found.</div>
@@ -66,6 +68,17 @@ const UsersTable = ({ users, currentUserId, onEdit, onResetPassword, onToggleAct
                   >
                     Reset Password
                   </button>
+                  {/* Only roles ROLE_RANK actually lets approve a till action
+                      can use a PIN — offering it on a CASHIER would just be
+                      an action that's stored but never checked. */}
+                  {PIN_ELIGIBLE_ROLES.includes(user.role) && (
+                    <button
+                      onClick={() => onSetPin(user)}
+                      className="text-indigo-700 hover:text-indigo-900 mr-3"
+                    >
+                      Set PIN
+                    </button>
+                  )}
                   {/* The backend refuses to let an admin deactivate themselves;
                       don't offer an action that can only fail. */}
                   {isSelf ? (

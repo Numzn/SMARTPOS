@@ -266,6 +266,12 @@ async function createTestSale({
  * this module uses, so it never touches real seeded data).
  */
 async function cleanupTestData() {
+  // POS Control Phase 1 (till-lock) — references both product and user with
+  // the default Restrict onDelete, must go before their deletes below.
+  await prisma.cashierCartLine.deleteMany({ where: { product: { sku: { startsWith: 'TEST-SKU-' } } } });
+  await prisma.cashierCartSession.deleteMany({ where: { user: { email: { contains: '@smartpos.test' } } } });
+  await prisma.supervisorApproval.deleteMany({ where: { approver: { email: { contains: '@smartpos.test' } } } });
+
   await prisma.stockMovement.deleteMany({ where: { product: { sku: { startsWith: 'TEST-SKU-' } } } });
   await prisma.refundItem.deleteMany({ where: { product: { sku: { startsWith: 'TEST-SKU-' } } } });
   await prisma.refund.deleteMany({ where: { originalSale: { user: { email: { contains: '@smartpos.test' } } } } });

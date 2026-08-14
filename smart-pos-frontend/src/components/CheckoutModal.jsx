@@ -19,6 +19,7 @@ import { ReceiptRenderer } from '@smartpos/receipt-engine/react';
 import { useAuth } from '../contexts/AuthContext';
 import { calculateCartTotals, formatZmw } from '../utils/cartTotals';
 import { customerApi } from '../services/customerService';
+import SupervisorApprovalModal from './cashier/modern/SupervisorApprovalModal';
 
 const PAYMENT_METHODS = [
   { id: 'cash', label: 'Cash', shortcut: '1', icon: Banknote, hint: 'Physical cash payment' },
@@ -39,6 +40,7 @@ const formatCurrency = formatZmw;
 const CheckoutModal = ({
   cart = [],
   cartTotals: cartTotalsProp,
+  tillSessionId = null,
   onClose,
   onSuccess,
   usingMockData = false,
@@ -68,6 +70,10 @@ const CheckoutModal = ({
   const [receiptVm, setReceiptVm] = useState(null);
   const [receiptLoading, setReceiptLoading] = useState(false);
   const [receiptFormat, setReceiptFormat] = useState('thermal');
+  // Discount-approval step-up (POS Control Phase 1) — set to true when the
+  // backend reports the order-level discount needs supervisor sign-off.
+  const [discountApprovalNeeded, setDiscountApprovalNeeded] = useState(false);
+  const [discountApprovalId, setDiscountApprovalId] = useState(null);
 
   const detailRef = useRef(null);
   // The very first print of a completed sale is the original tax invoice, not
@@ -208,7 +214,13 @@ const CheckoutModal = ({
     }
   };
 
-  const submitSale = async () => {
+  /**
+   * overrideDiscountApprovalId is passed explicitly (not read from state)
+   * when retrying immediately after handleDiscountApproved — React state
+   * updates aren't synchronous, so reading `discountApprovalId` here right
+   * after setDiscountApprovalId() would still see the stale (null) value.
+   */
+  const submitSale = async (overrideDiscountApprovalId) => {
     if (!user?.id) {
       setError('You must be logged in to complete a sale.');
       return;
@@ -235,6 +247,9 @@ const CheckoutModal = ({
           cardLast4: paymentMethod === 'card' ? cardLast4 : null,
           mobileNumber: paymentMethod === 'mobile' ? mobileNumber : null,
         },
+        tillSessionId,
+        discountApprovalId:
+          typeof overrideDiscountApprovalId === 'string' ? overrideDiscountApprovalId : discountApprovalId,
       };
 
       if (usingMockData) {
@@ -263,6 +278,12 @@ const CheckoutModal = ({
       }
     } catch (err) {
       console.error('Payment processing failed:', err);
+      if (err.data?.code === 'APPROVAL_REQUIRED') {
+        // The cart discount is over the threshold — collect a supervisor
+        // approval ticket, then retry with discountApprovalId attached.
+        setDiscountApprovalNeeded(true);
+        return;
+      }
       if (err.data?.sale?.id) {
         setSaleId(err.data.sale.id);
         setZraState('failed');
@@ -305,6 +326,15 @@ const CheckoutModal = ({
   const handleComplete = () => {
     onSuccess?.(saleId);
     onClose?.();
+  };
+
+  const handleDiscountApproved = ({ approvalId }) => {
+    setDiscountApprovalId(approvalId);
+    setDiscountApprovalNeeded(false);
+    // Retry immediately rather than making the cashier click "Complete
+    // payment" a second time — approvalId is passed explicitly since the
+    // state update above hasn't been applied yet at this point.
+    submitSale(approvalId);
   };
 
   const renderStepDots = () => (
@@ -781,6 +811,16 @@ const CheckoutModal = ({
           )}
         </div>
       </div>
+
+      <SupervisorApprovalModal
+        open={discountApprovalNeeded}
+        onClose={() => setDiscountApprovalNeeded(false)}
+        actionType="ORDER_DISCOUNT"
+        sessionId={tillSessionId}
+        target={{ discountAmount: totals.discount }}
+        itemLabel={`Discount of ${formatCurrency(totals.discount)} needs approval`}
+        onApproved={handleDiscountApproved}
+      />
     </div>
   );
 };

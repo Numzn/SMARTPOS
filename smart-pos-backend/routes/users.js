@@ -9,7 +9,9 @@ const { loginLimiter } = require('../middleware/rateLimit');
 const auditService = require('../services/auditService');
 
 const MIN_PASSWORD_LENGTH = 8;
-const VALID_ROLES = ['ADMIN', 'MANAGER', 'CASHIER', 'VIEWER'];
+const VALID_ROLES = ['ADMIN', 'MANAGER', 'SUPERVISOR', 'CASHIER', 'VIEWER'];
+const MIN_PIN_LENGTH = 4;
+const MAX_PIN_LENGTH = 6;
 
 function generateTempPassword() {
   return crypto.randomBytes(9).toString('base64url'); // ~12 chars, URL-safe
@@ -597,6 +599,50 @@ router.post('/:id/reset-password', authenticateToken, requireRole('ADMIN'), asyn
   } catch (error) {
     console.error('Error resetting password:', error);
     res.status(500).json({ error: 'Failed to reset password' });
+  }
+});
+
+/**
+ * POST /api/users/:id/pin — set/reset a supervisor step-up PIN (POS Control
+ * Phase 1). Mirrors /:id/reset-password: admin-only, invalidates nothing
+ * else, generates a temp PIN if none supplied. The PIN itself is never
+ * readable again after this response — same "only handed back once"
+ * contract as reset-password's temporaryPassword.
+ */
+router.post('/:id/pin', authenticateToken, requireRole('ADMIN'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await prisma.user.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const suppliedPin = req.body.pin;
+    const newPin = suppliedPin || String(crypto.randomInt(0, 10 ** MAX_PIN_LENGTH)).padStart(MAX_PIN_LENGTH, '0');
+
+    if (!/^\d+$/.test(newPin) || newPin.length < MIN_PIN_LENGTH || newPin.length > MAX_PIN_LENGTH) {
+      return res.status(400).json({ error: `PIN must be ${MIN_PIN_LENGTH}-${MAX_PIN_LENGTH} digits` });
+    }
+
+    const pinHash = await bcrypt.hash(newPin, 10);
+    await prisma.user.update({ where: { id }, data: { pinHash } });
+
+    auditService.safeLog(auditService.eventTypes.USER_UPDATE, {
+      ...auditService.contextFromReq(req),
+      entityType: 'USER',
+      entityId: id,
+      action: 'ADMIN_SET_PIN',
+      description: `Supervisor PIN set for ${existing.email} by admin`,
+      riskLevel: 'MEDIUM',
+    });
+
+    res.json({
+      message: 'PIN set successfully',
+      temporaryPin: suppliedPin ? undefined : newPin,
+    });
+  } catch (error) {
+    console.error('Error setting PIN:', error);
+    res.status(500).json({ error: 'Failed to set PIN' });
   }
 });
 

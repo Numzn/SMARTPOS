@@ -5,12 +5,17 @@ import ProductGrid from './ProductGrid';
 import CartSection from './CartSection';
 import StatusBar from './StatusBar';
 import CheckoutModal from '../../CheckoutModal';
+import SupervisorApprovalModal from './SupervisorApprovalModal';
 import {
   fetchProducts,
   fetchCategories,
   fetchVsdcStatus,
   mockProducts,
   mockCategories,
+  openTillSession,
+  scanItem,
+  reverseLine,
+  abandonTillSession,
 } from '../../../api/cashierApi';
 import { fetchPrinterStatus } from '../../../api/printersApi';
 import { mapPrinterStatusLabel } from '../../../lib/printReceipt';
@@ -30,10 +35,23 @@ const CashierDashboard = () => {
   const [discountType, setDiscountType] = useState('percentage');
   const [discountValue, setDiscountValue] = useState('');
 
+  // Till-lock (POS Control Phase 1) — the server-committed cart backing
+  // this on-screen one. Opened lazily on the first scan of a transaction,
+  // consumed by a successful checkout, abandoned on an explicit clear.
+  const [tillSessionId, setTillSessionId] = useState(null);
+  // A pending decrease/removal awaiting supervisor approval — set opens
+  // SupervisorApprovalModal; { productId, toQuantity, name }.
+  const [pendingReversal, setPendingReversal] = useState(null);
+
   const [zraStatus, setZraStatus] = useState('checking');
   const [printerStatus, setPrinterStatus] = useState('unknown');
   const [networkStatus] = useState('connected');
   const [stockNotice, setStockNotice] = useState('');
+
+  // Dedupes concurrent ensureTillSession() calls — two rapid add-to-cart
+  // clicks before tillSessionId state has updated would otherwise both see
+  // it as null and each open their own orphaned session.
+  const sessionOpenPromiseRef = useRef(null);
 
   // Silent refresh plumbing. Refs rather than state: these only coordinate
   // the polling loop and must never themselves trigger a re-render, which on
@@ -181,56 +199,145 @@ const CashierDashboard = () => {
     window.setTimeout(() => setStockNotice(''), 3000);
   };
 
-  const addToCart = (product) => {
+  // POS Control Phase 1 — the committed cart is server state, opened lazily
+  // on the first scan of a transaction so browsing never creates an empty
+  // session. Mock/demo mode (no real backend) is exempt — free local editing,
+  // exactly as before this feature existed.
+  const ensureTillSession = async () => {
+    if (tillSessionId) return tillSessionId;
+    if (!sessionOpenPromiseRef.current) {
+      sessionOpenPromiseRef.current = openTillSession()
+        .then(({ session }) => {
+          setTillSessionId(session.id);
+          return session.id;
+        })
+        .finally(() => {
+          sessionOpenPromiseRef.current = null;
+        });
+    }
+    return sessionOpenPromiseRef.current;
+  };
+
+  const addToCart = async (product) => {
     if (product.stock <= 0) {
       showStockNotice(`${product.name} is out of stock.`);
       return;
     }
 
-    setCart((prevCart) => {
-      const existingItem = prevCart.find((item) => item.id === product.id);
-      const nextQuantity = (existingItem?.quantity ?? 0) + 1;
+    const existingItem = cart.find((item) => item.id === product.id);
+    const nextQuantity = (existingItem?.quantity ?? 0) + 1;
+    if (nextQuantity > product.stock) {
+      showStockNotice(`Only ${product.stock} of ${product.name} available.`);
+      return;
+    }
 
-      if (nextQuantity > product.stock) {
-        showStockNotice(`Only ${product.stock} of ${product.name} available.`);
-        return prevCart;
+    if (!usingMockData) {
+      try {
+        const sessionId = await ensureTillSession();
+        await scanItem(sessionId, { productId: product.id, quantity: 1, unitPrice: product.price });
+      } catch (err) {
+        showStockNotice(err?.data?.error || err.message || `Could not add ${product.name}.`);
+        return;
       }
+    }
 
-      if (existingItem) {
+    setCart((prevCart) => {
+      const existing = prevCart.find((item) => item.id === product.id);
+      if (existing) {
         return prevCart.map((item) =>
-          item.id === product.id ? { ...item, quantity: nextQuantity } : item
+          item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
         );
       }
       return [...prevCart, { ...product, quantity: 1 }];
     });
   };
 
+  /**
+   * Increasing quantity is always free (scanItem, no approval). Decreasing
+   * or removing an already-committed line opens SupervisorApprovalModal via
+   * pendingReversal — see handleReversalApproved for the actual mutation.
+   */
   const updateCartQuantity = (itemId, newQuantity) => {
+    const item = cart.find((entry) => entry.id === itemId);
+    if (!item) return;
+
     if (newQuantity <= 0) {
       removeFromCart(itemId);
       return;
     }
 
-    const availableStock = getAvailableStock(itemId);
-    const cappedQuantity = Math.min(newQuantity, availableStock);
-
-    if (cappedQuantity < newQuantity) {
-      const item = cart.find((entry) => entry.id === itemId);
-      showStockNotice(`Only ${availableStock} of ${item?.name || 'this item'} available.`);
+    if (newQuantity <= item.quantity) {
+      setPendingReversal({ productId: itemId, toQuantity: newQuantity, name: item.name });
+      return;
     }
 
-    setCart((prevCart) =>
-      prevCart.map((item) => (item.id === itemId ? { ...item, quantity: cappedQuantity } : item))
-    );
+    const availableStock = getAvailableStock(itemId);
+    const cappedQuantity = Math.min(newQuantity, availableStock);
+    if (cappedQuantity < newQuantity) {
+      showStockNotice(`Only ${availableStock} of ${item.name} available.`);
+    }
+    const delta = cappedQuantity - item.quantity;
+    if (delta <= 0) return;
+
+    if (usingMockData) {
+      setCart((prevCart) =>
+        prevCart.map((entry) => (entry.id === itemId ? { ...entry, quantity: cappedQuantity } : entry))
+      );
+      return;
+    }
+
+    scanItem(tillSessionId, { productId: itemId, quantity: delta, unitPrice: item.price })
+      .then(() => {
+        setCart((prevCart) =>
+          prevCart.map((entry) => (entry.id === itemId ? { ...entry, quantity: cappedQuantity } : entry))
+        );
+      })
+      .catch((err) => showStockNotice(err?.data?.error || err.message || 'Could not update quantity.'));
   };
 
   const removeFromCart = (itemId) => {
-    setCart((prevCart) => prevCart.filter((item) => item.id !== itemId));
+    const item = cart.find((entry) => entry.id === itemId);
+    if (!item) return;
+    if (usingMockData) {
+      setCart((prevCart) => prevCart.filter((entry) => entry.id !== itemId));
+      return;
+    }
+    setPendingReversal({ productId: itemId, toQuantity: 0, name: item.name });
+  };
+
+  const handleReversalApproved = async ({ approvalId, reasonCode, reasonNote }) => {
+    const { productId, toQuantity } = pendingReversal;
+    try {
+      await reverseLine(tillSessionId, productId, { toQuantity, approvalId, reasonCode, reasonNote });
+      setCart((prevCart) =>
+        toQuantity <= 0
+          ? prevCart.filter((entry) => entry.id !== productId)
+          : prevCart.map((entry) => (entry.id === productId ? { ...entry, quantity: toQuantity } : entry))
+      );
+    } catch (err) {
+      showStockNotice(err?.data?.error || err.message || 'Reversal failed.');
+    } finally {
+      setPendingReversal(null);
+    }
   };
 
   const clearCart = () => {
+    if (tillSessionId) {
+      abandonTillSession(tillSessionId).catch(() => {}); // best-effort; local state clears regardless
+    }
     setCart([]);
     setDiscountValue('');
+    setTillSessionId(null);
+  };
+
+  // After a successful checkout, the session is already CONSUMED server-side
+  // (see lib/saleFiscal.js) — this just resets local state for the next sale,
+  // deliberately not clearCart(), which would call abandonTillSession on an
+  // already-consumed session for no reason.
+  const resetCartAfterSale = () => {
+    setCart([]);
+    setDiscountValue('');
+    setTillSessionId(null);
   };
 
   const handleCheckout = () => {
@@ -241,7 +348,7 @@ const CashierDashboard = () => {
 
   const handleCheckoutSuccess = () => {
     setShowCheckout(false);
-    clearCart();
+    resetCartAfterSale();
     // The sale just consumed stock; pull the new figures immediately rather
     // than leaving the next customer to be served against pre-sale numbers.
     refreshProductsSilently();
@@ -343,11 +450,31 @@ const CashierDashboard = () => {
         <CheckoutModal
           cart={cart}
           cartTotals={cartTotals}
+          tillSessionId={tillSessionId}
           onSuccess={handleCheckoutSuccess}
           onClose={handleCheckoutClose}
           usingMockData={usingMockData}
         />
       )}
+
+      <SupervisorApprovalModal
+        open={Boolean(pendingReversal)}
+        onClose={() => setPendingReversal(null)}
+        actionType="LINE_REVERSAL"
+        sessionId={tillSessionId}
+        target={
+          pendingReversal
+            ? {
+                productId: pendingReversal.productId,
+                quantity:
+                  (cart.find((item) => item.id === pendingReversal.productId)?.quantity ?? 0) -
+                  pendingReversal.toQuantity,
+              }
+            : undefined
+        }
+        itemLabel={pendingReversal?.name}
+        onApproved={handleReversalApproved}
+      />
     </div>
   );
 };

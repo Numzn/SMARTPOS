@@ -118,7 +118,7 @@ router.post('/checkout', authenticateToken, requirePermission('sales:write'), as
     });
   } catch (error) {
     console.error('Checkout error:', error);
-    res.status(error.status || 500).json({ error: error.message || 'Checkout failed' });
+    res.status(error.status || 500).json({ error: error.message || 'Checkout failed', code: error.code });
   }
 });
 

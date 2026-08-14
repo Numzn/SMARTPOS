@@ -57,6 +57,19 @@ const PERMISSIONS = {
     // receipt they handle, so this grants no visibility they lacked.
     'zra:read',
   ],
+  // Same baseline as CASHIER — a supervisor still works a till day to day.
+  // What actually makes them a supervisor is their PIN passing the
+  // ROLE_RANK check in lib/approval.js, not an extra route permission here.
+  SUPERVISOR: [
+    'products:read',
+    'categories:read',
+    'inventory:read',
+    'sales:read', 'sales:write',
+    'receipts:read',
+    'shifts:write',
+    'customers:read', 'customers:write',
+    'zra:read',
+  ],
   VIEWER: [
     'products:read',
     'categories:read',
@@ -68,6 +81,18 @@ const PERMISSIONS = {
     'suppliers:read',
     'purchasing:read',
   ]
+};
+
+// Ordered role hierarchy for step-up approval checks (lib/approval.js) — an
+// approver just needs rank >= the required tier's rank, so adding or
+// removing a tier later (e.g. a future 5th level) is one map entry, not a
+// redesign of every "who can approve this" check.
+const ROLE_RANK = {
+  VIEWER: 0,
+  CASHIER: 1,
+  SUPERVISOR: 2,
+  MANAGER: 3,
+  ADMIN: 4,
 };
 
 // Session manager for tracking active sessions
@@ -377,5 +402,6 @@ module.exports = {
   requireAnyPermission,
   optionalAuth,
   sessionManager,
-  PERMISSIONS
+  PERMISSIONS,
+  ROLE_RANK
 };

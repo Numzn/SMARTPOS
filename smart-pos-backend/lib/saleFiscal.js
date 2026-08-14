@@ -3,7 +3,6 @@
  * Reference: NUMZPAY GRC FP-001 (fiscal lock).
  */
 
-const bcrypt = require('bcryptjs');
 const prisma = require('./prisma');
 const {
   deductStockForSale,
@@ -13,6 +12,7 @@ const {
   DEFAULT_BRANCH,
 } = require('./inventoryStock');
 const { assertRegisteredProducts } = require('./productRegistration');
+const { consumeApproval } = require('./approval');
 const zraInvoiceService = require('../services/zraInvoice');
 const vsdcService = require('../services/vsdcService');
 
@@ -48,34 +48,18 @@ function resolveLineDiscount(item, product, itemTotal) {
 }
 
 /**
- * A discount above the per-product (or default) threshold needs a manager/
- * admin to sign off with their own password — reuses existing credentials
- * rather than introducing a separate PIN system.
+ * A discount above the per-product (or default) threshold needs a supervisor
+ * (or manager/admin) to sign off — via a short-lived, action-bound approval
+ * ticket already minted through POST /api/till/approvals (lib/approval.js),
+ * not a raw credential carried in the checkout payload itself. Consumed
+ * inside the same transaction as the sale it authorizes.
  */
-async function verifyDiscountApproval(tx, approverUserId, approverPassword) {
-  if (!approverUserId || !approverPassword) {
-    const err = new Error(
-      'This discount requires manager approval — provide approverUserId and approverPassword'
-    );
-    err.status = 403;
-    throw err;
-  }
-
-  const approver = await tx.user.findUnique({ where: { id: approverUserId } });
-  if (!approver || !approver.isActive || !['ADMIN', 'MANAGER'].includes(approver.role)) {
-    const err = new Error('Approver must be an active manager or admin');
-    err.status = 403;
-    throw err;
-  }
-
-  const passwordOk = await bcrypt.compare(approverPassword, approver.password);
-  if (!passwordOk) {
-    const err = new Error('Approver password is incorrect');
-    err.status = 403;
-    throw err;
-  }
-
-  return approver;
+async function verifyDiscountApproval(tx, discountApprovalId, sessionId, discountAmount) {
+  return consumeApproval(tx, discountApprovalId, {
+    actionType: 'ORDER_DISCOUNT',
+    sessionId,
+    target: { discountAmount },
+  });
 }
 
 function parseSalePayload(body) {
@@ -89,6 +73,8 @@ function parseSalePayload(body) {
     customerInfo,
     customerId,
     paymentDetails,
+    tillSessionId,
+    discountApprovalId,
   } = body;
 
   if (!userId || !Array.isArray(items) || items.length === 0) {
@@ -145,7 +131,64 @@ function parseSalePayload(body) {
     customerId: customerId || null,
     amountPaid: Number.isFinite(amountPaid) ? amountPaid : null,
     changeAmount: Number.isFinite(changeAmount) ? changeAmount : null,
+    tillSessionId: tillSessionId || null,
+    discountApprovalId: discountApprovalId || null,
   };
+}
+
+/**
+ * Row-locks the till session, verifies the requesting user owns it and it's
+ * still OPEN, and validates the submitted items exactly match its committed
+ * ACTIVE lines (same products, quantities, prices) — the real enforcement
+ * behind "the cart can't change after the customer sees a total": even a
+ * hand-crafted checkout request can't submit anything the server didn't
+ * already record as scanned. Must run inside the same transaction as the
+ * Sale it authorizes.
+ */
+async function validateAndLockTillSession(tx, sessionId, userId, items) {
+  const locked = await tx.$queryRaw`SELECT id FROM cashier_cart_sessions WHERE id = ${sessionId} FOR UPDATE`;
+  if (!locked.length) {
+    const err = new Error('Till session not found');
+    err.status = 404;
+    throw err;
+  }
+
+  const session = await tx.cashierCartSession.findUnique({ where: { id: sessionId } });
+  if (session.userId !== userId) {
+    const err = new Error('You do not own this till session');
+    err.status = 403;
+    throw err;
+  }
+  if (session.status !== 'OPEN') {
+    const err = new Error(`Till session is ${session.status.toLowerCase()}, not open`);
+    err.status = 409;
+    throw err;
+  }
+
+  const activeLines = await tx.cashierCartLine.findMany({ where: { sessionId, status: 'ACTIVE' } });
+
+  const submitted = new Map(
+    items.map((item) => [item.productId, { quantity: parseInt(item.quantity, 10), price: parseFloat(item.price) }])
+  );
+  const committed = new Map(activeLines.map((line) => [line.productId, line]));
+
+  const mismatchError = () => {
+    const err = new Error(
+      'Submitted cart does not match the till session\'s committed items — it may be stale or tampered with'
+    );
+    err.status = 409;
+    return err;
+  };
+
+  if (submitted.size !== committed.size) throw mismatchError();
+  for (const [productId, sub] of submitted) {
+    const line = committed.get(productId);
+    if (!line || line.quantity !== sub.quantity || Math.abs(line.unitPrice - sub.price) > 0.01) {
+      throw mismatchError();
+    }
+  }
+
+  return session;
 }
 
 async function createPendingSale(body) {
@@ -153,6 +196,14 @@ async function createPendingSale(body) {
 
   return prisma.$transaction(async (tx) => {
     const branchId = parsed.branchId || DEFAULT_BRANCH;
+
+    // Till-lock validation — see validateAndLockTillSession's own comment.
+    // Optional: bare/admin sale creation that never opened a till session is
+    // unaffected, unchanged from before this feature existed.
+    if (parsed.tillSessionId) {
+      await validateAndLockTillSession(tx, parsed.tillSessionId, parsed.userId, parsed.items);
+    }
+
     const openShift = await tx.shift.findFirst({
       where: { userId: parsed.userId, branchId, status: 'OPEN' },
     });
@@ -201,9 +252,19 @@ async function createPendingSale(body) {
     const orderLevelDiscount = parseFloat(parsed.discountAmount) || 0;
     const combinedDiscount = totalLineDiscount + orderLevelDiscount;
 
+    // The order-level (cart-wide) discount needs the same approval gate as a
+    // per-line discount — previously only per-line discounts (a field the
+    // shipped cashier UI never sends) were checked here, so a 100% cart
+    // discount went through with zero approval. See CartSection.jsx/
+    // cartTotals.js for where this value actually comes from.
+    const orderLevelPercent = parsed.subtotal > 0 ? (orderLevelDiscount / parsed.subtotal) * 100 : 0;
+    if (orderLevelDiscount > 0 && orderLevelPercent > DEFAULT_DISCOUNT_APPROVAL_THRESHOLD_PERCENT) {
+      approvalRequired = true;
+    }
+
     let approvedByUserId = null;
     if (approvalRequired) {
-      const approver = await verifyDiscountApproval(tx, body.approverUserId, body.approverPassword);
+      const approver = await verifyDiscountApproval(tx, parsed.discountApprovalId, parsed.tillSessionId, combinedDiscount);
       approvedByUserId = approver.id;
     }
 
@@ -252,6 +313,13 @@ async function createPendingSale(body) {
           itemClsCd: product.zraItemClassification || product.zraClassificationCode || null,
           taxType: product.taxType || null,
         },
+      });
+    }
+
+    if (parsed.tillSessionId) {
+      await tx.cashierCartSession.update({
+        where: { id: parsed.tillSessionId },
+        data: { status: 'CONSUMED' },
       });
     }
 
