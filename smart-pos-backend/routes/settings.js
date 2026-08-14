@@ -5,6 +5,15 @@ const { authenticateToken, requirePermission } = require('../middleware/auth');
 const auditService = require('../services/auditService');
 const { getBusinessProfile, ensureDefaultBusinessProfile } = require('../lib/ensureBusinessProfile');
 const { runDatabaseBackup } = require('../lib/backup');
+const { getDiscountPolicy } = require('../lib/discountPolicy');
+
+const DISCOUNT_POLICY_BOOLEAN_KEYS = [
+  'cashierCanApply',
+  'cashierCanRequest',
+  'supervisorCanApply',
+  'managerCanApply',
+  'approvalRequired',
+];
 
 router.get('/business', authenticateToken, requirePermission('settings:read'), async (req, res) => {
   try {
@@ -20,7 +29,7 @@ router.patch('/business', authenticateToken, requirePermission('settings:write')
   try {
     await ensureDefaultBusinessProfile();
 
-    const { tradingName, tpin, logoUrl, footerLines, showPoweredBy, receiptVersion } = req.body;
+    const { tradingName, tpin, logoUrl, footerLines, showPoweredBy, receiptVersion, discountPolicy } = req.body;
 
     const data = {};
     if (tradingName != null) data.tradingName = String(tradingName);
@@ -36,6 +45,38 @@ router.patch('/business', authenticateToken, requirePermission('settings:write')
     }
     if (showPoweredBy != null) data.showPoweredBy = Boolean(showPoweredBy);
     if (receiptVersion != null) data.receiptVersion = String(receiptVersion);
+
+    // NUMZ discount authorization policy (not a ZRA requirement — see
+    // lib/discountPolicy.js). Server-side validated: only the known boolean
+    // keys are accepted (coerced, unrecognized keys rejected outright) and
+    // merged over the *current* stored policy, never replaced wholesale, so
+    // a partial update can't silently reset unrelated fields to defaults.
+    if (discountPolicy != null) {
+      if (typeof discountPolicy !== 'object' || Array.isArray(discountPolicy)) {
+        return res.status(400).json({ error: 'discountPolicy must be an object' });
+      }
+      const unknownKeys = Object.keys(discountPolicy).filter(
+        (key) => key !== 'discountLimits' && !DISCOUNT_POLICY_BOOLEAN_KEYS.includes(key)
+      );
+      if (unknownKeys.length) {
+        return res.status(400).json({ error: `Unknown discountPolicy field(s): ${unknownKeys.join(', ')}` });
+      }
+      const currentPolicy = await getDiscountPolicy(prisma);
+      const nextPolicy = { ...currentPolicy };
+      for (const key of DISCOUNT_POLICY_BOOLEAN_KEYS) {
+        if (discountPolicy[key] != null) nextPolicy[key] = Boolean(discountPolicy[key]);
+      }
+      // discountLimits is reserved for future per-role percentage caps — not
+      // enforced yet, but validated as an object if supplied so a malformed
+      // value can't silently corrupt the stored policy.
+      if (discountPolicy.discountLimits != null) {
+        if (typeof discountPolicy.discountLimits !== 'object' || Array.isArray(discountPolicy.discountLimits)) {
+          return res.status(400).json({ error: 'discountPolicy.discountLimits must be an object' });
+        }
+        nextPolicy.discountLimits = discountPolicy.discountLimits;
+      }
+      data.discountPolicy = nextPolicy;
+    }
 
     const profile = await prisma.businessProfile.update({
       where: { id: 'default' },

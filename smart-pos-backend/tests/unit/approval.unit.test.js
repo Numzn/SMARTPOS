@@ -123,6 +123,105 @@ describe('lib/approval — supervisor step-up tickets', () => {
         })
       ).rejects.toMatchObject({ status: 400 });
     });
+
+    // Hard security invariant (not policy-configurable) — a user must never
+    // approve their own restricted action, for any actionType.
+    it('rejects self-approval: approverUserId === requesterUserId, for LINE_REVERSAL', async () => {
+      const supervisor = await createTestUser({ role: 'SUPERVISOR', pinHash: await hash('1234') });
+
+      await expect(
+        requestApproval(prisma, {
+          approverUserId: supervisor.id,
+          requesterUserId: supervisor.id,
+          credential: '1234',
+          method: 'PIN',
+          actionType: 'LINE_REVERSAL',
+          sessionId: 's1',
+          target: { productId: 'p1', quantity: 1 },
+        })
+      ).rejects.toMatchObject({ status: 403, code: 'SELF_APPROVAL_DENIED' });
+    });
+
+    it('rejects self-approval for ORDER_DISCOUNT even when the requester has apply authority', async () => {
+      const manager = await createTestUser({ role: 'MANAGER', pinHash: await hash('1234') });
+
+      await expect(
+        requestApproval(prisma, {
+          approverUserId: manager.id,
+          requesterUserId: manager.id,
+          credential: '1234',
+          method: 'PIN',
+          actionType: 'ORDER_DISCOUNT',
+          sessionId: 's1',
+          target: { discountAmount: 50 },
+        })
+      ).rejects.toMatchObject({ status: 403, code: 'SELF_APPROVAL_DENIED' });
+    });
+
+    it('allows approval when requesterUserId differs from approverUserId', async () => {
+      const cashier = await createTestUser({ role: 'CASHIER' });
+      const supervisor = await createTestUser({ role: 'SUPERVISOR', pinHash: await hash('1234') });
+
+      const ticket = await requestApproval(prisma, {
+        approverUserId: supervisor.id,
+        requesterUserId: cashier.id,
+        credential: '1234',
+        method: 'PIN',
+        actionType: 'LINE_REVERSAL',
+        sessionId: 's1',
+        target: { productId: 'p1', quantity: 1 },
+      });
+      expect(ticket.approverUserId).toBe(supervisor.id);
+    });
+
+    // ORDER_DISCOUNT eligibility mirrors discountPolicy's apply authority,
+    // NOT just ROLE_RANK >= SUPERVISOR — a SUPERVISOR who is not authorized
+    // to apply discounts (the strict default) cannot approve one either,
+    // even though they remain a valid LINE_REVERSAL approver.
+    describe('ORDER_DISCOUNT approver eligibility follows discount policy, not just rank', () => {
+      it('rejects a SUPERVISOR approver under the default policy (supervisorCanApply=false)', async () => {
+        const supervisor = await createTestUser({ role: 'SUPERVISOR', pinHash: await hash('1234') });
+
+        await expect(
+          requestApproval(prisma, {
+            approverUserId: supervisor.id,
+            credential: '1234',
+            method: 'PIN',
+            actionType: 'ORDER_DISCOUNT',
+            sessionId: 's1',
+            target: { discountAmount: 50 },
+          })
+        ).rejects.toMatchObject({ status: 403 });
+      });
+
+      it('accepts a MANAGER approver for ORDER_DISCOUNT (managerCanApply=true by default)', async () => {
+        const manager = await createTestUser({ role: 'MANAGER', pinHash: await hash('1234') });
+
+        const ticket = await requestApproval(prisma, {
+          approverUserId: manager.id,
+          credential: '1234',
+          method: 'PIN',
+          actionType: 'ORDER_DISCOUNT',
+          sessionId: 's1',
+          target: { discountAmount: 50 },
+        });
+        expect(ticket.approverUserId).toBe(manager.id);
+      });
+
+      it('the same SUPERVISOR remains a valid LINE_REVERSAL approver (unrelated to discount policy)', async () => {
+        const supervisor = await createTestUser({ role: 'SUPERVISOR', pinHash: await hash('1234') });
+
+        const ticket = await requestApproval(prisma, {
+          approverUserId: supervisor.id,
+          credential: '1234',
+          method: 'PIN',
+          actionType: 'LINE_REVERSAL',
+          sessionId: 's1',
+          target: { productId: 'p1', quantity: 1 },
+        });
+        expect(ticket.approverUserId).toBe(supervisor.id);
+      });
+    });
   });
 
   describe('consumeApproval', () => {

@@ -3,28 +3,33 @@ import bcrypt from 'bcryptjs';
 import testData from '../helpers/testData.js';
 import saleFiscal from '../../lib/saleFiscal.js';
 import { requestApproval } from '../../lib/approval.js';
+import { ensureDefaultBusinessProfile } from '../../lib/ensureBusinessProfile.js';
+import { DEFAULT_DISCOUNT_POLICY } from '../../lib/discountPolicy.js';
+import zraInvoiceService from '../../services/zraInvoice.js';
 
 const { createTestBranch, createTestUser, createSellableProduct, cleanupTestData, prisma, DEFAULT_BRANCH_CODE } =
   testData;
 const { createPendingSale } = saleFiscal;
 
-const MANAGER_PASSWORD = 'manager-test-password-123';
+const APPROVER_PASSWORD = 'approver-test-password-123';
 
-async function createManager() {
-  const hash = await bcrypt.hash(MANAGER_PASSWORD, 4); // low cost factor — tests only
-  return createTestUser({ role: 'MANAGER', password: hash });
+async function createApprover(role) {
+  const hash = await bcrypt.hash(APPROVER_PASSWORD, 4); // low cost factor — tests only
+  return createTestUser({ role, password: hash });
 }
 
-/**
- * Mints an ORDER_DISCOUNT approval ticket the way POST /api/till/approvals
- * would, for tests that call createPendingSale directly (below the route
- * layer). sessionId: null matches this per-line-discount path, which has no
- * till session — see SupervisorApproval's schema comment.
- */
-async function approveDiscount(approverUserId, credential, discountAmount) {
+async function setPolicy(overrides) {
+  await prisma.businessProfile.update({
+    where: { id: 'default' },
+    data: { discountPolicy: { ...DEFAULT_DISCOUNT_POLICY, ...overrides } },
+  });
+}
+
+async function approveDiscount(approverUserId, discountAmount, requesterUserId) {
   const ticket = await requestApproval(prisma, {
     approverUserId,
-    credential,
+    requesterUserId,
+    credential: APPROVER_PASSWORD,
     method: 'PASSWORD',
     actionType: 'ORDER_DISCOUNT',
     sessionId: null,
@@ -33,211 +38,232 @@ async function approveDiscount(approverUserId, credential, discountAmount) {
   return ticket.id;
 }
 
-describe('Discount resolution and manager approval', () => {
+async function fullPriceCheckout(userId, product, discountPercent, extra = {}) {
+  return createPendingSale({
+    userId,
+    branchId: DEFAULT_BRANCH_CODE,
+    discount: (product.price * discountPercent) / 100,
+    items: [{ productId: product.id, quantity: 1, price: product.price }],
+    ...extra,
+  });
+}
+
+describe('Discount authorization (NUMZ POS policy — not a ZRA requirement)', () => {
   beforeAll(async () => {
     await createTestBranch();
+    await ensureDefaultBusinessProfile();
   });
 
   afterEach(async () => {
     await cleanupTestData();
+    await setPolicy({}); // restore the strict default between tests
   });
 
-  it('applies a line discount under the product maxDiscount threshold with no approval needed', async () => {
-    const user = await createTestUser();
+  it.each([1, 5, 10, 50])('cashier + %i%% discount -> DENIED, regardless of size', async (percent) => {
+    const cashier = await createTestUser({ role: 'CASHIER' });
     const product = await createSellableProduct({ stock: 10 });
-    await testData.prisma.product.update({ where: { id: product.id }, data: { maxDiscount: 15 } });
 
-    const sale = await createPendingSale({
-      userId: user.id,
-      branchId: DEFAULT_BRANCH_CODE,
-      items: [{ productId: product.id, quantity: 2, price: 100, discountPercent: 10 }],
+    await expect(fullPriceCheckout(cashier.id, product, percent)).rejects.toMatchObject({
+      status: 403,
+      code: 'DISCOUNT_NOT_AUTHORIZED',
     });
-
-    expect(sale.discount).toBe(20); // 10% of 200
-    expect(sale.discountApprovedByUserId).toBeNull();
-    expect(sale.saleItems[0].discount).toBe(20);
   });
 
-  it('rejects a discount above threshold when no approval ticket is supplied', async () => {
-    const user = await createTestUser();
+  it('cashier direct crafted checkout discount is denied even without going through the UI at all', async () => {
+    const cashier = await createTestUser({ role: 'CASHIER' });
     const product = await createSellableProduct({ stock: 10 });
-    await testData.prisma.product.update({ where: { id: product.id }, data: { maxDiscount: 10 } });
 
+    // Simulates a hand-crafted API call with no prior UI interaction.
     await expect(
       createPendingSale({
-        userId: user.id,
+        userId: cashier.id,
         branchId: DEFAULT_BRANCH_CODE,
-        items: [{ productId: product.id, quantity: 1, price: 100, discountPercent: 25 }],
+        discount: 1, // even a trivial K1 discount
+        items: [{ productId: product.id, quantity: 1, price: product.price }],
       })
-    ).rejects.toMatchObject({ status: 403 });
+    ).rejects.toMatchObject({ status: 403, code: 'DISCOUNT_NOT_AUTHORIZED' });
   });
 
-  it('rejects an approval ticket request from a cashier as approver (must rank >= SUPERVISOR)', async () => {
-    const otherCashier = await createTestUser({ password: await bcrypt.hash('irrelevant', 4) });
+  it('cashier cannot even request a discount while cashierCanRequest=false (the default)', async () => {
+    const cashier = await createTestUser({ role: 'CASHIER' });
+    const product = await createSellableProduct({ stock: 10 });
 
-    await expect(
-      requestApproval(prisma, {
-        approverUserId: otherCashier.id,
-        credential: 'irrelevant',
-        method: 'PASSWORD',
-        actionType: 'ORDER_DISCOUNT',
-        sessionId: null,
-        target: { discountAmount: 25 },
-      })
-    ).rejects.toMatchObject({ status: 403 });
+    // No approval ticket exists (request path is closed), so this must be
+    // denied outright, not fall through to "requires approval".
+    await expect(fullPriceCheckout(cashier.id, product, 20)).rejects.toMatchObject({
+      status: 403,
+      code: 'DISCOUNT_NOT_AUTHORIZED',
+    });
   });
 
-  it('rejects an approval ticket request with a wrong password', async () => {
-    const manager = await createManager();
+  it('manager discount -> ALLOWED directly, no approval ticket needed', async () => {
+    const manager = await createTestUser({ role: 'MANAGER' });
+    const product = await createSellableProduct({ stock: 10 });
+
+    const sale = await fullPriceCheckout(manager.id, product, 50);
+
+    expect(sale.discount).toBeCloseTo(product.price * 0.5, 4);
+    expect(sale.discountApprovedByUserId).toBeNull(); // self-authorized, not "approved by" anyone
+  });
+
+  it('admin discount -> ALLOWED directly, any percentage including 100%', async () => {
+    const admin = await createTestUser({ role: 'ADMIN' });
+    const product = await createSellableProduct({ stock: 10 });
+
+    const sale = await fullPriceCheckout(admin.id, product, 100);
+
+    expect(sale.discount).toBeCloseTo(product.price, 4);
+    expect(sale.total).toBeCloseTo(0, 4);
+  });
+
+  it('supervisor discount is denied under the default policy (supervisorCanApply=false)', async () => {
+    const supervisor = await createTestUser({ role: 'SUPERVISOR' });
+    const product = await createSellableProduct({ stock: 10 });
+
+    await expect(fullPriceCheckout(supervisor.id, product, 10)).rejects.toMatchObject({
+      status: 403,
+      code: 'DISCOUNT_NOT_AUTHORIZED',
+    });
+  });
+
+  it('supervisor discount is allowed once policy.supervisorCanApply is enabled — configurable, as specified', async () => {
+    await setPolicy({ supervisorCanApply: true });
+    const supervisor = await createTestUser({ role: 'SUPERVISOR' });
+    const product = await createSellableProduct({ stock: 10 });
+
+    const sale = await fullPriceCheckout(supervisor.id, product, 10);
+    expect(sale.discount).toBeCloseTo(product.price * 0.1, 4);
+  });
+
+  it('a role with request-but-not-apply authority (policy-enabled) must present a valid ticket from an authorized approver', async () => {
+    await setPolicy({ cashierCanRequest: true }); // cashierCanApply stays false
+    const cashier = await createTestUser({ role: 'CASHIER' });
+    const manager = await createApprover('MANAGER');
+    const product = await createSellableProduct({ stock: 10 });
+    const discountAmount = product.price * 0.2;
+
+    // No ticket yet — still denied, but via the "needs approval" path now,
+    // not an outright authorization denial.
+    await expect(fullPriceCheckout(cashier.id, product, 20)).rejects.toMatchObject({ status: 403 });
+
+    const discountApprovalId = await approveDiscount(manager.id, discountAmount, cashier.id);
+    const sale = await fullPriceCheckout(cashier.id, product, 20, { discountApprovalId });
+
+    expect(sale.discount).toBeCloseTo(discountAmount, 4);
+    expect(sale.discountApprovedByUserId).toBe(manager.id);
+  });
+
+  it('a self-approval attempt on the discount ticket is denied even for an otherwise-authorized approver', async () => {
+    const manager = await createApprover('MANAGER');
 
     await expect(
       requestApproval(prisma, {
         approverUserId: manager.id,
-        credential: 'not-the-right-password',
+        requesterUserId: manager.id,
+        credential: APPROVER_PASSWORD,
         method: 'PASSWORD',
         actionType: 'ORDER_DISCOUNT',
         sessionId: null,
-        target: { discountAmount: 25 },
+        target: { discountAmount: 10 },
       })
-    ).rejects.toMatchObject({ status: 403 });
+    ).rejects.toMatchObject({ status: 403, code: 'SELF_APPROVAL_DENIED' });
+  });
+});
+
+describe('Discount fiscal math — item-level and order-level ZRA reconciliation', () => {
+  beforeAll(async () => {
+    await createTestBranch();
+    await ensureDefaultBusinessProfile();
   });
 
-  it('accepts a discount above threshold when a valid manager-approved ticket is supplied', async () => {
-    const user = await createTestUser();
-    const manager = await createManager();
-    const product = await createSellableProduct({ stock: 10 });
-    await testData.prisma.product.update({ where: { id: product.id }, data: { maxDiscount: 10 } });
-
-    const discountApprovalId = await approveDiscount(manager.id, MANAGER_PASSWORD, 25);
-
-    const sale = await createPendingSale({
-      userId: user.id,
-      branchId: DEFAULT_BRANCH_CODE,
-      items: [{ productId: product.id, quantity: 1, price: 100, discountPercent: 25 }],
-      discountApprovalId,
-    });
-
-    expect(sale.discount).toBe(25);
-    expect(sale.discountApprovedByUserId).toBe(manager.id);
+  afterEach(async () => {
+    await cleanupTestData();
+    await setPolicy({});
   });
 
-  it('a ticket cannot be reused for a second, different sale', async () => {
-    const user = await createTestUser();
-    const manager = await createManager();
-    const product = await createSellableProduct({ stock: 10 });
-    await testData.prisma.product.update({ where: { id: product.id }, data: { maxDiscount: 10 } });
-
-    const discountApprovalId = await approveDiscount(manager.id, MANAGER_PASSWORD, 25);
-
-    await createPendingSale({
-      userId: user.id,
-      branchId: DEFAULT_BRANCH_CODE,
-      items: [{ productId: product.id, quantity: 1, price: 100, discountPercent: 25 }],
-      discountApprovalId,
-    });
-
-    await expect(
-      createPendingSale({
-        userId: user.id,
-        branchId: DEFAULT_BRANCH_CODE,
-        items: [{ productId: product.id, quantity: 1, price: 100, discountPercent: 25 }],
-        discountApprovalId,
-      })
-    ).rejects.toMatchObject({ status: 403 });
-  });
-
-  it('falls back to the default approval threshold when the product has no maxDiscount set', async () => {
-    const user = await createTestUser();
-    const product = await createSellableProduct({ stock: 10 }); // maxDiscount defaults to 0
-
-    // 5% is under the default 10% floor — should not require approval.
-    const okSale = await createPendingSale({
-      userId: user.id,
-      branchId: DEFAULT_BRANCH_CODE,
-      items: [{ productId: product.id, quantity: 1, price: 100, discountPercent: 5 }],
-    });
-    expect(okSale.discountApprovedByUserId).toBeNull();
-
-    // 15% is over the default 10% floor — should require approval.
-    await expect(
-      createPendingSale({
-        userId: user.id,
-        branchId: DEFAULT_BRANCH_CODE,
-        items: [{ productId: product.id, quantity: 1, price: 100, discountPercent: 15 }],
-      })
-    ).rejects.toMatchObject({ status: 403 });
-  });
-
-  it('clamps a discount amount larger than the line subtotal instead of going negative', async () => {
-    const user = await createTestUser();
-    const manager = await createManager();
-    const product = await createSellableProduct({ stock: 10 });
-    await testData.prisma.product.update({ where: { id: product.id }, data: { maxDiscount: 100 } });
-
-    // resolveLineDiscount clamps 500 -> 100 (the line's own subtotal) before
-    // the approval check runs, so the ticket must match the clamped amount.
-    const discountApprovalId = await approveDiscount(manager.id, MANAGER_PASSWORD, 100);
-
-    const sale = await createPendingSale({
-      userId: user.id,
-      branchId: DEFAULT_BRANCH_CODE,
-      items: [{ productId: product.id, quantity: 1, price: 100, discountAmount: 500 }],
-      discountApprovalId,
-    });
-
-    expect(sale.saleItems[0].discount).toBe(100); // clamped to the line's own subtotal
-    expect(sale.discount).toBe(100);
-  });
-
-  it('combines multiple line discounts with an order-level discount into Sale.discount', async () => {
-    const user = await createTestUser();
-    const productA = await createSellableProduct({ stock: 10 });
-    const productB = await createSellableProduct({ stock: 10 });
-    await testData.prisma.product.update({ where: { id: productA.id }, data: { maxDiscount: 20 } });
-    await testData.prisma.product.update({ where: { id: productB.id }, data: { maxDiscount: 20 } });
-
-    const sale = await createPendingSale({
-      userId: user.id,
-      branchId: DEFAULT_BRANCH_CODE,
-      discount: 5, // flat order-level discount, e.g. a loyalty voucher — well under the 10% default threshold
-      items: [
-        { productId: productA.id, quantity: 1, price: 100, discountAmount: 10 },
-        { productId: productB.id, quantity: 1, price: 100, discountPercent: 10 },
-      ],
-    });
-
-    // 10 (flat) + 10 (10% of 100) + 5 (order-level) = 25
-    expect(sale.discount).toBe(25);
-    expect(sale.total).toBe(sale.subtotal + sale.tax - 25);
-  });
-
-  it('an order-level (cart-wide) discount over 10% of subtotal requires approval even with zero line discounts', async () => {
-    const user = await createTestUser();
+  it('no-discount sale: SaleItem totals are unchanged from before this phase (regression)', async () => {
+    const manager = await createTestUser({ role: 'MANAGER' });
     const product = await createSellableProduct({ stock: 10 });
 
-    // This is the loophole item 15*/POS-control fixed: a flat cart-level
-    // discount with no per-line discount fields used to bypass approval
-    // entirely (see lib/saleFiscal.js's orderLevelPercent check).
-    await expect(
-      createPendingSale({
-        userId: user.id,
-        branchId: DEFAULT_BRANCH_CODE,
-        discount: 50, // 50% of a 100 subtotal
-        items: [{ productId: product.id, quantity: 1, price: 100 }],
-      })
-    ).rejects.toMatchObject({ status: 403 });
+    const sale = await createPendingSale({
+      userId: manager.id,
+      branchId: DEFAULT_BRANCH_CODE,
+      items: [{ productId: product.id, quantity: 1, price: product.price }],
+    });
 
-    const manager = await createManager();
-    const discountApprovalId = await approveDiscount(manager.id, MANAGER_PASSWORD, 50);
+    const line = sale.saleItems[0];
+    const expectedTax = product.price * 0.16;
+    expect(line.discount).toBe(0);
+    expect(line.splyAmt).toBeCloseTo(product.price, 4);
+    expect(line.taxblAmt).toBeCloseTo(product.price, 4);
+    expect(line.taxAmt).toBeCloseTo(expectedTax, 4);
+    expect(line.totAmt).toBeCloseTo(product.price + expectedTax, 4);
+  });
+
+  it('non-zero item-level discount: dcRt/dcAmt-equivalent (SaleItem.discount) populated, item totAmt reconciles net of it', async () => {
+    const manager = await createTestUser({ role: 'MANAGER' });
+    const product = await createSellableProduct({ stock: 10 });
 
     const sale = await createPendingSale({
-      userId: user.id,
+      userId: manager.id,
       branchId: DEFAULT_BRANCH_CODE,
-      discount: 50,
-      items: [{ productId: product.id, quantity: 1, price: 100 }],
-      discountApprovalId,
+      items: [{ productId: product.id, quantity: 1, price: product.price, discountPercent: 20 }],
     });
-    expect(sale.discount).toBe(50);
-    expect(sale.discountApprovedByUserId).toBe(manager.id);
+
+    const line = sale.saleItems[0];
+    const expectedDiscount = product.price * 0.2;
+    const expectedBase = product.price - expectedDiscount;
+    expect(line.discount).toBeCloseTo(expectedDiscount, 4);
+    expect(line.taxblAmt).toBeCloseTo(expectedBase, 4);
+    expect(line.totAmt).toBeCloseTo(expectedBase * 1.16, 4);
+  });
+
+  it('order-level discount is NOT distributed into SaleItem — each line totAmt stays full, only Sale.discount/total reflect it', async () => {
+    const manager = await createTestUser({ role: 'MANAGER' });
+    const product = await createSellableProduct({ stock: 10 });
+
+    const sale = await fullPriceCheckout(manager.id, product, 50);
+
+    const line = sale.saleItems[0];
+    expect(line.discount).toBe(0); // order-level discount never touches the line
+    expect(line.totAmt).toBeCloseTo(product.price * 1.16, 4); // full, undiscounted line total
+    expect(sale.discount).toBeCloseTo(product.price * 0.5, 4); // the order-level figure lives on Sale
+  });
+
+  it('order-level discount maps to cashDcRt/cashDcAmt via zraInvoiceService, header total reconciles against the item sum', async () => {
+    const manager = await createTestUser({ role: 'MANAGER' });
+    const product = await createSellableProduct({ stock: 10 });
+    await prisma.product.update({ where: { id: product.id }, data: { zraClassificationCode: '50101500' } });
+
+    const sale = await fullPriceCheckout(manager.id, product, 50);
+    const fullSale = await prisma.sale.findUnique({
+      where: { id: sale.id },
+      include: { saleItems: { include: { product: true } }, user: true },
+    });
+
+    const invoiceData = zraInvoiceService.buildInvoiceDataFromSale(fullSale, { invcNo: 999 });
+
+    const itemTotalSum = invoiceData.items.reduce((s, i) => s + i.totalAmount, 0);
+    expect(invoiceData.cashDiscountAmount).toBeGreaterThan(0);
+    expect(invoiceData.items[0].discountAmount).toBe(0); // not duplicated into the item
+    expect(itemTotalSum - invoiceData.cashDiscountAmount).toBeCloseTo(invoiceData.totalAmount, 4);
+  });
+
+  it('100% discount is a legitimate edge case: header total reconciles to 0, no fiscal-math error', async () => {
+    const admin = await createTestUser({ role: 'ADMIN' });
+    const product = await createSellableProduct({ stock: 10 });
+    await prisma.product.update({ where: { id: product.id }, data: { zraClassificationCode: '50101500' } });
+
+    const sale = await fullPriceCheckout(admin.id, product, 100);
+    const fullSale = await prisma.sale.findUnique({
+      where: { id: sale.id },
+      include: { saleItems: { include: { product: true } }, user: true },
+    });
+
+    const invoiceData = zraInvoiceService.buildInvoiceDataFromSale(fullSale, { invcNo: 998 });
+    const itemTotalSum = invoiceData.items.reduce((s, i) => s + i.totalAmount, 0);
+
+    expect(invoiceData.totalAmount).toBeCloseTo(0, 4);
+    expect(itemTotalSum - invoiceData.cashDiscountAmount).toBeCloseTo(0, 4);
   });
 });

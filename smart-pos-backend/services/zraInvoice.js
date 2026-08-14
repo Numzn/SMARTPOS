@@ -275,6 +275,14 @@ class ZRAInvoiceService {
           `Product ${product.sku || product.name} is missing ZRA classification code`
         );
       }
+      // ZRA item-level discount (dcRt/dcAmt) — line.discount is the actual
+      // per-line discount amount already persisted on SaleItem
+      // (lib/saleFiscal.js); this was previously hardcoded to 0 regardless
+      // of that stored value. Zero in the common case (order-level-only
+      // discounts, or no discount), so no behavior change for those.
+      const discountAmount = Number(line.discount || 0);
+      const discountRate = line.splyAmt > 0 ? (discountAmount / line.splyAmt) * 100 : 0;
+
       return {
         itemCode: product.sku || product.id,
         itemClassification,
@@ -286,14 +294,29 @@ class ZRAInvoiceService {
         quantity: line.qty,
         unitPrice: line.prc,
         supplyAmount: line.splyAmt,
-        discountRate: 0,
-        discountAmount: 0,
+        discountRate,
+        discountAmount,
         taxType: line.taxType || product.taxType || 'A',
         taxableAmount: line.taxblAmt,
         taxAmount: line.taxAmt,
         totalAmount: line.totAmt,
       };
     });
+
+    // ZRA order-level discount (cashDcRt/cashDcAmt) — a separate header field
+    // from item-level dcRt/dcAmt, never distributed across items (per the
+    // spec's own worked example: header totAmt = sum(item.totAmt) - cashDcAmt).
+    // Derived as the residual between the item-total sum and the already-
+    // correct Sale.total, rather than recomputed independently — Sale.total's
+    // own VAT-on-discounted-base math is the existing, proven, unchanged
+    // convention (cartTotals.js/saleFiscal.js), so this guarantees
+    // sum(item.totAmt) - cashDcAmt reconciles to Sale.total exactly, without
+    // touching that convention or requiring a specific tax rate to gross up
+    // by (which would be ambiguous for a mixed-tax-rate cart). Zero for any
+    // sale with no order-level discount, by construction.
+    const itemTotalSum = items.reduce((sum, i) => sum + i.totalAmount, 0);
+    const cashDcAmt = Math.max(0, Math.round((itemTotalSum - sale.total) * 10000) / 10000);
+    const cashDcRt = itemTotalSum > 0 ? (cashDcAmt / itemTotalSum) * 100 : 0;
 
     const invcNo = options.invcNo ?? sale.fiscalInvcNo;
     if (!invcNo) {
@@ -315,6 +338,8 @@ class ZRAInvoiceService {
       totalTaxableAmount: items.reduce((s, i) => s + i.taxableAmount, 0),
       totalTaxAmount: items.reduce((s, i) => s + i.taxAmount, 0),
       totalAmount: sale.total,
+      cashDiscountRate: cashDcRt,
+      cashDiscountAmount: cashDcAmt,
       registeredBy: sale.userId,
       registeredByName: sale.user?.name || sale.user?.email || 'SYSTEM',
     };

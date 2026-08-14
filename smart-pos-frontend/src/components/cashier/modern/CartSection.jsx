@@ -13,6 +13,12 @@ const CartSection = ({
   onDiscountValueChange,
   usingMockData = false,
   getAvailableStock,
+  // NUMZ discount policy (not a ZRA rule) — whether the current user's role
+  // may apply a discount directly or at least request one (which still goes
+  // through the existing supervisor-approval-ticket flow at checkout). When
+  // neither is true (the default for CASHIER), the control is not rendered
+  // at all — backend independently enforces this regardless of the UI.
+  discountAllowed = false,
 }) => {
   const totals = calculateCartTotals(cart, { discountType, discountValue });
 
@@ -109,7 +115,7 @@ const CartSection = ({
         </div>
       )}
 
-      {cart.length > 0 && (
+      {cart.length > 0 && discountAllowed && (
         <div className="border-t border-gray-200 pt-4 mb-6">
           <div className="flex items-center space-x-2 mb-3">
             <Percent className="w-4 h-4 text-gray-500" />

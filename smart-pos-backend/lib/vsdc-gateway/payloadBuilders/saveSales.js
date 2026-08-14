@@ -158,8 +158,12 @@ function buildSaveSalesPayload(invoiceData, vsdcCtx) {
     totTaxblAmt: NUM(totTaxblAmt),
     totTaxAmt: NUM(totTaxAmt),
     totAmt: NUM(invoiceData.totalAmount ?? invoiceData.totAmt ?? 0),
-    cashDcRt: 0,
-    cashDcAmt: 0,
+    // Order-level (cash) discount — a separate header field from each item's
+    // own dcRt/dcAmt, per the ZRA spec's worked example (header totAmt =
+    // sum(item.totAmt) - cashDcAmt, never distributed across items).
+    // Previously hardcoded to 0 regardless of any real order-level discount.
+    cashDcRt: NUM(invoiceData.cashDiscountRate ?? invoiceData.cashDcRt ?? 0, 2),
+    cashDcAmt: NUM(invoiceData.cashDiscountAmount ?? invoiceData.cashDcAmt ?? 0),
     prchrAcptcYn: 'N',
     remark: invoiceData.remark || '',
     regrId: invoiceData.registeredBy || 'SYSTEM',
@@ -194,6 +198,11 @@ function buildSaveSalesPayload(invoiceData, vsdcCtx) {
       totTaxblAmt: payload.totTaxblAmt,
       totTaxAmt: payload.totTaxAmt,
       totAmt: payload.totAmt,
+      // Mirrors the official branch's discount fields — omitting these here
+      // left the mock-mode payload (what mock-vsdc actually receives) unable
+      // to reconcile totAmt against the item sum for any discounted sale.
+      cashDcRt: payload.cashDcRt,
+      cashDcAmt: payload.cashDcAmt,
       itemList: itemList.map((it) => ({
         itemSeq: it.itemSeq,
         itemCd: it.itemCd,
@@ -202,6 +211,8 @@ function buildSaveSalesPayload(invoiceData, vsdcCtx) {
         qty: it.qty,
         prc: it.prc,
         splyAmt: it.splyAmt,
+        dcRt: it.dcRt,
+        dcAmt: it.dcAmt,
         taxTyCd: it.vatCatCd,
         taxblAmt: it.vatTaxblAmt,
         taxAmt: it.vatAmt,

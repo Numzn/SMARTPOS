@@ -205,4 +205,29 @@ describe('POST/GET/PATCH/DELETE /api/till/sessions, POST /api/till/approvals', (
     expect(ids).not.toContain(inactiveManager.id);
     expect(res.body.approvers[0]).not.toHaveProperty('email');
   });
+
+  it('POST /approvals rejects self-approval at the HTTP layer (requesterUserId threaded from the authenticated caller)', async () => {
+    const supervisor = await createTestUser({ role: 'SUPERVISOR', pinHash: await bcrypt.hash('4321', 4) });
+
+    const openRes = await request(app)
+      .post('/api/till/sessions')
+      .set('Authorization', `Bearer ${tokenFor(supervisor)}`)
+      .send({ branchId: DEFAULT_BRANCH_CODE });
+    const sessionId = openRes.body.session.id;
+
+    const res = await request(approvalsApp)
+      .post('/api/till/approvals')
+      .set('Authorization', `Bearer ${tokenFor(supervisor)}`)
+      .send({
+        actionType: 'LINE_REVERSAL',
+        method: 'PIN',
+        credential: '4321',
+        approverUserId: supervisor.id, // approving their own request
+        sessionId,
+        target: { productId: 'irrelevant', quantity: 1 },
+      });
+
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('SELF_APPROVAL_DENIED');
+  });
 });

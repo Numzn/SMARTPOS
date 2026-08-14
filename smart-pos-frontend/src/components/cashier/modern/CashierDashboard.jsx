@@ -16,6 +16,7 @@ import {
   scanItem,
   reverseLine,
   abandonTillSession,
+  fetchDiscountPolicy,
 } from '../../../api/cashierApi';
 import { fetchPrinterStatus } from '../../../api/printersApi';
 import { mapPrinterStatusLabel } from '../../../lib/printReceipt';
@@ -34,6 +35,9 @@ const CashierDashboard = () => {
 
   const [discountType, setDiscountType] = useState('percentage');
   const [discountValue, setDiscountValue] = useState('');
+  // NUMZ discount policy (not a ZRA rule) — fail-closed default (false)
+  // until the real policy loads, so an unauthorized control never flashes.
+  const [discountAllowed, setDiscountAllowed] = useState(false);
 
   // Till-lock (POS Control Phase 1) — the server-committed cart backing
   // this on-screen one. Opened lazily on the first scan of a transaction,
@@ -72,6 +76,20 @@ const CashierDashboard = () => {
 
   useEffect(() => {
     fetchInitialData();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchDiscountPolicy()
+      .then((res) => {
+        if (!cancelled) setDiscountAllowed(Boolean(res.canApply || res.canRequest));
+      })
+      .catch(() => {
+        // Fail closed — stays hidden if the policy can't be loaded.
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -384,6 +402,7 @@ const CashierDashboard = () => {
                 onDiscountValueChange={setDiscountValue}
                 usingMockData={usingMockData}
                 getAvailableStock={getAvailableStock}
+                discountAllowed={usingMockData || discountAllowed}
               />
             </div>
           </div>

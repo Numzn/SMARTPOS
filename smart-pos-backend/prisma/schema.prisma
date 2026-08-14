@@ -968,6 +968,11 @@ model BusinessProfile {
   footerLines     Json     @default("[]")
   showPoweredBy   Boolean  @default(true)
   receiptVersion  String   @default("1.0")
+  // NUMZ discount authorization policy (not a ZRA requirement) — see
+  // lib/discountPolicy.js for the shape and safe-default merge logic. The
+  // DB default here is the strict/safe policy: existing installations that
+  // never touch this become strict, not permissive.
+  discountPolicy  Json     @default("{\"cashierCanApply\":false,\"cashierCanRequest\":false,\"supervisorCanApply\":false,\"managerCanApply\":true,\"approvalRequired\":true,\"discountLimits\":{}}")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 

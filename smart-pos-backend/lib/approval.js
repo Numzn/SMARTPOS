@@ -10,16 +10,35 @@
  */
 const bcrypt = require('bcryptjs');
 const { ROLE_RANK } = require('../middleware/auth');
+const { getDiscountPolicy, canApplyDiscount } = require('./discountPolicy');
 
 const APPROVAL_TTL_MS = 3 * 60 * 1000; // 3 minutes — long enough to type a PIN, short enough not to become a standing credential.
+
+/**
+ * Per-actionType approver eligibility. LINE_REVERSAL keeps the original
+ * rank-floor check (till-lock is unrelated to discount policy). ORDER_DISCOUNT
+ * eligibility mirrors discount *apply* authority — approving someone else's
+ * discount request requires the same authority as applying one directly, so
+ * e.g. a SUPERVISOR whose discountPolicy.supervisorCanApply is false cannot
+ * approve a discount either, even though they can still approve reversals.
+ */
+async function isEligibleApprover(db, approver, actionType) {
+  if (actionType === 'ORDER_DISCOUNT') {
+    const policy = await getDiscountPolicy(db);
+    return canApplyDiscount(approver.role, policy);
+  }
+  return (ROLE_RANK[approver.role] ?? -1) >= ROLE_RANK.SUPERVISOR;
+}
 
 /**
  * Verify an approver's PIN/password and mint an approval ticket bound to one
  * specific action. `db` is either the raw prisma client or an active `tx` —
  * this is normally called standalone (POST /api/till/approvals), outside any
- * other transaction.
+ * other transaction. `requesterUserId` is the authenticated caller asking for
+ * the ticket — required so a user can never approve their own request; this
+ * is a hard invariant, not policy-configurable.
  */
-async function requestApproval(db, { approverUserId, credential, method, actionType, sessionId, target = {} }) {
+async function requestApproval(db, { approverUserId, requesterUserId, credential, method, actionType, sessionId, target = {} }) {
   if (!approverUserId || !credential) {
     const err = new Error('Supervisor approval requires approverUserId and a credential');
     err.status = 403;
@@ -35,10 +54,20 @@ async function requestApproval(db, { approverUserId, credential, method, actionT
     err.status = 400;
     throw err;
   }
+  if (requesterUserId && approverUserId === requesterUserId) {
+    const err = new Error('You cannot approve your own request');
+    err.status = 403;
+    err.code = 'SELF_APPROVAL_DENIED';
+    throw err;
+  }
 
   const approver = await db.user.findUnique({ where: { id: approverUserId } });
-  if (!approver || !approver.isActive || (ROLE_RANK[approver.role] ?? -1) < ROLE_RANK.SUPERVISOR) {
-    const err = new Error('Approver must be an active supervisor, manager, or admin');
+  if (!approver || !approver.isActive || !(await isEligibleApprover(db, approver, actionType))) {
+    const err = new Error(
+      actionType === 'ORDER_DISCOUNT'
+        ? 'Approver is not authorized to apply discounts under the current policy'
+        : 'Approver must be an active supervisor, manager, or admin'
+    );
     err.status = 403;
     throw err;
   }

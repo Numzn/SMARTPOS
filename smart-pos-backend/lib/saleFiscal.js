@@ -13,6 +13,7 @@ const {
 } = require('./inventoryStock');
 const { assertRegisteredProducts } = require('./productRegistration');
 const { consumeApproval } = require('./approval');
+const { getDiscountPolicy, canApplyDiscount, canRequestDiscount } = require('./discountPolicy');
 const zraInvoiceService = require('../services/zraInvoice');
 const vsdcService = require('../services/vsdcService');
 
@@ -226,12 +227,13 @@ async function createPendingSale(body) {
     const resolvedCustomerName = parsed.customerName || customer?.name || null;
     const resolvedCustomerTpin = parsed.customerTpin || customer?.tpin || null;
 
-    // Resolve each line's discount and whether any of them (or the
-    // order-level discount) crosses the approval threshold, before creating
-    // any rows — an approval failure must not leave a half-written sale.
+    // Resolve each line's discount amount (clamped to the line's own
+    // subtotal) before creating any rows — an approval failure must not
+    // leave a half-written sale. resolveLineDiscount's own requiresApproval
+    // output is no longer used to gate anything (see below) — WHO may
+    // discount at all is a role/policy question, not a size-of-discount one.
     const lineResolutions = [];
     let totalLineDiscount = 0;
-    let approvalRequired = false;
 
     for (const item of parsed.items) {
       const product = await tx.product.findUnique({ where: { id: item.productId } });
@@ -242,9 +244,8 @@ async function createPendingSale(body) {
       const quantity = parseInt(item.quantity, 10);
       const unitPrice = parseFloat(item.price);
       const itemTotal = quantity * unitPrice;
-      const { discount: lineDiscount, requiresApproval } = resolveLineDiscount(item, product, itemTotal);
+      const { discount: lineDiscount } = resolveLineDiscount(item, product, itemTotal);
 
-      if (requiresApproval) approvalRequired = true;
       totalLineDiscount += lineDiscount;
       lineResolutions.push({ item, product, quantity, unitPrice, itemTotal, lineDiscount });
     }
@@ -252,14 +253,30 @@ async function createPendingSale(body) {
     const orderLevelDiscount = parseFloat(parsed.discountAmount) || 0;
     const combinedDiscount = totalLineDiscount + orderLevelDiscount;
 
-    // The order-level (cart-wide) discount needs the same approval gate as a
-    // per-line discount — previously only per-line discounts (a field the
-    // shipped cashier UI never sends) were checked here, so a 100% cart
-    // discount went through with zero approval. See CartSection.jsx/
-    // cartTotals.js for where this value actually comes from.
-    const orderLevelPercent = parsed.subtotal > 0 ? (orderLevelDiscount / parsed.subtotal) * 100 : 0;
-    if (orderLevelDiscount > 0 && orderLevelPercent > DEFAULT_DISCOUNT_APPROVAL_THRESHOLD_PERCENT) {
-      approvalRequired = true;
+    // Discount authorization — NUMZ POS policy, not a ZRA rule (ZRA only
+    // defines the fiscal representation, dcRt/dcAmt + cashDcRt/cashDcAmt).
+    // FIRST determine WHO is authorized to apply a discount at all (by role
+    // + the configurable BusinessProfile.discountPolicy); a percentage
+    // threshold never grants permission on its own — the old "under 10% is
+    // free" model is retired. A role that can apply directly needs no
+    // ticket; a role that can only request needs one from an approver who
+    // also has apply authority (lib/approval.js's isEligibleApprover); a
+    // role with neither is denied outright, before any ticket is even
+    // considered.
+    let approvalRequired = false;
+    if (combinedDiscount > 0) {
+      const applicant = await tx.user.findUnique({ where: { id: parsed.userId }, select: { role: true } });
+      const policy = await getDiscountPolicy(tx);
+
+      if (!canApplyDiscount(applicant?.role, policy)) {
+        if (!canRequestDiscount(applicant?.role, policy)) {
+          const err = new Error('Your role is not authorized to apply a discount');
+          err.status = 403;
+          err.code = 'DISCOUNT_NOT_AUTHORIZED';
+          throw err;
+        }
+        approvalRequired = true;
+      }
     }
 
     let approvedByUserId = null;
@@ -291,9 +308,15 @@ async function createPendingSale(body) {
     for (const { item, product, quantity, unitPrice, itemTotal, lineDiscount } of lineResolutions) {
       const taxRate = (product.taxRate ?? 16) / 100;
       const splyAmt = itemTotal;
-      const taxblAmt = splyAmt;
+      // Item-level (ZRA dcAmt) discount reduces the taxable base before tax
+      // is added — when lineDiscount is 0 (the common case today, since the
+      // shipped UI only ever sends an order-level discount) this reduces to
+      // exactly the prior splyAmt/taxblAmt/taxAmt/totAmt formulas, so
+      // ordinary non-discounted sales are byte-for-byte unchanged.
+      const discountedBase = splyAmt - lineDiscount;
+      const taxblAmt = discountedBase;
       const taxAmt = taxblAmt * taxRate;
-      const totAmt = splyAmt + taxAmt;
+      const totAmt = discountedBase + taxAmt;
 
       await tx.saleItem.create({
         data: {

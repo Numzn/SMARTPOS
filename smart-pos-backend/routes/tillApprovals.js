@@ -3,9 +3,30 @@ const router = express.Router();
 const prisma = require('../lib/prisma');
 const { authenticateToken, ROLE_RANK } = require('../middleware/auth');
 const { requestApproval } = require('../lib/approval');
+const { getDiscountPolicy, canApplyDiscount, canRequestDiscount } = require('../lib/discountPolicy');
 const auditService = require('../services/auditService');
 
 const APPROVER_ROLES = Object.keys(ROLE_RANK).filter((role) => ROLE_RANK[role] >= ROLE_RANK.SUPERVISOR);
+
+/**
+ * GET /api/till/discount-policy — whether the CURRENT user's own role may
+ * apply/request a discount. Deliberately narrow (booleans only, not the raw
+ * policy/thresholds) — any authenticated till user needs this to decide
+ * whether to show a discount control at all; the full policy object is a
+ * settings:read-gated concern (routes/settings.js), not a till concern.
+ */
+router.get('/discount-policy', authenticateToken, async (req, res) => {
+  try {
+    const policy = await getDiscountPolicy(prisma);
+    res.json({
+      canApply: canApplyDiscount(req.user.role, policy),
+      canRequest: canRequestDiscount(req.user.role, policy),
+    });
+  } catch (error) {
+    console.error('Error loading discount policy:', error.message);
+    res.status(500).json({ error: 'Failed to load discount policy' });
+  }
+});
 
 /**
  * GET /api/till/approvers — id+name only (no email, no other fields) of
@@ -63,6 +84,7 @@ router.post('/approvals', authenticateToken, async (req, res) => {
 
     const approval = await requestApproval(prisma, {
       approverUserId,
+      requesterUserId: req.user.userId,
       credential,
       method,
       actionType,
@@ -82,7 +104,7 @@ router.post('/approvals', authenticateToken, async (req, res) => {
     res.status(201).json({ approvalId: approval.id, expiresAt: approval.expiresAt });
   } catch (error) {
     console.error('Supervisor approval request failed:', error.message);
-    res.status(error.status || 500).json({ error: error.message || 'Approval request failed' });
+    res.status(error.status || 500).json({ error: error.message || 'Approval request failed', code: error.code });
   }
 });
 

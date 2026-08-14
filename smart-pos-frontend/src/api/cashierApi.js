@@ -83,6 +83,11 @@ export async function fetchApprovers() {
   return apiFetch('/till/approvers');
 }
 
+/** Whether the current user's role may apply/request a discount. */
+export async function fetchDiscountPolicy() {
+  return apiFetch('/till/discount-policy');
+}
+
 // Mock data fallback when API is unavailable
 export const mockProducts = [
   { id: 1, name: 'Coca Cola 500ml', price: 8.5, category: 'Beverages', stock: 50 },
