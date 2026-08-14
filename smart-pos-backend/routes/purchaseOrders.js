@@ -12,6 +12,7 @@ const {
 const { authenticateToken, requirePermission } = require('../middleware/auth');
 const { DEFAULT_BRANCH } = require('../lib/inventoryStock');
 const auditService = require('../services/auditService');
+const purchaseSaveSync = require('../lib/vsdc-gateway/purchaseSaveSync');
 
 function actorId(req) {
   return req.user?.userId || req.user?.id || null;
@@ -162,7 +163,19 @@ router.post('/:id/cancel', authenticateToken, requirePermission('purchasing:writ
   }
 });
 
-/** POST /api/purchase-orders/:id/receive */
+/**
+ * POST /api/purchase-orders/:id/receive
+ *
+ * Item 15* — a successful receive automatically fires fiscal purchase
+ * reporting for the new GRN (syncAfterReceive), so an operator no longer
+ * has to remember the separate POST /api/vsdc/purchases/sync call. The
+ * trigger fires only after receiveAgainstPurchaseOrder's own transaction has
+ * committed and the response is already built, so a VSDC outage can never
+ * roll back or block the receive itself — it only leaves the GRN's
+ * zraSyncedAt null, which is exactly the same "pending" state
+ * /api/vsdc/purchases/sync already recovers from (kept fully intact below,
+ * unchanged, for historical/administrative retry).
+ */
 router.post('/:id/receive', authenticateToken, requirePermission('purchasing:write'), async (req, res) => {
   try {
     const result = await receiveAgainstPurchaseOrder(req.params.id, {
@@ -183,6 +196,8 @@ router.post('/:id/receive', authenticateToken, requirePermission('purchasing:wri
     });
 
     res.status(201).json({ success: true, ...result });
+
+    purchaseSaveSync.syncAfterReceive(result.grn.id);
   } catch (error) {
     console.error('Error receiving against purchase order:', error.message);
     res.status(error.status || 500).json({ success: false, error: error.message || 'Failed to receive stock' });

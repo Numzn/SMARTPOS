@@ -161,9 +161,28 @@ async function syncPendingGrns(options = {}) {
   return { attempted: grns.length, succeeded, failed, items };
 }
 
+/**
+ * Item 15* — fire-and-forget sync for a just-received GRN; never throws.
+ * Mirrors stockSyncService's syncAfterSale/syncAfterMovements: the caller
+ * (routes/purchaseOrders.js's POST /:id/receive) invokes this AFTER its own
+ * transaction has already committed the GRN, so a VSDC failure here can
+ * never roll back or lose the receive — syncGrnById() already leaves
+ * zraSyncedAt untouched on failure (only zraSyncError is set), which is the
+ * same "unsynced=retryable" sentinel POST /api/vsdc/purchases/sync's
+ * getPendingGrns() already scans, so that endpoint is the built-in recovery
+ * path for anything this trigger misses (crash, VSDC down, etc.) — no
+ * second/competing idempotency or retry mechanism needed.
+ */
+function syncAfterReceive(grnId) {
+  syncGrnById(grnId).catch((err) => {
+    console.warn('[purchaseSaveSync] post-receive sync failed:', err.message);
+  });
+}
+
 module.exports = {
   getPendingGrns,
   submitPurchaseToVsdc,
   syncGrnById,
   syncPendingGrns,
+  syncAfterReceive,
 };

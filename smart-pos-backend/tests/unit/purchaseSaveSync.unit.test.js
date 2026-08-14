@@ -197,4 +197,72 @@ describe('purchaseSaveSync', () => {
     const pending = await purchaseSaveSync.getPendingGrns({ limit: 1 });
     expect(pending.length).toBeLessThanOrEqual(1);
   });
+
+  // Item 15* — syncAfterReceive is the fire-and-forget wrapper routes/purchaseOrders.js
+  // calls after a receive transaction commits. It never returns a promise
+  // (matching stockSyncService.syncAfterSale/syncAfterMovements exactly), so
+  // these tests observe its effect via the DB rather than awaiting it directly.
+  describe('syncAfterReceive (item 15*)', () => {
+    it('13. fires syncGrnById in the background and it completes successfully', async () => {
+      const { grn } = await setupGrn();
+      const postSpy = vi.spyOn(transport, 'authenticatedPost').mockResolvedValue(mockResponse());
+
+      purchaseSaveSync.syncAfterReceive(grn.id);
+
+      await vi.waitFor(async () => {
+        const refreshed = await prisma.goodsReceivedNote.findUnique({ where: { id: grn.id } });
+        expect(refreshed.zraSyncedAt).toBeTruthy();
+      });
+      expect(postSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('14. a VSDC failure leaves the GRN pending (zraSyncedAt null) with the error recorded, not lost', async () => {
+      const { grn } = await setupGrn();
+      vi.spyOn(transport, 'authenticatedPost').mockResolvedValue({
+        success: false,
+        data: { resultCd: '999', resultMsg: 'Simulated VSDC outage' },
+      });
+
+      purchaseSaveSync.syncAfterReceive(grn.id);
+
+      await vi.waitFor(async () => {
+        const refreshed = await prisma.goodsReceivedNote.findUnique({ where: { id: grn.id } });
+        expect(refreshed.zraSyncError).toMatch(/Simulated VSDC outage/);
+      });
+      const refreshed = await prisma.goodsReceivedNote.findUnique({ where: { id: grn.id } });
+      expect(refreshed.zraSyncedAt).toBeNull();
+    });
+
+    it('15. never throws synchronously and logs a warning if the underlying sync rejects unexpectedly', async () => {
+      // A real, unmocked Prisma failure (not a stub) — id:null fails Prisma's
+      // own query validation for a non-nullable String field, exercising the
+      // actual exception path syncGrnById doesn't wrap in its own try/catch.
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      expect(() => purchaseSaveSync.syncAfterReceive(null)).not.toThrow();
+
+      await vi.waitFor(() => {
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+        expect(warnSpy.mock.calls[0][0]).toBe('[purchaseSaveSync] post-receive sync failed:');
+      });
+    });
+
+    it('16. calling it twice for the same GRN (duplicate trigger) only submits once — the second call is skipped', async () => {
+      const { grn } = await setupGrn();
+      const postSpy = vi.spyOn(transport, 'authenticatedPost').mockResolvedValue(mockResponse());
+
+      purchaseSaveSync.syncAfterReceive(grn.id);
+      await vi.waitFor(async () => {
+        const refreshed = await prisma.goodsReceivedNote.findUnique({ where: { id: grn.id } });
+        expect(refreshed.zraSyncedAt).toBeTruthy();
+      });
+
+      // A second trigger for the same GRN — e.g. a duplicated route call, or
+      // an operator also clicking manual sync after the automatic one landed.
+      purchaseSaveSync.syncAfterReceive(grn.id);
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(postSpy).toHaveBeenCalledTimes(1);
+    });
+  });
 });
