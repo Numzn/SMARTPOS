@@ -125,11 +125,36 @@ const ProductImportModal = ({ show, onClose, onImported }) => {
       footer={footer}
     >
       {done ? (
-        <div className="bg-green-50 border border-green-200 rounded-md p-4 text-sm text-green-900">
-          Imported <strong>{done.created}</strong> new product{done.created === 1 ? '' : 's'} and
-          updated <strong>{done.updated}</strong>.
-          {done.categoriesCreated > 0 && (
-            <> Created <strong>{done.categoriesCreated}</strong> new categor{done.categoriesCreated === 1 ? 'y' : 'ies'}.</>
+        <div className="space-y-3">
+          <div className="bg-green-50 border border-green-200 rounded-md p-4 text-sm text-green-900">
+            Imported <strong>{done.created}</strong> new product{done.created === 1 ? '' : 's'} and
+            updated <strong>{done.updated}</strong>.
+            {done.categoriesCreated > 0 && (
+              <> Created <strong>{done.categoriesCreated}</strong> new categor{done.categoriesCreated === 1 ? 'y' : 'ies'}.</>
+            )}
+          </div>
+
+          {done.registration && (
+            <div className="bg-blue-50 border border-blue-200 rounded-md p-4 text-sm text-blue-900">
+              {done.registration.registered > 0 && (
+                <>Registered <strong>{done.registration.registered}</strong> with ZRA. </>
+              )}
+              {done.registration.failed > 0 && (
+                <>
+                  <strong>{done.registration.failed}</strong> failed to register — check the product list for
+                  details.{' '}
+                </>
+              )}
+              {done.registration.skippedNoCode > 0 && (
+                <>
+                  <strong>{done.registration.skippedNoCode}</strong> still need a classification code before they
+                  can register.
+                </>
+              )}
+              {done.registration.registered === 0 &&
+                done.registration.failed === 0 &&
+                done.registration.skippedNoCode === 0 && <>No rows had a classification code to register.</>}
+            </div>
           )}
         </div>
       ) : (
@@ -149,13 +174,22 @@ const ProductImportModal = ({ show, onClose, onImported }) => {
             <p className="text-xs text-gray-500 mt-1">
               Required columns: <code>name</code>, <code>price</code>. Optional:{' '}
               <code>sku</code>, <code>category</code>, <code>cost</code>, <code>barcode</code>,{' '}
-              <code>brand</code>, <code>unit</code>, <code>taxRate</code>, <code>description</code>.{' '}
+              <code>brand</code>, <code>unit</code>, <code>taxRate</code>, <code>description</code>,{' '}
+              <code>zraClassificationCode</code>, <code>taxType</code>, <code>zraPackageUnit</code>,{' '}
+              <code>zraQuantityUnit</code>.{' '}
               <code>taxRate</code> is a percentage (<code>16</code> = 16% VAT) and also accepts a
               VAT category name — <code>STANDARD</code>, <code>ZERO_RATED</code> or{' '}
               <code>EXEMPT</code>.
               Rows are matched on <code>sku</code> — a match updates, anything else is created.
               Columns you leave out are left untouched. Export the catalogue first for a
               ready-made template.
+            </p>
+            <p className="text-xs text-gray-500 mt-1">
+              ZRA code columns, if given, must be valid ZRA-synced codes — an unrecognised code is
+              a row error, same as an unrecognised category. Rows that end up with a
+              classification code are automatically submitted for ZRA registration right after
+              import; rows without one stay Pending — use "Register pending products" from the
+              product list once you've added codes.
             </p>
           </div>
 
@@ -211,7 +245,7 @@ const ProductImportModal = ({ show, onClose, onImported }) => {
                 <table className="min-w-full text-sm">
                   <thead className="bg-gray-50 sticky top-0">
                     <tr>
-                      {['Line', 'Action', 'Name', 'SKU', 'Price', 'Problem'].map((h) => (
+                      {['Line', 'Action', 'Name', 'SKU', 'Price', 'ZRA Code', 'Problem'].map((h) => (
                         <th key={h} className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
                           {h}
                         </th>
@@ -234,6 +268,7 @@ const ProductImportModal = ({ show, onClose, onImported }) => {
                             ? '—'
                             : `K${Number(row.data.price).toFixed(2)}`}
                         </td>
+                        <td className="px-3 py-2 text-gray-600">{row.data.zraClassificationCode || '—'}</td>
                         <td className="px-3 py-2 text-red-700 text-xs">{row.errors.join('; ') || ''}</td>
                       </tr>
                     ))}

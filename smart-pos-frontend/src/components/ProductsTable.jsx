@@ -94,6 +94,17 @@ const ProductsTable = ({
                                 Retry
                               </button>
                             )}
+                            {product.zraRegistrationStatus !== 'REGISTERED' &&
+                              !product.zraClassificationCode &&
+                              !product.zraItemClassification && (
+                                <button
+                                  type="button"
+                                  onClick={() => onEdit(product)}
+                                  className="text-blue-600 hover:text-blue-800 underline"
+                                >
+                                  Add classification code
+                                </button>
+                              )}
                           </div>
                         );
                       })()}

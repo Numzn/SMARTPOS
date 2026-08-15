@@ -203,7 +203,9 @@ router.post('/import', authenticateToken, requirePermission('products:write'), a
       entityType: 'PRODUCT',
       action: 'IMPORT_PRODUCTS_CSV',
       newValues: result,
-      description: `Imported products from CSV: ${result.created} created, ${result.updated} updated`,
+      description: `Imported products from CSV: ${result.created} created, ${result.updated} updated, ` +
+        `${result.registration.registered} registered, ${result.registration.failed} registration failure(s), ` +
+        `${result.registration.skippedNoCode} without a classification code`,
     });
 
     return res.json({ dryRun: false, ...result });
@@ -212,6 +214,79 @@ router.post('/import', authenticateToken, requirePermission('products:write'), a
     return res
       .status(error.status || 500)
       .json({ error: error.message || 'Failed to import products', plan: error.plan });
+  }
+});
+
+/**
+ * POST /api/products/bulk-register — best-effort ZRA registration for every
+ * product still stuck at PENDING/FAILED that already has a classification
+ * code (from a CSV import or a manual edit). Sequential, capped by `limit`
+ * so one call has a bounded worst-case duration — call again to keep
+ * working through a large backlog (see `remaining` in the response).
+ * Products with no classification code at all are reported, not silently
+ * skipped, so the caller knows exactly what still needs fixing.
+ */
+router.post('/bulk-register', authenticateToken, requirePermission('products:write'), async (req, res) => {
+  try {
+    const limit = Math.min(500, Math.max(1, parseInt(req.body?.limit, 10) || 200));
+
+    const candidates = await prisma.product.findMany({
+      where: { zraRegistrationStatus: { in: ['PENDING', 'FAILED'] } },
+      select: { id: true, sku: true, name: true, zraClassificationCode: true, zraItemClassification: true },
+      orderBy: { updatedAt: 'asc' },
+    });
+
+    const withCode = candidates.filter((p) => p.zraItemClassification || p.zraClassificationCode);
+    const noCode = candidates.filter((p) => !p.zraItemClassification && !p.zraClassificationCode);
+    const toAttempt = withCode.slice(0, limit);
+    const remaining = Math.max(0, withCode.length - toAttempt.length);
+
+    const results = [];
+    let registered = 0;
+    let failed = 0;
+    for (const product of toAttempt) {
+      const outcome = await registerProductWithVsdc(product.id);
+      if (outcome.success) {
+        registered += 1;
+        results.push({ productId: product.id, sku: product.sku, name: product.name, status: 'REGISTERED' });
+      } else {
+        failed += 1;
+        results.push({
+          productId: product.id,
+          sku: product.sku,
+          name: product.name,
+          status: 'FAILED',
+          error: outcome.error,
+        });
+      }
+      // Small pacing delay between calls — matches the existing bulkSaveItems
+      // precedent (services/itemManagement.js) so a large batch doesn't
+      // hammer VSDC back-to-back.
+      if (toAttempt.length > 1) await new Promise((r) => setTimeout(r, 150));
+    }
+
+    const response = {
+      attempted: toAttempt.length,
+      registered,
+      failed,
+      skippedNoCode: noCode.length,
+      remaining,
+      results,
+      noCodeProducts: noCode.slice(0, 50).map((p) => ({ id: p.id, sku: p.sku, name: p.name })),
+    };
+
+    auditService.safeLog(auditService.eventTypes.PRODUCT_BULK_REGISTER, {
+      ...auditService.contextFromReq(req),
+      entityType: 'PRODUCT',
+      action: 'BULK_REGISTER',
+      newValues: { attempted: toAttempt.length, registered, failed, skippedNoCode: noCode.length },
+      description: `Bulk-registered pending products: ${registered} registered, ${failed} failed, ${noCode.length} skipped (no classification code)`,
+    });
+
+    return res.json(response);
+  } catch (error) {
+    console.error('Error bulk-registering products:', error.message);
+    return res.status(500).json({ error: error.message || 'Bulk registration failed' });
   }
 });
 

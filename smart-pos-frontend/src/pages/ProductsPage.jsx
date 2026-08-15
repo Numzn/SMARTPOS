@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import ProductImportModal from '../components/products/ProductImportModal';
+import BulkRegisterModal from '../components/products/BulkRegisterModal';
 import { productImportApi } from '../services/productImportService';
 import ProductModal from '../components/ProductModal';
 import ProductsTable from '../components/ProductsTable';
@@ -227,7 +228,14 @@ const ProductsPage = () => {
   const getStockStatusForProduct = (productId) => getStockStatus(inventory, productId);
 
   const [showImportModal, setShowImportModal] = useState(false);
+  const [showBulkRegisterModal, setShowBulkRegisterModal] = useState(false);
   const [exportError, setExportError] = useState('');
+
+  // Cheap client-side count from the already-loaded product list, so the
+  // toolbar button can show at a glance whether there's anything to do.
+  const pendingRegistrationCount = products.filter(
+    (p) => p.zraRegistrationStatus !== 'REGISTERED' && (p.zraClassificationCode || p.zraItemClassification)
+  ).length;
 
   // Server-side export, which emits exactly the columns the importer accepts
   // so a catalogue can be exported, edited in a spreadsheet and fed back in.
@@ -292,6 +300,17 @@ const ProductsPage = () => {
                   className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
                 >
                   📤 Import
+                </button>
+                <button
+                  onClick={() => setShowBulkRegisterModal(true)}
+                  className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                >
+                  🛰️ Register pending
+                  {pendingRegistrationCount > 0 && (
+                    <span className="ml-1.5 inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                      {pendingRegistrationCount}
+                    </span>
+                  )}
                 </button>
                 <button
                   onClick={() => setShowAddModal(true)}
@@ -406,6 +425,13 @@ const ProductsPage = () => {
               show={showImportModal}
               onClose={() => setShowImportModal(false)}
               onImported={fetchProducts}
+            />
+
+            <BulkRegisterModal
+              show={showBulkRegisterModal}
+              onClose={() => setShowBulkRegisterModal(false)}
+              products={products}
+              onDone={fetchProducts}
             />
 
             {/* Add Product Modal */}

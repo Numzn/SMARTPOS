@@ -13,12 +13,15 @@
 
 const prisma = require('./prisma');
 const { parseCsv, toRecords: toRecordsShared, csvCell, toCsv } = require('./csv');
+const { getProductClassification } = require('./productRegistrationState');
 
 const REQUIRED_HEADERS = ['name', 'price'];
 
 const EXPORT_HEADERS = [
   'sku', 'name', 'description', 'category', 'price', 'cost',
-  'barcode', 'brand', 'unit', 'taxRate', 'vatCategoryCode', 'isActive',
+  'barcode', 'brand', 'unit', 'taxRate', 'vatCategoryCode',
+  'zraClassificationCode', 'taxType', 'zraPackageUnit', 'zraQuantityUnit',
+  'isActive',
 ];
 
 const toRecords = (text) => toRecordsShared(text, REQUIRED_HEADERS);
@@ -147,15 +150,69 @@ const bool = (value) => {
 };
 
 /**
+ * Checks every distinct ZRA code value actually referenced in the file, once
+ * each — not one query per row. A real file references a handful of distinct
+ * classification/tax-type/unit codes even across hundreds of rows, so this
+ * stays a handful of queries total. Reuses the same synced-code tables the
+ * single-product routes validate against (see routes/products.js's
+ * assertProductZraCodes / zraCodesService.isUsableStandardCode).
+ */
+async function loadZraCodeValidity(records) {
+  const distinct = {
+    classification: new Set(),
+    taxType: new Set(),
+    zraPackageUnit: new Set(),
+    zraQuantityUnit: new Set(),
+  };
+  for (const r of records) {
+    if (r.zraclassificationcode) distinct.classification.add(r.zraclassificationcode);
+    if (r.taxtype) distinct.taxType.add(r.taxtype);
+    if (r.zrapackageunit) distinct.zraPackageUnit.add(r.zrapackageunit);
+    if (r.zraquantityunit) distinct.zraQuantityUnit.add(r.zraquantityunit);
+  }
+
+  const classificationRows = distinct.classification.size
+    ? await prisma.zraClassificationCode.findMany({
+        where: { code: { in: [...distinct.classification] } },
+        select: { code: true, useYn: true },
+      })
+    : [];
+  const usableClassification = new Set(
+    classificationRows.filter((r) => r.useYn !== 'N').map((r) => r.code)
+  );
+
+  const zraCodesService = require('../services/zraCodesService');
+  const checkAll = async (set, codeType) => {
+    const pairs = await Promise.all(
+      [...set].map(async (code) => [code, await zraCodesService.isUsableStandardCode(codeType, code)])
+    );
+    return new Map(pairs);
+  };
+  const [taxTypeOk, packageOk, quantityOk] = await Promise.all([
+    checkAll(distinct.taxType, 'TAX_TYPES'),
+    checkAll(distinct.zraPackageUnit, 'PACKAGING_UNITS'),
+    checkAll(distinct.zraQuantityUnit, 'UNIT_OF_MEASURE'),
+  ]);
+
+  return {
+    isUsableClassification: (code) => usableClassification.has(code),
+    isUsableTaxType: (code) => taxTypeOk.get(code) === true,
+    isUsablePackageUnit: (code) => packageOk.get(code) === true,
+    isUsableQuantityUnit: (code) => quantityOk.get(code) === true,
+  };
+}
+
+/**
  * Validate and resolve every row against current data, reporting what would
  * happen. Writes nothing.
  */
 async function planProductImport(csvText, { createMissingCategories = false } = {}) {
   const records = toRecords(csvText);
 
-  const [categories, existingProducts] = await Promise.all([
+  const [categories, existingProducts, zraCodeValidity] = await Promise.all([
     prisma.category.findMany({ select: { id: true, name: true } }),
     prisma.product.findMany({ select: { id: true, sku: true, barcode: true, name: true } }),
+    loadZraCodeValidity(records),
   ]);
 
   const categoryByName = new Map(categories.map((c) => [c.name.toLowerCase(), c]));
@@ -244,6 +301,30 @@ async function planProductImport(csvText, { createMissingCategories = false } = 
       errors.push('category is required for new products');
     }
 
+    // ZRA registration codes — optional, but if given must be a real,
+    // currently-synced code (same enforcement as the single-product
+    // create/update routes' assertProductZraCodes), otherwise the product
+    // would silently fail registration later with a much less actionable
+    // error. Treated as a hard row error, same shape as an unknown category.
+    const zraClassificationCode = optional(record.zraclassificationcode);
+    if (zraClassificationCode && !zraCodeValidity.isUsableClassification(zraClassificationCode)) {
+      errors.push(
+        `'${zraClassificationCode}' is not a valid, ZRA-synced classification code`
+      );
+    }
+    const taxType = optional(record.taxtype);
+    if (taxType && !zraCodeValidity.isUsableTaxType(taxType)) {
+      errors.push(`'${taxType}' is not a valid, ZRA-synced tax type`);
+    }
+    const zraPackageUnit = optional(record.zrapackageunit);
+    if (zraPackageUnit && !zraCodeValidity.isUsablePackageUnit(zraPackageUnit)) {
+      errors.push(`'${zraPackageUnit}' is not a valid, ZRA-synced package unit`);
+    }
+    const zraQuantityUnit = optional(record.zraquantityunit);
+    if (zraQuantityUnit && !zraCodeValidity.isUsableQuantityUnit(zraQuantityUnit)) {
+      errors.push(`'${zraQuantityUnit}' is not a valid, ZRA-synced quantity unit`);
+    }
+
     rows.push({
       line: record.__line,
       action: errors.length ? 'error' : existing ? 'update' : 'create',
@@ -265,6 +346,15 @@ async function planProductImport(csvText, { createMissingCategories = false } = 
         vatCategoryCode: optional(record.vatcategorycode) ?? tax.vatCategoryCode,
         isActive: bool(record.isactive),
         categoryId: category?.id || null,
+        // Written to both fields together — registration reads
+        // zraItemClassification first (getProductClassification), and the
+        // single-product routes always set both to the same value. Leaving
+        // zraItemClassification unset here would silently defeat the column.
+        zraClassificationCode,
+        zraItemClassification: zraClassificationCode,
+        taxType,
+        zraPackageUnit,
+        zraQuantityUnit,
       },
     });
   }
@@ -297,10 +387,11 @@ async function applyProductImport(csvText, { createMissingCategories = false } =
     throw err;
   }
 
-  const results = await prisma.$transaction(async (tx) => {
+  const { writtenRows, ...results } = await prisma.$transaction(async (tx) => {
     let created = 0;
     let updated = 0;
     let categoriesCreated = 0;
+    const writtenRows = [];
 
     // Create any opted-in categories first, inside the same transaction, so a
     // later failure rolls them back too rather than leaving orphans behind.
@@ -324,21 +415,81 @@ async function applyProductImport(csvText, { createMissingCategories = false } =
       const clean = Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined));
 
       if (row.action === 'create') {
-        await tx.product.create({ data: { ...clean, categoryId } });
+        const product = await tx.product.create({ data: { ...clean, categoryId } });
+        writtenRows.push({ line: row.line, id: product.id, sku: product.sku, name: product.name });
         created += 1;
       } else {
-        await tx.product.update({
+        const product = await tx.product.update({
           where: { id: row.existingId },
           data: categoryId ? { ...clean, categoryId } : clean,
         });
+        writtenRows.push({ line: row.line, id: product.id, sku: product.sku, name: product.name });
         updated += 1;
       }
     }
 
-    return { created, updated, categoriesCreated };
+    return { created, updated, categoriesCreated, writtenRows };
   });
 
-  return { ...results, totalRows: plan.totalRows };
+  const registration = await registerImportedProducts(writtenRows);
+
+  return { ...results, registration, totalRows: plan.totalRows };
+}
+
+/**
+ * Best-effort ZRA registration for freshly-imported rows, run *after* the
+ * write transaction has already committed — a failed registration must
+ * never roll back the DB write or abort the rest of the batch, unlike the
+ * strict single-product create route. Rows with no classification code are
+ * reported as skipped, not silently ignored, so the user knows exactly what
+ * still needs a code before it can register.
+ */
+async function registerImportedProducts(writtenRows) {
+  const summary = { attempted: 0, registered: 0, failed: 0, skippedNoCode: 0, results: [] };
+  if (!writtenRows.length) return summary;
+
+  const { registerProductWithVsdc } = require('./productRegistration');
+
+  const codedProducts = await prisma.product.findMany({
+    where: { id: { in: writtenRows.map((r) => r.id) } },
+    select: { id: true, zraClassificationCode: true, zraItemClassification: true },
+  });
+  const codeById = new Map(
+    codedProducts.map((p) => [p.id, p.zraItemClassification || p.zraClassificationCode || null])
+  );
+
+  for (const row of writtenRows) {
+    if (!codeById.get(row.id)) {
+      summary.skippedNoCode += 1;
+      summary.results.push({ line: row.line, productId: row.id, sku: row.sku, status: 'SKIPPED_NO_CODE' });
+      continue;
+    }
+
+    summary.attempted += 1;
+    try {
+      const outcome = await registerProductWithVsdc(row.id);
+      if (outcome.success) {
+        summary.registered += 1;
+        summary.results.push({ line: row.line, productId: row.id, sku: row.sku, status: 'REGISTERED' });
+      } else {
+        summary.failed += 1;
+        summary.results.push({
+          line: row.line,
+          productId: row.id,
+          sku: row.sku,
+          status: 'FAILED',
+          error: outcome.error,
+        });
+      }
+    } catch (err) {
+      // Defensive — registerProductWithVsdc doesn't normally throw, but one
+      // row's registration must never abort the rest of the batch.
+      summary.failed += 1;
+      summary.results.push({ line: row.line, productId: row.id, sku: row.sku, status: 'FAILED', error: err.message });
+    }
+  }
+
+  return summary;
 }
 
 /** Export in exactly the shape the importer accepts, so a round-trip works. */
@@ -360,6 +511,10 @@ async function exportProductsCsv() {
     p.unit ?? '',
     p.taxRate ?? '',
     p.vatCategoryCode ?? '',
+    getProductClassification(p) ?? '',
+    p.taxType ?? '',
+    p.zraPackageUnit ?? '',
+    p.zraQuantityUnit ?? '',
     p.isActive,
   ]);
 

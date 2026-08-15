@@ -44,6 +44,15 @@ export const productApi = {
 
   deleteProduct: (productId) =>
     apiFetch(`/products/${productId}`, { method: 'DELETE' }),
+
+  // Best-effort ZRA registration for every PENDING/FAILED product that
+  // already has a classification code. `limit` caps one call's batch size
+  // (server default 200) — call again if the response's `remaining` is > 0.
+  bulkRegister: (limit) =>
+    apiFetch('/products/bulk-register', {
+      method: 'POST',
+      body: JSON.stringify(limit ? { limit } : {}),
+    }),
 };
 
 export const categoryApi = {

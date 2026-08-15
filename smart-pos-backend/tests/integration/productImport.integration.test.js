@@ -1,21 +1,31 @@
-import { describe, it, expect, beforeAll, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
 import testData from '../helpers/testData.js';
 import productImport from '../../lib/productImport.js';
 
 const { prisma, createTestBranch, createTestCategory, createTestProduct, cleanupTestData } = testData;
 const { parseCsv, planProductImport, applyProductImport, exportProductsCsv } = productImport;
+const itemManagementService = require('../../services/itemManagement.js');
 
 const csv = (...lines) => lines.join('\n');
+
+const IMPORT_CLASS_CODE = 'PIMP-BASE-CLASS';
 
 describe('product CSV import', () => {
   let category;
 
   beforeAll(async () => {
     await createTestBranch();
+    await prisma.zraClassificationCode.upsert({
+      where: { code: IMPORT_CLASS_CODE },
+      create: { code: IMPORT_CLASS_CODE, name: 'Base classification for import tests', useYn: 'Y' },
+      update: { useYn: 'Y' },
+    });
   });
 
   afterEach(async () => {
+    await prisma.zraCode.deleteMany({ where: { code: { startsWith: 'PIMP-' } } });
     await cleanupTestData();
+    vi.restoreAllMocks();
   });
 
   async function withCategory() {
@@ -302,6 +312,224 @@ describe('product CSV import', () => {
       expect.arrayContaining(['sku', 'name', 'category', 'price'])
     );
     // Feeding the export straight back must not produce errors.
+    const plan = await planProductImport(out);
+    expect(plan.summary.error).toBe(0);
+  });
+
+  /* ---------------- ZRA registration columns ---------------- */
+
+  function mockVsdcSuccess() {
+    vi.spyOn(itemManagementService, 'saveItemToVSDC').mockResolvedValue({
+      success: true,
+      itemCode: 'ignored-in-mock',
+      zraResponse: { resultCd: '000' },
+    });
+  }
+
+  async function seedCurrentCode(codeClass, code) {
+    await prisma.zraCode.upsert({
+      where: { codeClass_code: { codeClass, code } },
+      create: { codeClass, code, name: `Usable ${code}`, syncedAt: new Date() },
+      update: { syncedAt: new Date() },
+    });
+  }
+
+  it('plans a valid classification/tax/unit code combination cleanly', async () => {
+    const cat = await withCategory();
+    await seedCurrentCode('04', 'PIMP-TAX-1');
+    await seedCurrentCode('17', 'PIMP-PKG-1');
+    await seedCurrentCode('10', 'PIMP-QTY-1');
+
+    const plan = await planProductImport(
+      csv(
+        'name,price,category,sku,zraClassificationCode,taxType,zraPackageUnit,zraQuantityUnit',
+        `TEST-Coded,10,${cat.name},TEST-SKU-IMP-CODE-1,${IMPORT_CLASS_CODE},PIMP-TAX-1,PIMP-PKG-1,PIMP-QTY-1`
+      )
+    );
+
+    expect(plan.summary.error).toBe(0);
+    expect(plan.rows[0].data.zraClassificationCode).toBe(IMPORT_CLASS_CODE);
+    expect(plan.rows[0].data.zraItemClassification).toBe(IMPORT_CLASS_CODE);
+    expect(plan.rows[0].data.taxType).toBe('PIMP-TAX-1');
+  });
+
+  it.each([
+    ['zraClassificationCode', 'PIMP-MADE-UP-CLASS', 'classification code'],
+    ['taxType', 'PIMP-MADE-UP-TAX', 'tax type'],
+    ['zraPackageUnit', 'PIMP-MADE-UP-PKG', 'package unit'],
+    ['zraQuantityUnit', 'PIMP-MADE-UP-QTY', 'quantity unit'],
+  ])('rejects an unrecognised %s as a row error, same as an unknown category', async (column, badValue, label) => {
+    const cat = await withCategory();
+    const plan = await planProductImport(
+      csv(`name,price,category,sku,${column}`, `TEST-Bad,10,${cat.name},TEST-SKU-IMP-BAD-${column},${badValue}`)
+    );
+
+    expect(plan.summary.error).toBe(1);
+    expect(plan.rows[0].errors.join(' ')).toMatch(new RegExp(`not a valid.*${label}`, 'i'));
+  });
+
+  it('a disabled (useYn=N) classification code is rejected the same as an unknown one', async () => {
+    const cat = await withCategory();
+    const disabledCode = 'PIMP-DISABLED-CLASS';
+    await prisma.zraClassificationCode.upsert({
+      where: { code: disabledCode },
+      create: { code: disabledCode, name: 'Disabled', useYn: 'N' },
+      update: { useYn: 'N' },
+    });
+
+    const plan = await planProductImport(
+      csv('name,price,category,sku,zraClassificationCode', `TEST-Bad,10,${cat.name},TEST-SKU-IMP-DISABLED,${disabledCode}`)
+    );
+
+    expect(plan.summary.error).toBe(1);
+    expect(plan.rows[0].errors.join(' ')).toMatch(/not a valid.*classification code/i);
+    await prisma.zraClassificationCode.delete({ where: { code: disabledCode } }).catch(() => {});
+  });
+
+  it('validates many rows referencing the same classification code cleanly (batched lookup, not one query per row)', async () => {
+    // Not asserting a call count here — spying directly on a Prisma model
+    // delegate method corrupts the shared client singleton across the rest
+    // of this file's tests (confirmed: it did, when tried). The batching
+    // design itself (one findMany keyed on the distinct codes referenced in
+    // the file, not per row) is verified by code review in
+    // lib/productImport.js's loadZraCodeValidity; this test just confirms
+    // the functional outcome — a 10-row file all referencing the same
+    // already-synced code plans cleanly.
+    const cat = await withCategory();
+    const lines = Array.from(
+      { length: 10 },
+      (_, i) => `TEST-Row${i},10,${cat.name},TEST-SKU-IMP-BATCH-${i},${IMPORT_CLASS_CODE}`
+    );
+    const plan = await planProductImport(
+      csv('name,price,category,sku,zraClassificationCode', ...lines)
+    );
+
+    expect(plan.summary.error).toBe(0);
+    expect(plan.rows.every((r) => r.data.zraClassificationCode === IMPORT_CLASS_CODE)).toBe(true);
+  });
+
+  it('an absent classification-code column leaves an existing code untouched on update', async () => {
+    const cat = await withCategory();
+    const existing = await createTestProduct({
+      categoryId: cat.id,
+      zraClassificationCode: IMPORT_CLASS_CODE,
+      zraItemClassification: IMPORT_CLASS_CODE,
+    });
+    mockVsdcSuccess(); // the row still has a code, so best-effort registration fires for real
+
+    // No zraClassificationCode column at all — a plain price update.
+    await applyProductImport(csv('name,price,sku', `Kept,33,${existing.sku}`));
+
+    const updated = await prisma.product.findUnique({ where: { id: existing.id } });
+    expect(updated.zraClassificationCode).toBe(IMPORT_CLASS_CODE);
+    expect(updated.zraItemClassification).toBe(IMPORT_CLASS_CODE);
+  });
+
+  it('a present-but-blank classification-code column explicitly clears both classification fields', async () => {
+    const cat = await withCategory();
+    const existing = await createTestProduct({
+      categoryId: cat.id,
+      zraClassificationCode: IMPORT_CLASS_CODE,
+      zraItemClassification: IMPORT_CLASS_CODE,
+    });
+
+    await applyProductImport(csv('name,price,sku,zraClassificationCode', `Cleared,33,${existing.sku},`));
+
+    const updated = await prisma.product.findUnique({ where: { id: existing.id } });
+    expect(updated.zraClassificationCode).toBeNull();
+    expect(updated.zraItemClassification).toBeNull();
+  });
+
+  it('best-effort registration: a row with a code gets registered, and its DB write is unaffected by another row failing', async () => {
+    const cat = await withCategory();
+    vi.spyOn(itemManagementService, 'saveItemToVSDC')
+      .mockResolvedValueOnce({ success: false, error: 'VSDC rejected this item' })
+      .mockResolvedValueOnce({ success: true, itemCode: 'ok', zraResponse: { resultCd: '000' } });
+
+    const result = await applyProductImport(
+      csv(
+        'name,price,category,sku,zraClassificationCode',
+        `TEST-First,10,${cat.name},TEST-SKU-IMP-REG-1,${IMPORT_CLASS_CODE}`,
+        `TEST-Second,10,${cat.name},TEST-SKU-IMP-REG-2,${IMPORT_CLASS_CODE}`
+      )
+    );
+
+    // Both rows are written regardless of registration outcome — a failed
+    // registration must never roll back the DB write or abort the batch.
+    expect(result.created).toBe(2);
+    expect(result.registration).toMatchObject({ attempted: 2, registered: 1, failed: 1, skippedNoCode: 0 });
+
+    // The failure path is handled directly by registerProductWithVsdc
+    // (markRegistrationFailed), so it's DB-verifiable here. The success path
+    // writes REGISTERED via a call inside the real saveItemToVSDC — which
+    // this test replaces entirely with a mock, so that DB write doesn't
+    // happen; the `result.registration` summary above (sourced from
+    // registerProductWithVsdc's own return value, independent of the DB
+    // write) is the correct place to assert the success outcome.
+    const first = await prisma.product.findFirst({ where: { sku: 'TEST-SKU-IMP-REG-1' } });
+    const second = await prisma.product.findFirst({ where: { sku: 'TEST-SKU-IMP-REG-2' } });
+    expect(first).not.toBeNull();
+    expect(first.zraRegistrationStatus).toBe('FAILED');
+    expect(first.zraRegistrationError).toMatch(/VSDC rejected/);
+    expect(second).not.toBeNull();
+    expect(result.registration.results.find((r) => r.sku === 'TEST-SKU-IMP-REG-2').status).toBe('REGISTERED');
+  });
+
+  it('rows with no classification code are skipped, not attempted, and never call VSDC', async () => {
+    const cat = await withCategory();
+    const spy = vi.spyOn(itemManagementService, 'saveItemToVSDC');
+
+    const result = await applyProductImport(
+      csv('name,price,category,sku', `TEST-NoCode,10,${cat.name},TEST-SKU-IMP-NOCODE-1`)
+    );
+
+    expect(result.registration).toMatchObject({ attempted: 0, registered: 0, failed: 0, skippedNoCode: 1 });
+    expect(spy).not.toHaveBeenCalled();
+
+    const product = await prisma.product.findFirst({ where: { sku: 'TEST-SKU-IMP-NOCODE-1' } });
+    expect(product.zraRegistrationStatus).toBe('PENDING');
+  });
+
+  it('REGRESSION: import registration ignores ZRA_REGISTRATION_STRICT — a VSDC failure never rolls back or throws', async () => {
+    const cat = await withCategory();
+    const original = process.env.ZRA_REGISTRATION_STRICT;
+    process.env.ZRA_REGISTRATION_STRICT = 'true';
+    vi.spyOn(itemManagementService, 'saveItemToVSDC').mockResolvedValue({
+      success: false,
+      error: 'simulated VSDC outage',
+    });
+
+    try {
+      const result = await applyProductImport(
+        csv('name,price,category,sku,zraClassificationCode', `TEST-Strict,10,${cat.name},TEST-SKU-IMP-STRICT-1,${IMPORT_CLASS_CODE}`)
+      );
+
+      expect(result.created).toBe(1);
+      expect(result.registration).toMatchObject({ registered: 0, failed: 1 });
+      const product = await prisma.product.findFirst({ where: { sku: 'TEST-SKU-IMP-STRICT-1' } });
+      expect(product).not.toBeNull();
+      expect(product.zraRegistrationStatus).toBe('FAILED');
+    } finally {
+      if (original === undefined) delete process.env.ZRA_REGISTRATION_STRICT;
+      else process.env.ZRA_REGISTRATION_STRICT = original;
+    }
+  });
+
+  it('exportProductsCsv includes the new ZRA columns and round-trips a coded product', async () => {
+    const cat = await withCategory();
+    await createTestProduct({
+      categoryId: cat.id,
+      zraClassificationCode: IMPORT_CLASS_CODE,
+      zraItemClassification: IMPORT_CLASS_CODE,
+    });
+
+    const out = await exportProductsCsv();
+    const header = out.split('\r\n')[0].split(',');
+    expect(header).toEqual(
+      expect.arrayContaining(['zraClassificationCode', 'taxType', 'zraPackageUnit', 'zraQuantityUnit'])
+    );
+    expect(out).toContain(IMPORT_CLASS_CODE);
+
     const plan = await planProductImport(out);
     expect(plan.summary.error).toBe(0);
   });
