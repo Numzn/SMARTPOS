@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, useEffect, useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -42,6 +42,62 @@ const NAV_ITEMS = [
   { name: 'ZRA Sync', href: '/zra-sync', icon: Satellite, show: (p) => p.viewZRAStatus },
 ];
 
+// A stable top-level component, not one defined inside MainLayout's render
+// body — a component declared per-render gets a new identity every time, so
+// React would unmount and remount the entire sidebar DOM subtree on every
+// MainLayout re-render (every route change, every header-search keystroke)
+// instead of diffing it like a normal element.
+const Sidebar = ({ navigation, activePath, onNavigate, onClose }) => (
+  <div className="flex flex-col h-full bg-surface-sidebar text-gray-300">
+    <div className="h-12 flex items-center justify-between px-4 border-b border-white/10">
+      <div>
+        <div className="text-sm font-semibold text-white tracking-tight">Smart POS</div>
+        <div className="text-[10px] text-gray-500 uppercase tracking-widest">Terminal</div>
+      </div>
+      <button
+        type="button"
+        onClick={onClose}
+        className="lg:hidden p-1 text-gray-400 hover:text-white"
+        aria-label="Close menu"
+      >
+        <X className="w-4 h-4" />
+      </button>
+    </div>
+
+    <nav className="flex-1 p-2 space-y-0.5 overflow-y-auto">
+      {navigation.map((item) => {
+        const Icon = item.icon;
+        const isActive = activePath === item.href;
+        return (
+          <button
+            key={item.name}
+            type="button"
+            onClick={() => onNavigate(item.href)}
+            className={isActive ? 'nav-item-active' : 'nav-item'}
+          >
+            <Icon className="w-4 h-4 shrink-0 opacity-80" strokeWidth={1.75} />
+            <span>{item.name}</span>
+          </button>
+        );
+      })}
+    </nav>
+
+    <div className="p-3 border-t border-white/10 text-[11px] text-gray-500">
+      ZRA VSDC · v2.0
+    </div>
+  </div>
+);
+
+// Scoped to just the routed page content — the previous boundary wrapped the
+// whole MainLayout at the router level, so a lazy chunk that hadn't loaded
+// yet (every back-office page on a fresh reload) blanked out the sidebar and
+// header along with the content while it fetched.
+const RouteFallback = () => (
+  <div className="p-10 text-center text-gray-500" role="status" aria-live="polite">
+    Loading…
+  </div>
+);
+
 const MainLayout = () => {
   const { user, logout } = useAuth();
   const permissions = usePermissions();
@@ -72,49 +128,10 @@ const MainLayout = () => {
     navigate('/login');
   };
 
-  const Sidebar = () => (
-    <div className="flex flex-col h-full bg-surface-sidebar text-gray-300">
-      <div className="h-12 flex items-center justify-between px-4 border-b border-white/10">
-        <div>
-          <div className="text-sm font-semibold text-white tracking-tight">Smart POS</div>
-          <div className="text-[10px] text-gray-500 uppercase tracking-widest">Terminal</div>
-        </div>
-        <button
-          type="button"
-          onClick={() => setSidebarOpen(false)}
-          className="lg:hidden p-1 text-gray-400 hover:text-white"
-          aria-label="Close menu"
-        >
-          <X className="w-4 h-4" />
-        </button>
-      </div>
-
-      <nav className="flex-1 p-2 space-y-0.5 overflow-y-auto">
-        {navigation.map((item) => {
-          const Icon = item.icon;
-          const isActive = location.pathname === item.href;
-          return (
-            <button
-              key={item.name}
-              type="button"
-              onClick={() => {
-                navigate(item.href);
-                setSidebarOpen(false);
-              }}
-              className={isActive ? 'nav-item-active' : 'nav-item'}
-            >
-              <Icon className="w-4 h-4 shrink-0 opacity-80" strokeWidth={1.75} />
-              <span>{item.name}</span>
-            </button>
-          );
-        })}
-      </nav>
-
-      <div className="p-3 border-t border-white/10 text-[11px] text-gray-500">
-        ZRA VSDC · v2.0
-      </div>
-    </div>
-  );
+  const handleSidebarNavigate = (href) => {
+    navigate(href);
+    setSidebarOpen(false);
+  };
 
   return (
     <div className="h-screen flex overflow-hidden bg-surface">
@@ -123,7 +140,12 @@ const MainLayout = () => {
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        <Sidebar />
+        <Sidebar
+          navigation={navigation}
+          activePath={location.pathname}
+          onNavigate={handleSidebarNavigate}
+          onClose={() => setSidebarOpen(false)}
+        />
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0">
@@ -195,13 +217,15 @@ const MainLayout = () => {
             isCashierRoute ? 'overflow-hidden p-0' : 'overflow-y-auto p-4'
           }`}
         >
-          <Outlet
-            context={{
-              openSidebar: () => setSidebarOpen(true),
-              headerSearch,
-              setHeaderSearch,
-            }}
-          />
+          <Suspense fallback={<RouteFallback />}>
+            <Outlet
+              context={{
+                openSidebar: () => setSidebarOpen(true),
+                headerSearch,
+                setHeaderSearch,
+              }}
+            />
+          </Suspense>
         </main>
       </div>
 

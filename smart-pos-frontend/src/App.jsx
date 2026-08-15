@@ -1,4 +1,4 @@
-import React, { Suspense, lazy } from 'react';
+import React, { lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import LoginForm from './components/auth/LoginForm';
@@ -27,12 +27,6 @@ const SuppliersPage = lazy(() => import('./pages/SuppliersPage'));
 const PurchaseOrdersPage = lazy(() => import('./pages/PurchaseOrdersPage'));
 const ZraSyncPage = lazy(() => import('./pages/ZraSyncPage'));
 
-const RouteFallback = () => (
-  <div className="p-10 text-center text-gray-500" role="status" aria-live="polite">
-    Loading…
-  </div>
-);
-
 function App() {
   return (
     <AuthProvider>
@@ -47,9 +41,7 @@ function App() {
               path="/"
               element={
                 <ProtectedRoute>
-                  <Suspense fallback={<RouteFallback />}>
-                    <MainLayout />
-                  </Suspense>
+                  <MainLayout />
                 </ProtectedRoute>
               }
             >
