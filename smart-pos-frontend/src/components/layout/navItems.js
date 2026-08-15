@@ -28,7 +28,7 @@ export const NAV_ITEMS = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, show: (p, u) => u?.role !== 'CASHIER' },
   { name: 'Cashier', href: '/cashier', icon: CreditCard, show: (p) => p.createSale || p.viewSales },
   { name: 'Sales', href: '/sales', icon: Receipt, show: (p) => p.viewSales || p.refundSale },
-  { name: 'Cash Register', href: '/cash-register', icon: Wallet, show: (p) => p.operateShift || p.reconcileShift || p.viewAllShifts },
+  { name: 'Cash Register', href: '/cash-register', icon: Wallet, show: (p) => p.operateShift || p.recordCashMovement || p.reconcileShift || p.viewAllShifts },
   { name: 'Customers', href: '/customers', icon: Contact, show: (p) => p.viewCustomers },
   { name: 'Products', href: '/products', icon: Package, show: (p) => p.viewProducts },
   { name: 'Inventory', href: '/inventory', icon: Warehouse, show: (p) => p.viewInventory },

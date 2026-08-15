@@ -85,7 +85,7 @@ function App() {
               <Route
                 path="cash-register"
                 element={
-                  <ProtectedRoute requiredPermission={['shifts:operate', 'shifts:reconcile', 'shifts:viewAll']}>
+                  <ProtectedRoute requiredPermission={['shifts:operate', 'shifts:recordMovement', 'shifts:reconcile', 'shifts:viewAll']}>
                     <CashRegisterPage />
                   </ProtectedRoute>
                 }

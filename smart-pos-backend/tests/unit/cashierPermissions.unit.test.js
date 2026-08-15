@@ -21,13 +21,17 @@ describe('CASHIER permission set', () => {
       'sales:read',
       'sales:write',
       'receipts:read',
-      'shifts:operate',
+      'shifts:recordMovement',
       'customers:read',
       'customers:write',
       'zra:status',
     ]) {
       expect(PERMISSIONS.CASHIER).toContain(permission);
     }
+  });
+
+  it('REGRESSION: cannot open or end a shift — only Supervisor+ operates the till lifecycle', () => {
+    expect(PERMISSIONS.CASHIER).not.toContain('shifts:operate');
   });
 
   it('stays read-only on fiscal operations — status yes, page access/submission/sync/admin no', () => {

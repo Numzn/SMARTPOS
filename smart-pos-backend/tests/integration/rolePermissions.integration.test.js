@@ -26,9 +26,11 @@ describe('Configurable RBAC — PUT /api/settings/roles/:role', () => {
 
   afterEach(async () => {
     await cleanupTestData();
-    // Always leave CASHIER's shifts:operate grant restored, even if a test
-    // fails mid-way, so it can't poison a later test file's assumptions.
-    await setRolePermission('CASHIER', 'shifts:operate', true, null);
+    // Always leave CASHIER's shifts:recordMovement grant restored, even if a
+    // test fails mid-way, so it can't poison a later test file's
+    // assumptions. shifts:operate is never restored to CASHIER here — it is
+    // never granted to CASHIER by default (Supervisor+ only).
+    await setRolePermission('CASHIER', 'shifts:recordMovement', true, null);
   });
 
   it('requires ADMIN — a MANAGER holding settings:write is still forbidden', async () => {
@@ -86,49 +88,51 @@ describe('Configurable RBAC — PUT /api/settings/roles/:role', () => {
   it('CONFIGURATION TEST: revoking then restoring a permission changes live behavior with no code change', async () => {
     const admin = await createTestUser({ role: 'ADMIN' });
     const cashier = await createTestUser({ role: 'CASHIER' });
-
-    // 1. Baseline: cashier can open a shift (shifts:operate granted by default).
-    const before = await request(shiftsApp)
+    // Cashier can't open a shift itself (shifts:operate is Supervisor+ only)
+    // — a Supervisor opens the till the Cashier then works against.
+    const supervisor = await createTestUser({ role: 'SUPERVISOR' });
+    const openedShift = await request(shiftsApp)
       .post('/api/shifts/open')
-      .set('Authorization', `Bearer ${tokenFor(cashier)}`)
+      .set('Authorization', `Bearer ${tokenFor(supervisor)}`)
       .send({ openingFloat: 0 });
-    expect(before.status).toBe(201);
+    expect(openedShift.status).toBe(201);
 
-    // Close it so the next open isn't blocked by the "already has an open shift" rule.
-    const reconciler = await createTestUser({ role: 'SUPERVISOR' });
-    await request(shiftsApp)
-      .post(`/api/shifts/${before.body.id}/close`)
-      .set('Authorization', `Bearer ${tokenFor(reconciler)}`)
-      .send({ countedCash: 0 });
+    // 1. Baseline: cashier can record a cash movement (shifts:recordMovement
+    // granted by default) against the branch's active shift.
+    const before = await request(shiftsApp)
+      .post(`/api/shifts/${openedShift.body.id}/cash-in`)
+      .set('Authorization', `Bearer ${tokenFor(cashier)}`)
+      .send({ amount: 10, reason: 'test' });
+    expect(before.status).toBe(200);
 
-    // 2. ADMIN revokes shifts:operate from CASHIER via the API.
+    // 2. ADMIN revokes shifts:recordMovement from CASHIER via the API.
     const revoke = await request(settingsApp)
       .put('/api/settings/roles/CASHIER')
       .set('Authorization', `Bearer ${tokenFor(admin)}`)
-      .send({ permission: 'shifts:operate', granted: false });
+      .send({ permission: 'shifts:recordMovement', granted: false });
     expect(revoke.status).toBe(200);
 
     // 3. The very next request from a CASHIER token is denied — no re-login,
     // no restart, no source change.
     const denied = await request(shiftsApp)
-      .post('/api/shifts/open')
+      .post(`/api/shifts/${openedShift.body.id}/cash-in`)
       .set('Authorization', `Bearer ${tokenFor(cashier)}`)
-      .send({ openingFloat: 0 });
+      .send({ amount: 10, reason: 'test' });
     expect(denied.status).toBe(403);
 
     // 4. ADMIN restores the permission.
     const restore = await request(settingsApp)
       .put('/api/settings/roles/CASHIER')
       .set('Authorization', `Bearer ${tokenFor(admin)}`)
-      .send({ permission: 'shifts:operate', granted: true });
+      .send({ permission: 'shifts:recordMovement', granted: true });
     expect(restore.status).toBe(200);
 
     // 5. Behavior is restored on the next request.
     const allowedAgain = await request(shiftsApp)
-      .post('/api/shifts/open')
+      .post(`/api/shifts/${openedShift.body.id}/cash-in`)
       .set('Authorization', `Bearer ${tokenFor(cashier)}`)
-      .send({ openingFloat: 0 });
-    expect(allowedAgain.status).toBe(201);
+      .send({ amount: 10, reason: 'test' });
+    expect(allowedAgain.status).toBe(200);
   });
 
   it('ADMIN has no code-level bypass — revoking an ADMIN permission via the real admin API actually denies ADMIN', async () => {

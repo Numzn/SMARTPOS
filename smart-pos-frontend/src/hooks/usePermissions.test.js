@@ -17,14 +17,15 @@ describe('usePermissions', () => {
   });
 
   it('CASHIER: has operational baseline, not drawer-financial or management permissions', () => {
-    mockUser = { role: 'CASHIER', permissions: ['sales:read', 'sales:write', 'shifts:operate', 'zra:status'] };
+    mockUser = { role: 'CASHIER', permissions: ['sales:read', 'sales:write', 'shifts:recordMovement', 'zra:status'] };
     const { result } = renderHook(() => usePermissions());
     const { canAccess } = result.current;
 
     expect(canAccess.createSale).toBe(true);
-    expect(canAccess.operateShift).toBe(true);
+    expect(canAccess.recordCashMovement).toBe(true);
     expect(canAccess.viewZRAStatus).toBe(true);
 
+    expect(canAccess.operateShift).toBe(false); // cannot open/end a shift
     expect(canAccess.viewExpectedCash).toBe(false);
     expect(canAccess.reconcileShift).toBe(false);
     expect(canAccess.viewZRAPage).toBe(false);

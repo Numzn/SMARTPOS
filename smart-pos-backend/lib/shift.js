@@ -21,6 +21,20 @@ async function getOpenShiftForUser(userId, branchId = DEFAULT_BRANCH) {
   });
 }
 
+/**
+ * The branch's currently active shift, regardless of who opened it — what a
+ * Cashier (shifts:recordMovement, not shifts:operate) resolves "current
+ * shift" to, since they never open one themselves. Most-recently-opened
+ * wins if more than one is somehow OPEN for the branch at once.
+ */
+async function getOpenShiftForBranch(branchId = DEFAULT_BRANCH) {
+  return prisma.shift.findFirst({
+    where: { branchId, status: 'OPEN' },
+    orderBy: { openedAt: 'desc' },
+    include: shiftInclude,
+  });
+}
+
 async function openShift({ userId, branchId = DEFAULT_BRANCH, openingFloat = 0, notes }) {
   if (!userId) {
     const err = new Error('userId is required');
@@ -562,6 +576,7 @@ async function getShiftTransactions(shiftId, { search, type, sort = 'time_desc',
 module.exports = {
   shiftInclude,
   getOpenShiftForUser,
+  getOpenShiftForBranch,
   openShift,
   recordCashMovement,
   computeExpectedCash,

@@ -22,6 +22,7 @@ function canAccessFor(permissions) {
     viewSettings: has('settings:read'),
     manageSettings: has('settings:write'),
     operateShift: has('shifts:operate'),
+    recordCashMovement: has('shifts:recordMovement'),
     reconcileShift: has('shifts:reconcile'),
     viewAllShifts: has('shifts:viewAll'),
     viewZRAPage: has('zra:read'),
@@ -38,7 +39,7 @@ function visibleItems(role, permissions) {
 
 describe('MainLayout NAV_ITEMS — sidebar matches the business role model', () => {
   it('CASHIER: exactly Cashier, Sales, Cash Register, Customers — no Dashboard', () => {
-    const names = visibleItems('CASHIER', ['sales:read', 'sales:write', 'receipts:read', 'customers:read', 'customers:write', 'shifts:operate', 'zra:status']);
+    const names = visibleItems('CASHIER', ['sales:read', 'sales:write', 'receipts:read', 'customers:read', 'customers:write', 'shifts:recordMovement', 'zra:status']);
     expect(names).toEqual(['Cashier', 'Sales', 'Cash Register', 'Customers']);
   });
 
@@ -76,7 +77,7 @@ describe('MainLayout NAV_ITEMS — sidebar matches the business role model', () 
   });
 
   it('a zra:status-only permission set never surfaces the ZRA Sync nav item', () => {
-    const names = visibleItems('CASHIER', ['sales:read', 'sales:write', 'shifts:operate', 'zra:status']);
+    const names = visibleItems('CASHIER', ['sales:read', 'sales:write', 'shifts:recordMovement', 'zra:status']);
     expect(names).not.toContain('ZRA Sync');
   });
 });

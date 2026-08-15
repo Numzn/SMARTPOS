@@ -205,9 +205,20 @@ async function createPendingSale(body) {
       await validateAndLockTillSession(tx, parsed.tillSessionId, parsed.userId, parsed.items);
     }
 
-    const openShift = await tx.shift.findFirst({
-      where: { userId: parsed.userId, branchId, status: 'OPEN' },
-    });
+    // The selling user's own open shift, if they have one (Supervisor/
+    // Manager/Admin, who can each open their own till). A Cashier no longer
+    // opens shifts at all (shifts:operate was removed from CASHIER) — they
+    // sell against whichever shift a Supervisor+ opened for the branch, so
+    // their sale still attributes to *a* shift for cash reconciliation
+    // instead of silently attributing to none.
+    const openShift =
+      (await tx.shift.findFirst({
+        where: { userId: parsed.userId, branchId, status: 'OPEN' },
+      })) ||
+      (await tx.shift.findFirst({
+        where: { branchId, status: 'OPEN' },
+        orderBy: { openedAt: 'desc' },
+      }));
 
     // A registered customer is optional and explicitly selected — walk-in
     // sales (no customerId) are completely unaffected. When present, its

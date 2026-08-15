@@ -272,7 +272,7 @@ describe('Cash register / shift lifecycle', () => {
     expect(zReport.cash.variance).toBe(0);
   });
 
-  it('checkout attribution: createPendingSale sets shiftId from the cashier open shift, and none when there is no open shift', async () => {
+  it('checkout attribution: createPendingSale sets shiftId from the selling user\'s own open shift, and null when there is no open shift at all in the branch', async () => {
     const { createPendingSale } = saleFiscal;
     const userWithShift = await createTestUser();
     const shift = await openShift({ userId: userWithShift.id, branchId: DEFAULT_BRANCH_CODE, openingFloat: 0 });
@@ -285,13 +285,30 @@ describe('Cash register / shift lifecycle', () => {
     });
     expect(saleWithShift.shiftId).toBe(shift.id);
 
-    const userWithoutShift = await createTestUser();
-    const saleWithoutShift = await createPendingSale({
-      userId: userWithoutShift.id,
+    // No open shift anywhere in the branch yet — nothing to fall back to.
+    const userNoShiftAtAll = await createTestUser();
+    await closeShift(shift.id, { countedCash: 0, reconcilerUserId: (await createTestUser({ role: 'SUPERVISOR' })).id });
+    const saleWithNoBranchShift = await createPendingSale({
+      userId: userNoShiftAtAll.id,
       branchId: DEFAULT_BRANCH_CODE,
       items: [{ productId: product.id, quantity: 1, price: 100 }],
     });
-    expect(saleWithoutShift.shiftId).toBeNull();
+    expect(saleWithNoBranchShift.shiftId).toBeNull();
+  });
+
+  it('checkout attribution falls back to the branch\'s active shift for a Cashier who never opens their own (shifts:recordMovement, not shifts:operate)', async () => {
+    const { createPendingSale } = saleFiscal;
+    const opener = await createTestUser({ role: 'SUPERVISOR' });
+    const shift = await openShift({ userId: opener.id, branchId: DEFAULT_BRANCH_CODE, openingFloat: 0 });
+    const product = await createSellableProduct({ stock: 10 });
+
+    const cashier = await createTestUser({ role: 'CASHIER' });
+    const sale = await createPendingSale({
+      userId: cashier.id,
+      branchId: DEFAULT_BRANCH_CODE,
+      items: [{ productId: product.id, quantity: 1, price: 100 }],
+    });
+    expect(sale.shiftId).toBe(shift.id);
   });
 
   it('getOpenShiftForUser only returns the OPEN shift for that user+branch', async () => {

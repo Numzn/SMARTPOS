@@ -12,7 +12,9 @@ const money = (n) => `K${Number(n || 0).toFixed(2)}`;
 
 const CashRegisterPage = () => {
   const { canAccess } = usePermissions();
-  const canOperate = canAccess.operateShift; // open/use own till, cash movements, end own shift
+  const canOperate = canAccess.operateShift; // Supervisor+: open/end own till, cash movements
+  const canRecordOnly = !canOperate && canAccess.recordCashMovement; // Cashier: cash movements on the branch's active till, never open/end
+  const canRecordMovements = canOperate || canRecordOnly;
   const canReconcile = canAccess.reconcileShift; // count + close ANY eligible shift, never own
   const canViewAll = canAccess.viewAllShifts; // full store-wide shift list
   const canReopen = canAccess.reopenShift;
@@ -37,7 +39,10 @@ const CashRegisterPage = () => {
   const [journalShiftId, setJournalShiftId] = useState(null);
 
   const loadCurrent = useCallback(async () => {
-    if (!canOperate) return null;
+    if (!canRecordMovements) return null;
+    // Supervisor+ (canOperate): their own shift. Cashier (canRecordOnly):
+    // the branch's currently active shift, whoever opened it — the backend
+    // resolves which one this is.
     const shift = await shiftApi.fetchCurrentShift();
     setCurrentShift(shift);
     if (shift) {
@@ -46,7 +51,7 @@ const CashRegisterPage = () => {
       setCurrentReport(null);
     }
     return shift;
-  }, [canOperate]);
+  }, [canRecordMovements]);
 
   const loadPendingQueue = useCallback(async () => {
     if (!canReconcile) return;
@@ -151,8 +156,10 @@ const CashRegisterPage = () => {
         <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Cash Register</h1>
         <p className="text-gray-600">
           {canReconcile
-            ? 'Operate your own till, and balance cashiers awaiting reconciliation'
-            : 'Open and use your till, record cash movements, end your shift'}
+            ? 'Operate your own till, and balance operators awaiting reconciliation'
+            : canOperate
+              ? 'Open and use your till, record cash movements, end your shift'
+              : 'Record cash movements on the till currently in use'}
         </p>
       </div>
 
@@ -180,20 +187,29 @@ const CashRegisterPage = () => {
         </section>
       )}
 
-      {canOperate && (
+      {canRecordMovements && (
         <section className="space-y-4">
           {!currentShift ? (
             <div className="bg-white rounded-lg shadow p-8 text-center">
-              <p className="text-gray-600 mb-4">
-                You don&apos;t have an open shift. Open the till to start recording sales against a
-                cash drawer.
-              </p>
-              <button
-                onClick={() => setShowOpenModal(true)}
-                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-              >
-                Open Shift
-              </button>
+              {canOperate ? (
+                <>
+                  <p className="text-gray-600 mb-4">
+                    You don&apos;t have an open shift. Open the till to start recording sales
+                    against a cash drawer.
+                  </p>
+                  <button
+                    onClick={() => setShowOpenModal(true)}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                  >
+                    Open Shift
+                  </button>
+                </>
+              ) : (
+                <p className="text-gray-600">
+                  No till is open for this branch yet. Ask a supervisor or manager to open one
+                  before you can record cash movements.
+                </p>
+              )}
             </div>
           ) : currentShift.status === 'PENDING_RECONCILIATION' ? (
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-6 text-center">
@@ -201,8 +217,9 @@ const CashRegisterPage = () => {
                 AWAITING RECONCILIATION
               </span>
               <p className="text-sm text-amber-900 mt-3">
-                Your shift has ended and is locked. A supervisor or manager will count the drawer
-                and close it — you can&apos;t reconcile your own till.
+                {canOperate
+                  ? "Your shift has ended and is locked. A supervisor or manager will count the drawer and close it — you can't reconcile your own till."
+                  : 'This till has ended and is locked, awaiting a supervisor or manager to count the drawer and close it.'}
               </p>
             </div>
           ) : (
@@ -220,7 +237,9 @@ const CashRegisterPage = () => {
                       </span>
                     </span>
                   ) : (
-                    <span className="text-sm text-gray-500">Till in use</span>
+                    <span className="text-sm text-gray-500">
+                      {canOperate ? 'Till in use' : `Till in use${currentShift.user?.name ? ` — opened by ${currentShift.user.name}` : ''}`}
+                    </span>
                   )}
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -242,13 +261,17 @@ const CashRegisterPage = () => {
                   >
                     Paid Out
                   </button>
-                  <button
-                    onClick={handleEndShift}
-                    disabled={saving}
-                    className="px-3 py-2 bg-amber-600 text-white rounded-md text-sm font-medium hover:bg-amber-700 disabled:opacity-50"
-                  >
-                    End Shift
-                  </button>
+                  {/* Only Supervisor+ (canOperate) ends a shift — a Cashier
+                      keeps cash movements but never opens or ends one. */}
+                  {canOperate && (
+                    <button
+                      onClick={handleEndShift}
+                      disabled={saving}
+                      className="px-3 py-2 bg-amber-600 text-white rounded-md text-sm font-medium hover:bg-amber-700 disabled:opacity-50"
+                    >
+                      End Shift
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -297,7 +320,7 @@ const CashRegisterPage = () => {
         </section>
       )}
 
-      {!canOperate && !canReconcile && !canViewAll && (
+      {!canRecordMovements && !canReconcile && !canViewAll && (
         <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
           You don&apos;t have permission to use the cash register.
         </div>

@@ -3,6 +3,8 @@ const prisma = require('../lib/prisma');
 const auditService = require('../services/auditService');
 const { DEFAULT_PERMISSIONS, getEffectivePermissions } = require('../lib/permissions');
 
+const DEFAULT_BRANCH = 'main';
+
 /**
  * Enhanced Authentication & Authorization Middleware
  * Provides role-based and permission-based access control for 100% compliance
@@ -113,9 +115,9 @@ const authenticateToken = async (req, res, next) => {
     // Validate user still exists and is active
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
-      select: { id: true, email: true, role: true, isActive: true }
+      select: { id: true, email: true, role: true, isActive: true, branchId: true }
     });
-    
+
     if (!user || !user.isActive) {
       auditService.safeLog(auditService.eventTypes.UNAUTHORIZED_ACCESS, {
         userId: decoded.userId,
@@ -130,14 +132,17 @@ const authenticateToken = async (req, res, next) => {
         code: 'USER_INACTIVE'
       });
     }
-    
+
     // Add user info and permissions to request. Always resolved fresh from
     // the RolePermission table (not the JWT's embedded snapshot) so a
     // permission change via PUT /api/settings/roles/:role takes effect on
-    // this user's very next request — no re-login, no redeploy.
+    // this user's very next request — no re-login, no redeploy. branchId is
+    // needed by shifts:recordMovement holders (Cashier) to find the
+    // branch's currently active shift, since they no longer own one.
     req.user = {
       ...decoded,
       role: user.role,
+      branchId: user.branchId || DEFAULT_BRANCH,
       permissions: await getEffectivePermissions(user.role),
     };
 
@@ -312,13 +317,14 @@ const optionalAuth = async (req, res, next) => {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       const user = await prisma.user.findUnique({
         where: { id: decoded.userId },
-        select: { id: true, email: true, role: true, isActive: true }
+        select: { id: true, email: true, role: true, isActive: true, branchId: true }
       });
-      
+
       if (user && user.isActive) {
         req.user = {
           ...decoded,
           role: user.role,
+          branchId: user.branchId || DEFAULT_BRANCH,
           permissions: await getEffectivePermissions(user.role),
         };
       }

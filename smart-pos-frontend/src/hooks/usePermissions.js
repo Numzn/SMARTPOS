@@ -58,12 +58,14 @@ export const usePermissions = () => {
     managePurchasing: hasPermission('purchasing:write'),
     viewPurchasing: hasPermission('purchasing:read'),
 
-    // Cash register / shifts — granular segregation of duties. Operating a
-    // till (own drawer, cash movements, ending a shift) is not the same as
-    // reconciling one (expected cash, counting, variance, closing) — a
-    // Cashier gets the former only; a Cashier can never see the latter,
-    // even for their own shift.
+    // Cash register / shifts — granular segregation of duties.
+    // shifts:operate (Supervisor/Manager/Admin) is opening/ending a shift —
+    // a Cashier never gets this. shifts:recordMovement (Cashier) is
+    // cash-in/out/paid-out on the branch's currently active shift, whoever
+    // opened it. Reconciling (expected cash, counting, variance, closing)
+    // is a further-separate tier a Cashier never sees either way.
     operateShift: hasPermission('shifts:operate'),
+    recordCashMovement: hasPermission('shifts:recordMovement'),
     viewExpectedCash: hasPermission('shifts:viewExpected'),
     countCash: hasPermission('shifts:countCash'),
     viewVariance: hasPermission('shifts:viewVariance'),

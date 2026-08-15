@@ -4,6 +4,7 @@ const prisma = require('../lib/prisma');
 const {
   shiftInclude,
   getOpenShiftForUser,
+  getOpenShiftForBranch,
   openShift,
   recordCashMovement,
   endShift,
@@ -48,32 +49,52 @@ function stripShiftFigures(shift, permissions) {
   return next;
 }
 
-// A caller may reach their own shift via shifts:operate (ownership required)
-// or any shift via shifts:viewAll / shifts:reconcile (reconcile because the
-// pending-reconciliation queue needs to inspect a shift before closing it).
+// A caller may reach their own shift via shifts:operate (ownership required),
+// any shift via shifts:viewAll / shifts:reconcile (reconcile because the
+// pending-reconciliation queue needs to inspect a shift before closing it),
+// or — a Cashier, shifts:recordMovement only — the branch's currently active
+// shift (OPEN or PENDING_RECONCILIATION), never arbitrary history.
 const CAN_VIEW_ANY = ['shifts:viewAll', 'shifts:reconcile'];
 
 function canViewShift(shift, req) {
   if (CAN_VIEW_ANY.some((p) => req.user.permissions.includes(p))) return true;
-  return req.user.permissions.includes('shifts:operate') && shift.userId === req.user.userId;
+  if (req.user.permissions.includes('shifts:operate') && shift.userId === req.user.userId) return true;
+  if (
+    req.user.permissions.includes('shifts:recordMovement') &&
+    shift.branchId === req.user.branchId &&
+    ['OPEN', 'PENDING_RECONCILIATION'].includes(shift.status)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 /**
- * GET /api/shifts/current — the requesting user's currently open shift, if any.
+ * GET /api/shifts/current — the requesting user's currently open shift
+ * (shifts:operate holders — Supervisor/Manager/Admin, who each open their
+ * own), or the branch's currently active shift (shifts:recordMovement only
+ * — Cashier, who never opens one themselves).
  */
-router.get('/current', authenticateToken, requirePermission('shifts:operate'), async (req, res) => {
-  try {
-    const branchId = req.query.branchId || DEFAULT_BRANCH;
-    const shift = await getOpenShiftForUser(req.user.userId, branchId);
-    if (!shift) {
-      return res.status(404).json({ error: 'No open shift for this user' });
+router.get(
+  '/current',
+  authenticateToken,
+  requireAnyPermission('shifts:operate', 'shifts:recordMovement'),
+  async (req, res) => {
+    try {
+      const branchId = req.query.branchId || req.user.branchId || DEFAULT_BRANCH;
+      const shift = req.user.permissions.includes('shifts:operate')
+        ? await getOpenShiftForUser(req.user.userId, branchId)
+        : await getOpenShiftForBranch(branchId);
+      if (!shift) {
+        return res.status(404).json({ error: 'No open shift for this user' });
+      }
+      res.json(stripShiftFigures(shift, req.user.permissions));
+    } catch (error) {
+      console.error('Error fetching current shift:', error);
+      res.status(500).json({ error: 'Failed to fetch current shift' });
     }
-    res.json(stripShiftFigures(shift, req.user.permissions));
-  } catch (error) {
-    console.error('Error fetching current shift:', error);
-    res.status(500).json({ error: 'Failed to fetch current shift' });
   }
-});
+);
 
 /**
  * GET /api/shifts — list shifts.
@@ -162,7 +183,7 @@ router.post('/open', authenticateToken, requirePermission('shifts:operate'), asy
 router.get(
   '/:id',
   authenticateToken,
-  requireAnyPermission('shifts:operate', 'shifts:viewAll', 'shifts:reconcile'),
+  requireAnyPermission('shifts:operate', 'shifts:recordMovement', 'shifts:viewAll', 'shifts:reconcile'),
   async (req, res) => {
     try {
       const shift = await prisma.shift.findUnique({ where: { id: req.params.id }, include: shiftInclude });
@@ -189,7 +210,7 @@ router.get(
 router.get(
   '/:id/report',
   authenticateToken,
-  requireAnyPermission('shifts:operate', 'shifts:viewAll', 'shifts:reconcile'),
+  requireAnyPermission('shifts:operate', 'shifts:recordMovement', 'shifts:viewAll', 'shifts:reconcile'),
   async (req, res) => {
     try {
       const shift = await prisma.shift.findUnique({ where: { id: req.params.id } });
@@ -218,7 +239,7 @@ router.get(
 router.get(
   '/:id/transactions',
   authenticateToken,
-  requireAnyPermission('shifts:operate', 'shifts:viewAll', 'shifts:reconcile'),
+  requireAnyPermission('shifts:operate', 'shifts:recordMovement', 'shifts:viewAll', 'shifts:reconcile'),
   async (req, res) => {
     try {
       const shift = await prisma.shift.findUnique({ where: { id: req.params.id } });
@@ -244,6 +265,19 @@ router.get(
   }
 );
 
+// A cash movement may be recorded by: the shift's owner (Supervisor/Manager/
+// Admin working their own till, shifts:operate), a Cashier
+// (shifts:recordMovement) acting on the branch's OPEN shift regardless of
+// who opened it — this is the whole point of the split, a Cashier who never
+// opens a shift still needs to record cash-in/out/paid-out on the till
+// they're actually working — or shifts:viewAll as a store-wide override.
+function canRecordMovement(shift, req) {
+  if (shift.userId === req.user.userId) return true;
+  if (req.user.permissions.includes('shifts:viewAll')) return true;
+  if (req.user.permissions.includes('shifts:recordMovement') && shift.branchId === req.user.branchId) return true;
+  return false;
+}
+
 function handleCashMovement(type) {
   return async (req, res) => {
     try {
@@ -251,7 +285,7 @@ function handleCashMovement(type) {
       if (!shift) {
         return res.status(404).json({ error: 'Shift not found' });
       }
-      if (shift.userId !== req.user.userId && !req.user.permissions.includes('shifts:viewAll')) {
+      if (!canRecordMovement(shift, req)) {
         return res.status(403).json({ error: 'Access denied' });
       }
 
@@ -279,9 +313,10 @@ function handleCashMovement(type) {
   };
 }
 
-router.post('/:id/cash-in', authenticateToken, requirePermission('shifts:operate'), handleCashMovement('CASH_IN'));
-router.post('/:id/cash-out', authenticateToken, requirePermission('shifts:operate'), handleCashMovement('CASH_OUT'));
-router.post('/:id/paid-out', authenticateToken, requirePermission('shifts:operate'), handleCashMovement('PAID_OUT'));
+const canOperateOrRecordMovement = requireAnyPermission('shifts:operate', 'shifts:recordMovement');
+router.post('/:id/cash-in', authenticateToken, canOperateOrRecordMovement, handleCashMovement('CASH_IN'));
+router.post('/:id/cash-out', authenticateToken, canOperateOrRecordMovement, handleCashMovement('CASH_OUT'));
+router.post('/:id/paid-out', authenticateToken, canOperateOrRecordMovement, handleCashMovement('PAID_OUT'));
 
 /**
  * POST /api/shifts/:id/end — cashier's "I'm done" action. Locks the drawer,
