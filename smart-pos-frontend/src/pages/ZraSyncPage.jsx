@@ -5,9 +5,15 @@ import BranchSnapshotCard from '../components/zraSync/BranchSnapshotCard';
 
 export default function ZraSyncPage() {
   const { canAccess } = usePermissions();
-  const { viewZRAStatus, syncZRA } = canAccess;
+  // Page access is zra:read (viewZRAPage) — the operational/administrative
+  // tier. zra:status (viewZRAStatus) is deliberately NOT enough to reach
+  // this page: it's the lightweight device-connectivity check the till uses
+  // and every Cashier/Supervisor holds it, but neither role should land
+  // here (route-level enforcement mirrors this in App.jsx, and the backend
+  // independently gates every /api/vsdc/* route the same way).
+  const { viewZRAPage, syncZRA, adminZRA } = canAccess;
 
-  if (!viewZRAStatus) {
+  if (!viewZRAPage) {
     return (
       <div className="min-h-[40vh] flex items-center justify-center">
         <div className="text-center">
@@ -33,7 +39,7 @@ export default function ZraSyncPage() {
         </div>
       )}
 
-      <DeviceStatusCard canSync={syncZRA} />
+      <DeviceStatusCard canAdmin={adminZRA} />
       <CodesSyncCard canSync={syncZRA} />
       <BranchSnapshotCard canSync={syncZRA} />
     </div>

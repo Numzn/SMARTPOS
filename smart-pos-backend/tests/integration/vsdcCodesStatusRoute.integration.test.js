@@ -39,12 +39,22 @@ describe('GET /api/vsdc/codes/status', () => {
     expect(res.status).toBe(401);
   });
 
-  it('is reachable by a CASHIER — zra:read is broadly granted, unlike the zra:sync-gated POST routes', async () => {
+  it('is NOT reachable by a CASHIER — zra:read is operational visibility, distinct from the zra:status device check the till uses', async () => {
     const cashier = await createTestUser({ role: 'CASHIER' });
 
     const res = await request(app)
       .get('/api/vsdc/codes/status')
       .set('Authorization', `Bearer ${tokenFor(cashier)}`);
+
+    expect(res.status).toBe(403);
+  });
+
+  it('is reachable by a MANAGER — zra:read', async () => {
+    const manager = await createTestUser({ role: 'MANAGER' });
+
+    const res = await request(app)
+      .get('/api/vsdc/codes/status')
+      .set('Authorization', `Bearer ${tokenFor(manager)}`);
 
     expect(res.status).toBe(200);
   });

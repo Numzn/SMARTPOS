@@ -1,87 +1,19 @@
 const jwt = require('jsonwebtoken');
 const prisma = require('../lib/prisma');
 const auditService = require('../services/auditService');
+const { DEFAULT_PERMISSIONS, getEffectivePermissions } = require('../lib/permissions');
 
 /**
  * Enhanced Authentication & Authorization Middleware
  * Provides role-based and permission-based access control for 100% compliance
+ *
+ * The role -> permission matrix itself now lives in the `RolePermission`
+ * table (lib/permissions.js), not here — this file only enforces whatever
+ * `getEffectivePermissions()` returns. `PERMISSIONS` is kept as an alias for
+ * `DEFAULT_PERMISSIONS` for backward-compat callers; it is seed/fallback
+ * data, not what's actually enforced at request time.
  */
-
-// Role-based permissions matrix
-const PERMISSIONS = {
-  ADMIN: [
-    'users:read', 'users:write', 'users:delete',
-    'products:read', 'products:write', 'products:delete',
-    'categories:read', 'categories:write', 'categories:delete',
-    'inventory:read', 'inventory:write', 'inventory:delete',
-    'sales:read', 'sales:write', 'sales:delete', 'sales:refund',
-    'receipts:read',
-    'reports:read', 'reports:write',
-    'settings:read', 'settings:write',
-    'shifts:read', 'shifts:write',
-    'customers:read', 'customers:write', 'customers:delete',
-    'suppliers:read', 'suppliers:write', 'suppliers:delete',
-    'purchasing:read', 'purchasing:write',
-    'zra:submit', 'zra:sync', 'zra:read',
-    'audit:read'
-  ],
-  MANAGER: [
-    'users:read',
-    'products:read', 'products:write',
-    'categories:read', 'categories:write',
-    'inventory:read', 'inventory:write',
-    'sales:read', 'sales:write', 'sales:refund',
-    'receipts:read',
-    'reports:read',
-    'settings:read',
-    'shifts:read', 'shifts:write',
-    'customers:read', 'customers:write', 'customers:delete',
-    'suppliers:read', 'suppliers:write', 'suppliers:delete',
-    'purchasing:read', 'purchasing:write',
-    'zra:submit', 'zra:sync', 'zra:read',
-    'audit:read'
-  ],
-  CASHIER: [
-    'products:read',
-    'categories:read',
-    'inventory:read',
-    'sales:read', 'sales:write',
-    'receipts:read',
-    'shifts:write',
-    'customers:read', 'customers:write',
-    // Read-only fiscal device status. A cashier has to be able to tell whether
-    // ZRA submission is working — it decides whether they keep trading — and
-    // without this the till's status call 403s and the UI reports the fiscal
-    // service as offline when it is perfectly healthy. The payload is device
-    // identity (TPIN, branch, device serial) that already prints on every
-    // receipt they handle, so this grants no visibility they lacked.
-    'zra:read',
-  ],
-  // Same baseline as CASHIER — a supervisor still works a till day to day.
-  // What actually makes them a supervisor is their PIN passing the
-  // ROLE_RANK check in lib/approval.js, not an extra route permission here.
-  SUPERVISOR: [
-    'products:read',
-    'categories:read',
-    'inventory:read',
-    'sales:read', 'sales:write',
-    'receipts:read',
-    'shifts:write',
-    'customers:read', 'customers:write',
-    'zra:read',
-  ],
-  VIEWER: [
-    'products:read',
-    'categories:read',
-    'inventory:read',
-    'sales:read',
-    'reports:read',
-    'shifts:read',
-    'customers:read',
-    'suppliers:read',
-    'purchasing:read',
-  ]
-};
+const PERMISSIONS = DEFAULT_PERMISSIONS;
 
 // Ordered role hierarchy for step-up approval checks (lib/approval.js) — an
 // approver just needs rank >= the required tier's rank, so adding or
@@ -199,12 +131,16 @@ const authenticateToken = async (req, res, next) => {
       });
     }
     
-    // Add user info and permissions to request
+    // Add user info and permissions to request. Always resolved fresh from
+    // the RolePermission table (not the JWT's embedded snapshot) so a
+    // permission change via PUT /api/settings/roles/:role takes effect on
+    // this user's very next request — no re-login, no redeploy.
     req.user = {
       ...decoded,
-      permissions: PERMISSIONS[user.role] || []
+      role: user.role,
+      permissions: await getEffectivePermissions(user.role),
     };
-    
+
     next();
   } catch (error) {
     if (error.name === 'TokenExpiredError') {
@@ -382,7 +318,8 @@ const optionalAuth = async (req, res, next) => {
       if (user && user.isActive) {
         req.user = {
           ...decoded,
-          permissions: PERMISSIONS[user.role] || []
+          role: user.role,
+          permissions: await getEffectivePermissions(user.role),
         };
       }
     }

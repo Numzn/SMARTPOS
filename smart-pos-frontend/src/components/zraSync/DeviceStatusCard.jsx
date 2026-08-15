@@ -9,7 +9,10 @@ function formatDateTime(value) {
   return d.toLocaleString();
 }
 
-export default function DeviceStatusCard({ canSync }) {
+// Device provisioning is zra:admin — a step up from zra:sync's day-to-day
+// sync triggers, ADMIN-only by default (Manager holds zra:sync but not
+// zra:admin).
+export default function DeviceStatusCard({ canAdmin }) {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -52,7 +55,7 @@ export default function DeviceStatusCard({ canSync }) {
           <Satellite className="w-4 h-4 text-gray-500" strokeWidth={1.5} />
           <h3 className="text-sm font-semibold text-gray-900">Device Initialisation</h3>
         </div>
-        {canSync && (
+        {canAdmin && (
           <button type="button" onClick={handleInitialize} disabled={initializing || loading} className="btn btn-primary !px-3 !py-1.5">
             {initializing ? 'Initializing…' : 'Initialize'}
           </button>

@@ -1,15 +1,22 @@
 import React from 'react';
 import { ShoppingCart, Plus, Package, BarChart2, FileText, Settings } from 'lucide-react';
+import { usePermissions } from '../../hooks/usePermissions';
 
 const QuickActions = ({ onActionClick }) => {
+  const { canAccess } = usePermissions();
+  // Only shortcuts the viewer can actually open — with route guards now
+  // enforced in App.jsx, a shortcut to a page you can't reach is a dead end,
+  // not just an inconvenience.
   const actions = [
-    { id: 'new-sale', title: 'New sale', icon: ShoppingCart, path: '/cashier' },
-    { id: 'add-product', title: 'Products', icon: Plus, path: '/products' },
-    { id: 'inventory', title: 'Inventory', icon: Package, path: '/inventory' },
-    { id: 'reports', title: 'Reports', icon: BarChart2, path: '/reports' },
-    { id: 'zra-status', title: 'ZRA status', icon: FileText, path: '/reports' },
-    { id: 'settings', title: 'Settings', icon: Settings, path: '/settings' },
-  ];
+    (canAccess.createSale || canAccess.viewSales) && { id: 'new-sale', title: 'New sale', icon: ShoppingCart, path: '/cashier' },
+    canAccess.viewProducts && { id: 'add-product', title: 'Products', icon: Plus, path: '/products' },
+    canAccess.viewInventory && { id: 'inventory', title: 'Inventory', icon: Package, path: '/inventory' },
+    canAccess.viewReports && { id: 'reports', title: 'Reports', icon: BarChart2, path: '/reports' },
+    canAccess.viewReports && { id: 'zra-status', title: 'ZRA status', icon: FileText, path: '/reports' },
+    (canAccess.viewSettings || canAccess.manageSettings) && { id: 'settings', title: 'Settings', icon: Settings, path: '/settings' },
+  ].filter(Boolean);
+
+  if (actions.length === 0) return null;
 
   return (
     <div className="panel">

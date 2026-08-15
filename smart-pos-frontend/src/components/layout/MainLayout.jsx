@@ -1,48 +1,9 @@
 import React, { Suspense, useEffect, useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import {
-  LayoutDashboard,
-  CreditCard,
-  Package,
-  Warehouse,
-  BarChart2,
-  Users,
-  Settings,
-  Printer,
-  Menu,
-  X,
-  Search,
-  Bell,
-  LogOut,
-  ChevronDown,
-  Receipt,
-  Contact,
-  Truck,
-  ShoppingCart,
-  Wallet,
-  Satellite,
-  History,
-} from 'lucide-react';
+import { Menu, X, Search, Bell, LogOut, ChevronDown } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePermissions } from '../../hooks/usePermissions';
-
-const NAV_ITEMS = [
-  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, show: () => true },
-  { name: 'Cashier', href: '/cashier', icon: CreditCard, show: (p, u) => p.createSale || p.viewSales || u?.role === 'CASHIER' },
-  { name: 'Sales', href: '/sales', icon: Receipt, show: (p) => p.viewSales || p.refundSale },
-  { name: 'Cash Register', href: '/cash-register', icon: Wallet, show: (p) => p.operateShift || p.viewShifts },
-  { name: 'Products', href: '/products', icon: Package, show: (p) => p.viewProducts },
-  { name: 'Inventory', href: '/inventory', icon: Warehouse, show: (p) => p.viewInventory },
-  { name: 'Customers', href: '/customers', icon: Contact, show: (p) => p.viewCustomers },
-  { name: 'Suppliers', href: '/suppliers', icon: Truck, show: (p) => p.viewSuppliers },
-  { name: 'Purchasing', href: '/purchasing', icon: ShoppingCart, show: (p) => p.viewPurchasing },
-  { name: 'Reports', href: '/reports', icon: BarChart2, show: (p) => p.viewReports },
-  { name: 'Users', href: '/users', icon: Users, show: (p) => p.viewUsers },
-  { name: 'Settings', href: '/settings', icon: Settings, show: (p) => p.viewSettings || p.manageSettings },
-  { name: 'Printers', href: '/printers', icon: Printer, show: (p) => p.viewSettings || p.manageSettings },
-  { name: 'ZRA Sync', href: '/zra-sync', icon: Satellite, show: (p) => p.viewZRAStatus },
-  { name: 'Audit Log', href: '/audit', icon: History, show: (p) => p.viewAuditLog },
-];
+import { NAV_ITEMS } from './navItems';
 
 // A stable top-level component, not one defined inside MainLayout's render
 // body — a component declared per-render gets a new identity every time, so

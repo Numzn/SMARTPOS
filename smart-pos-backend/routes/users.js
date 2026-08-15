@@ -4,7 +4,8 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const prisma = require('../lib/prisma');
-const { authenticateToken, requireRole, requirePermission, sessionManager, PERMISSIONS } = require('../middleware/auth');
+const { authenticateToken, requireRole, requirePermission, sessionManager } = require('../middleware/auth');
+const { getEffectivePermissions } = require('../lib/permissions');
 const { loginLimiter } = require('../middleware/rateLimit');
 const auditService = require('../services/auditService');
 
@@ -70,7 +71,7 @@ router.get('/profile', authenticateToken, async (req, res) => {
     
     res.json({
       ...user,
-      permissions: PERMISSIONS[user.role] || [],
+      permissions: await getEffectivePermissions(user.role),
     });
   } catch (error) {
     console.error('Error fetching user profile:', error);
@@ -192,14 +193,19 @@ router.post('/login', loginLimiter, async (req, res) => {
       });
     }
     
-    // Generate JWT token with extended expiry for remember me
+    // Generate JWT token with extended expiry for remember me. The token's
+    // embedded `permissions` is a snapshot for client-side display only —
+    // authenticateToken always re-resolves fresh from RolePermission on
+    // every request, so this snapshot going stale between logins never
+    // weakens enforcement.
     const expiresIn = rememberMe ? '7d' : '24h';
+    const loginPermissions = await getEffectivePermissions(user.role);
     const token = jwt.sign(
-      { 
-        userId: user.id, 
-        email: user.email, 
+      {
+        userId: user.id,
+        email: user.email,
         role: user.role,
-        permissions: PERMISSIONS[user.role] || []
+        permissions: loginPermissions
       },
       process.env.JWT_SECRET,
       { expiresIn }
@@ -237,7 +243,7 @@ router.post('/login', loginLimiter, async (req, res) => {
         email: user.email,
         name: user.name,
         role: user.role,
-        permissions: PERMISSIONS[user.role] || []
+        permissions: loginPermissions
       }
     });
   } catch (error) {

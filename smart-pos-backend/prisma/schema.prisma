@@ -901,6 +901,7 @@ model Shift {
   openedAt       DateTime    @default(now())
   openingNotes   String?
 
+  endedAt        DateTime?   // cashier "end shift" timestamp — locks cash movements, awaits reconciliation
   closedAt       DateTime?
   closedByUserId String?
   countedCash    Float?      // physical cash counted at close
@@ -1098,6 +1099,24 @@ enum Role {
   VIEWER
 }
 
+// Configurable RBAC: the authoritative source of `role -> permission` grants
+// at runtime, seeded from lib/permissions.js:DEFAULT_PERMISSIONS. Editing
+// this table (via PUT /api/settings/roles/:role, ADMIN-only) changes actual
+// authorization behavior with no deploy — including for ADMIN, which has no
+// code-level bypass. Does not affect ROLE_RANK/approval authority, which is
+// a separate, unmodified system in middleware/auth.js and lib/approval.js.
+model RolePermission {
+  id         String   @id @default(cuid())
+  role       Role
+  permission String
+  granted    Boolean  @default(true)
+  updatedAt  DateTime @updatedAt
+  updatedBy  String?
+
+  @@unique([role, permission])
+  @@map("role_permissions")
+}
+
 enum RefundStatus {
   PENDING
   FISCAL_SUBMITTING
@@ -1154,6 +1173,7 @@ enum ZraRegistrationStatus {
 
 enum ShiftStatus {
   OPEN
+  PENDING_RECONCILIATION
   CLOSED
 }
 

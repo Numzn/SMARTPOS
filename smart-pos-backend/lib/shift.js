@@ -151,7 +151,13 @@ async function computeExpectedCash(shiftId) {
   };
 }
 
-async function closeShift(shiftId, { countedCash, userId, notes }) {
+/**
+ * Cashier's "I'm done" action — locks the drawer against further cash
+ * movements and hands it off for reconciliation, but computes and exposes
+ * no financial figures. Segregation of duties: the cashier who worked the
+ * till is never the one who finds out (or decides) whether it balances.
+ */
+async function endShift(shiftId, { userId }) {
   const shift = await prisma.shift.findUnique({ where: { id: shiftId } });
   if (!shift) {
     const err = new Error('Shift not found');
@@ -159,8 +165,53 @@ async function closeShift(shiftId, { countedCash, userId, notes }) {
     throw err;
   }
   if (shift.status !== 'OPEN') {
+    const err = new Error(`Cannot end a shift with status ${shift.status}`);
+    err.status = 409;
+    throw err;
+  }
+
+  return prisma.shift.update({
+    where: { id: shiftId },
+    data: {
+      status: 'PENDING_RECONCILIATION',
+      endedAt: new Date(),
+    },
+    include: shiftInclude,
+  });
+}
+
+/**
+ * Reconcile (count + close) a shift. Runnable on an OPEN shift directly (a
+ * supervisor doing a spot-check) or, the normal path, one already ended by
+ * its cashier (PENDING_RECONCILIATION).
+ *
+ * `reconcilerUserId` must differ from the shift's owner — this is a hard
+ * invariant, not permission-gated, mirroring SELF_APPROVAL_DENIED in
+ * lib/approval.js: a till can never be balanced by the person who worked
+ * it, regardless of what role or permissions that person holds (including
+ * ADMIN — segregation of duties is structural, not a privilege check).
+ */
+async function closeShift(shiftId, { countedCash, reconcilerUserId, notes }) {
+  const shift = await prisma.shift.findUnique({ where: { id: shiftId } });
+  if (!shift) {
+    const err = new Error('Shift not found');
+    err.status = 404;
+    throw err;
+  }
+  if (!['OPEN', 'PENDING_RECONCILIATION'].includes(shift.status)) {
     const err = new Error('Shift is already closed');
     err.status = 409;
+    throw err;
+  }
+  if (!reconcilerUserId) {
+    const err = new Error('reconcilerUserId is required');
+    err.status = 400;
+    throw err;
+  }
+  if (reconcilerUserId === shift.userId) {
+    const err = new Error('A shift cannot be reconciled by the cashier who worked it');
+    err.status = 403;
+    err.code = 'SELF_RECONCILE_DENIED';
     throw err;
   }
 
@@ -179,11 +230,45 @@ async function closeShift(shiftId, { countedCash, userId, notes }) {
     data: {
       status: 'CLOSED',
       closedAt: new Date(),
-      closedByUserId: userId || shift.userId,
+      closedByUserId: reconcilerUserId,
       countedCash: counted,
       expectedCash: breakdown.expectedCash,
       variance,
       closingNotes: notes || null,
+    },
+    include: shiftInclude,
+  });
+}
+
+/**
+ * Manager override: reopen a reconciled shift (e.g. a counting error found
+ * after the fact). Clears the reconciliation figures back to the
+ * PENDING_RECONCILIATION state rather than OPEN — cash movements stay
+ * locked; a reconciler still has to close it again.
+ */
+async function reopenShift(shiftId, { notes } = {}) {
+  const shift = await prisma.shift.findUnique({ where: { id: shiftId } });
+  if (!shift) {
+    const err = new Error('Shift not found');
+    err.status = 404;
+    throw err;
+  }
+  if (shift.status !== 'CLOSED') {
+    const err = new Error('Only a closed shift can be reopened');
+    err.status = 409;
+    throw err;
+  }
+
+  return prisma.shift.update({
+    where: { id: shiftId },
+    data: {
+      status: 'PENDING_RECONCILIATION',
+      closedAt: null,
+      closedByUserId: null,
+      countedCash: null,
+      expectedCash: null,
+      variance: null,
+      closingNotes: notes || shift.closingNotes,
     },
     include: shiftInclude,
   });
@@ -480,7 +565,9 @@ module.exports = {
   openShift,
   recordCashMovement,
   computeExpectedCash,
+  endShift,
   closeShift,
+  reopenShift,
   getShiftReport,
   getShiftTransactions,
 };

@@ -1,13 +1,24 @@
 import { useState, useEffect } from 'react';
 import api from '../../services/api';
+import { usePermissions } from '../../hooks/usePermissions';
 import DashboardHeader from './DashboardHeader';
 import DashboardStats from './DashboardStats';
 import HourlyChart from './HourlyChart';
 import TopProducts from './TopProducts';
 import PaymentMethods from './PaymentMethods';
 import QuickActions from './QuickActions';
+import PendingReconciliation from './PendingReconciliation';
 
 const Dashboard = () => {
+  const { canAccess } = usePermissions();
+  // Store-wide sales KPIs are a business-management view, not something
+  // Supervisor gets by default — reports:read is what actually distinguishes
+  // Manager/Admin/Viewer (who hold it) from Supervisor (who doesn't), so
+  // gating on it here is what keeps this dashboard "operational" for
+  // Supervisor and "store-wide" for Manager+, per the role's business
+  // definition rather than an invented dashboard-specific flag.
+  const showBusinessKpis = canAccess.viewReports;
+
   const [stats, setStats] = useState({
     todaySales: 0,
     transactionCount: 0,
@@ -23,6 +34,7 @@ const Dashboard = () => {
   const [lastUpdated, setLastUpdated] = useState(null);
 
   const fetchStats = async () => {
+    if (!showBusinessKpis) return;
     setIsLoading(true);
     setError(null);
     try {
@@ -51,6 +63,7 @@ const Dashboard = () => {
 
   useEffect(() => {
     fetchStats();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTimeframe]);
 
   return (
@@ -66,16 +79,22 @@ const Dashboard = () => {
         <div className="panel border-amber-300 bg-amber-50 text-amber-900 text-xs p-3">{error}</div>
       )}
 
-      <DashboardStats stats={stats} isLoading={isLoading} />
+      {canAccess.reconcileShift && <PendingReconciliation />}
+
+      {showBusinessKpis && <DashboardStats stats={stats} isLoading={isLoading} />}
       <QuickActions onActionClick={(a) => (window.location.href = a.path)} />
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2">
-          <HourlyChart data={stats.hourlyStats} isLoading={isLoading} />
-        </div>
-        <TopProducts data={stats.topProducts} isLoading={isLoading} />
-      </div>
-      <PaymentMethods data={stats.paymentMethods} isLoading={isLoading} />
+      {showBusinessKpis && (
+        <>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="lg:col-span-2">
+              <HourlyChart data={stats.hourlyStats} isLoading={isLoading} />
+            </div>
+            <TopProducts data={stats.topProducts} isLoading={isLoading} />
+          </div>
+          <PaymentMethods data={stats.paymentMethods} isLoading={isLoading} />
+        </>
+      )}
     </div>
   );
 };

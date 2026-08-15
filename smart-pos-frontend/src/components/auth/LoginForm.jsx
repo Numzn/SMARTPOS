@@ -3,12 +3,13 @@ import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import api from '../../services/api';
 import { API_ROOT } from '../../lib/apiClient';
+import { getHomeRoute } from '../../lib/roleHome';
 import { Server, AlertCircle, Loader2 } from 'lucide-react';
 
 const API_DISPLAY = API_ROOT.replace(/^https?:\/\//, '');
 
 const LoginForm = () => {
-  const { login, isAuthenticated, loading } = useAuth();
+  const { login, isAuthenticated, user, loading } = useAuth();
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
     email: 'admin@smartpos.com',
@@ -26,7 +27,7 @@ const LoginForm = () => {
   }, []);
 
   if (isAuthenticated) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to={getHomeRoute(user?.role)} replace />;
   }
 
   const handleChange = (e) => {
@@ -41,7 +42,7 @@ const LoginForm = () => {
 
     const result = await login(formData.email, formData.password);
     if (result.success) {
-      navigate('/dashboard', { replace: true });
+      navigate(getHomeRoute(result.user?.role), { replace: true });
     } else {
       setError(result.error);
     }

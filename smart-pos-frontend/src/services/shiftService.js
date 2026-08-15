@@ -56,4 +56,24 @@ export const shiftApi = {
       method: 'POST',
       body: JSON.stringify({ countedCash, notes }),
     }),
+
+  /**
+   * Cashier's "I'm done" action — locks the drawer, hands it off for
+   * reconciliation, exposes no financial figures. Segregation of duties:
+   * this is the only self-service end-of-shift action a Cashier has.
+   */
+  endShift: (id) => apiFetch(`/shifts/${id}/end`, { method: 'POST' }),
+
+  /** Shifts awaiting a Supervisor+ to count and close them. */
+  fetchPendingReconciliation: async () => {
+    const data = await apiFetch('/shifts?status=PENDING_RECONCILIATION');
+    return data.shifts || [];
+  },
+
+  /** Manager+ override for a shift reconciled in error. */
+  reopenShift: (id, { notes } = {}) =>
+    apiFetch(`/shifts/${id}/reopen`, {
+      method: 'POST',
+      body: JSON.stringify({ notes }),
+    }),
 };

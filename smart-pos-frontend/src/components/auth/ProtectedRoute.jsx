@@ -2,6 +2,13 @@ import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 
+// requiredRole / requiredPermission accept either a single string (must
+// match) or an array (any-of) — the array form is what closes the
+// direct-URL-bypass gap: every nested route in App.jsx now names the
+// permission(s) it actually needs, so typing a URL directly is subject to
+// the same boundary as the sidebar, not a way around it.
+const toArray = (value) => (value == null ? null : Array.isArray(value) ? value : [value]);
+
 const ProtectedRoute = ({ children, requiredRole = null, requiredPermission = null }) => {
   const { isAuthenticated, user, loading } = useAuth();
   const location = useLocation();
@@ -18,8 +25,8 @@ const ProtectedRoute = ({ children, requiredRole = null, requiredPermission = nu
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  // Role-based access control
-  if (requiredRole && user.role !== requiredRole) {
+  const roles = toArray(requiredRole);
+  if (roles && !roles.includes(user.role)) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
@@ -30,8 +37,8 @@ const ProtectedRoute = ({ children, requiredRole = null, requiredPermission = nu
     );
   }
 
-  // Permission-based access control
-  if (requiredPermission && !user.permissions?.includes(requiredPermission)) {
+  const permissions = toArray(requiredPermission);
+  if (permissions && !permissions.some((p) => user.permissions?.includes(p))) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">

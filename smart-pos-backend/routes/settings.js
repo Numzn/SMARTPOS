@@ -1,11 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
-const { authenticateToken, requirePermission } = require('../middleware/auth');
+const { authenticateToken, requirePermission, requireRole } = require('../middleware/auth');
 const auditService = require('../services/auditService');
 const { getBusinessProfile, ensureDefaultBusinessProfile } = require('../lib/ensureBusinessProfile');
 const { runDatabaseBackup } = require('../lib/backup');
 const { getDiscountPolicy } = require('../lib/discountPolicy');
+const { ALL_PERMISSIONS, listRolePermissions, setRolePermission } = require('../lib/permissions');
+
+const VALID_ROLES = ['ADMIN', 'MANAGER', 'SUPERVISOR', 'CASHIER', 'VIEWER'];
 
 const DISCOUNT_POLICY_BOOLEAN_KEYS = [
   'cashierCanApply',
@@ -96,6 +99,65 @@ router.patch('/business', authenticateToken, requirePermission('settings:write')
   } catch (error) {
     console.error('Settings update error:', error.message);
     res.status(500).json({ error: 'Failed to update business settings' });
+  }
+});
+
+// Configurable RBAC: read/update the role -> permission matrix. Deliberately
+// gated by requireRole('ADMIN') rather than requirePermission('settings:write')
+// — editing the permission matrix is a strictly higher-trust action than
+// editing business profile fields, and gating it on a *permission* would let
+// an ADMIN grant a MANAGER `settings:write` and thereby hand that MANAGER
+// the ability to grant itself anything (self-escalation). requireRole keeps
+// this specific door ADMIN-only regardless of what settings:write covers.
+// This endpoint only ever writes RolePermission rows — it has no path to
+// ROLE_RANK or the approval-eligibility logic in lib/approval.js, which stay
+// a separate, unmodified system.
+router.get('/roles', authenticateToken, requireRole('ADMIN'), async (req, res) => {
+  try {
+    const rows = await listRolePermissions();
+    res.json({ roles: VALID_ROLES, permissions: ALL_PERMISSIONS, grants: rows });
+  } catch (error) {
+    console.error('Role permissions fetch error:', error.message);
+    res.status(500).json({ error: 'Failed to load role permissions' });
+  }
+});
+
+router.put('/roles/:role', authenticateToken, requireRole('ADMIN'), async (req, res) => {
+  try {
+    const { role } = req.params;
+    if (!VALID_ROLES.includes(role)) {
+      return res.status(400).json({ error: `Invalid role: ${role}` });
+    }
+
+    const { permission, granted } = req.body;
+    if (typeof permission !== 'string' || !permission) {
+      return res.status(400).json({ error: 'permission is required' });
+    }
+    if (typeof granted !== 'boolean') {
+      return res.status(400).json({ error: 'granted must be a boolean' });
+    }
+    if (!ALL_PERMISSIONS.includes(permission)) {
+      return res.status(400).json({ error: `Unknown permission: ${permission}` });
+    }
+
+    const row = await setRolePermission(role, permission, granted, req.user.userId);
+
+    auditService.safeLog(auditService.eventTypes.SETTINGS_UPDATE, {
+      ...auditService.contextFromReq(req),
+      entityType: 'ROLE_PERMISSION',
+      entityId: `${role}:${permission}`,
+      action: 'UPDATE',
+      newValues: { role, permission, granted },
+      description: `Role permission ${granted ? 'granted' : 'revoked'}: ${role} / ${permission}`,
+    });
+
+    res.json(row);
+  } catch (error) {
+    if (error.code === 'UNKNOWN_ROLE' || error.code === 'UNKNOWN_PERMISSION') {
+      return res.status(400).json({ error: error.message });
+    }
+    console.error('Role permission update error:', error.message);
+    res.status(500).json({ error: 'Failed to update role permission' });
   }
 });
 

@@ -2,8 +2,34 @@ const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
 const { ensureDefaultBranch } = require('../lib/ensureDefaultBranch');
 const { ensureDefaultBusinessProfile } = require('../lib/ensureBusinessProfile');
+const { DEFAULT_PERMISSIONS } = require('../lib/permissions');
 
 const prisma = new PrismaClient();
+
+/**
+ * Seed the configurable RolePermission matrix from lib/permissions.js's
+ * DEFAULT_PERMISSIONS. Idempotent (upsert on the [role, permission] unique
+ * key) so re-running this script — including on an install that already has
+ * admin-edited grants — never clobbers a deliberate customization; it only
+ * ensures every currently-known permission has a row, defaulting new ones
+ * (e.g. after an app upgrade adds a permission) to granted for the roles
+ * that had it in the default matrix, and simply absent (not granted) for
+ * roles that didn't.
+ */
+async function ensureRolePermissionsSeeded() {
+  let created = 0;
+  for (const [role, permissions] of Object.entries(DEFAULT_PERMISSIONS)) {
+    for (const permission of permissions) {
+      const result = await prisma.rolePermission.upsert({
+        where: { role_permission: { role, permission } },
+        update: {},
+        create: { role, permission, granted: true },
+      });
+      if (result) created += 1;
+    }
+  }
+  return created;
+}
 
 async function main() {
   console.log('🌱 Starting database seed...');
@@ -13,6 +39,9 @@ async function main() {
 
   await ensureDefaultBusinessProfile();
   console.log('✅ Default business profile ensured');
+
+  const rolePermissionCount = await ensureRolePermissionsSeeded();
+  console.log(`✅ Role permissions ensured (${rolePermissionCount} grants across ${Object.keys(DEFAULT_PERMISSIONS).length} roles)`);
 
   // Create default admin user
   const adminPassword = await bcrypt.hash('admin123', 10);

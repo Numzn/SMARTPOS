@@ -1,5 +1,6 @@
 import React from 'react';
 import { exportShiftReportPdf } from '../../lib/shiftPdf';
+import { usePermissions } from '../../hooks/usePermissions';
 
 const money = (n) => `K${Number(n || 0).toFixed(2)}`;
 
@@ -44,6 +45,15 @@ const Block = ({ title, children }) => (
  */
 const ShiftReportPanel = ({ report, onViewTransactions }) => {
   const [exportError, setExportError] = React.useState(null);
+  const { canAccess } = usePermissions();
+  // Defense-in-depth: the server already strips these fields from the
+  // response for a viewer without shifts:viewExpected/shifts:viewVariance
+  // (segregation of duties — a Cashier never sees expected cash or variance,
+  // even for their own shift), so these are `undefined` on the wire for
+  // them. Gating rendering here too means a Cashier never sees a misleading
+  // "K0.00" in place of a hidden figure.
+  const showExpected = canAccess.viewExpectedCash;
+  const showVariance = canAccess.viewVariance;
 
   if (!report) return null;
 
@@ -139,11 +149,14 @@ const ShiftReportPanel = ({ report, onViewTransactions }) => {
         </div>
       )}
 
-      {/* Expected cash — the number the whole report exists to produce */}
-      <div className="px-4 py-3 bg-indigo-50 border-b border-indigo-100 flex items-center justify-between">
-        <span className="text-sm font-medium text-indigo-900">Expected Cash in Drawer</span>
-        <span className="text-2xl font-bold text-indigo-900">{money(cash.expectedCash)}</span>
-      </div>
+      {/* Expected cash — the number the whole report exists to produce.
+          Reconciliation-only: never shown to the cashier who worked the till. */}
+      {showExpected && (
+        <div className="px-4 py-3 bg-indigo-50 border-b border-indigo-100 flex items-center justify-between">
+          <span className="text-sm font-medium text-indigo-900">Expected Cash in Drawer</span>
+          <span className="text-2xl font-bold text-indigo-900">{money(cash.expectedCash)}</span>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-gray-200">
         <div className="divide-y divide-gray-200">
@@ -194,30 +207,32 @@ const ShiftReportPanel = ({ report, onViewTransactions }) => {
             <Row label="Cash Refunds" value={`-${money(cash.cashRefunds)}`} />
           </Block>
 
-          <Block title="Cash Position">
-            <Row label="Expected Cash" value={money(cash.expectedCash)} strong />
-            {isClosed ? (
-              <>
-                <Row label="Counted Cash" value={money(cash.countedCash)} />
-                <Row
-                  label={`Variance${variance ? (variance > 0 ? ' (over)' : ' (short)') : ''}`}
-                  value={money(variance)}
-                  strong
-                  tone={varianceTone}
-                />
-                {cash.variancePct != null && (
-                  <Row label="Variance %" value={`${cash.variancePct}%`} tone={varianceTone} indent />
-                )}
-                {shift.closedBy?.name && <Row label="Closed By" value={shift.closedBy.name} />}
-              </>
-            ) : (
-              <Row
-                label="Counted Cash"
-                value="Pending — recorded at close"
-                tone="text-gray-400"
-              />
-            )}
-          </Block>
+          {(showExpected || showVariance) && (
+            <Block title="Cash Position">
+              {showExpected && <Row label="Expected Cash" value={money(cash.expectedCash)} strong />}
+              {isClosed ? (
+                <>
+                  {showExpected && <Row label="Counted Cash" value={money(cash.countedCash)} />}
+                  {showVariance && (
+                    <Row
+                      label={`Variance${variance ? (variance > 0 ? ' (over)' : ' (short)') : ''}`}
+                      value={money(variance)}
+                      strong
+                      tone={varianceTone}
+                    />
+                  )}
+                  {showVariance && cash.variancePct != null && (
+                    <Row label="Variance %" value={`${cash.variancePct}%`} tone={varianceTone} indent />
+                  )}
+                  {shift.closedBy?.name && <Row label="Closed By" value={shift.closedBy.name} />}
+                </>
+              ) : (
+                showExpected && (
+                  <Row label="Counted Cash" value="Pending — recorded at close" tone="text-gray-400" />
+                )
+              )}
+            </Block>
+          )}
         </div>
       </div>
 

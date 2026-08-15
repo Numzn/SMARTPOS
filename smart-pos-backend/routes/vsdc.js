@@ -7,9 +7,12 @@ const { authenticateToken, requirePermission } = require('../middleware/auth');
 const { DEFAULT_BRANCH } = require('../lib/inventoryStock');
 
 /**
- * GET /api/vsdc/status — device init status (no secrets exposed)
+ * GET /api/vsdc/status — device init status (no secrets exposed). This is
+ * the only ZRA route CASHIER/SUPERVISOR reach by default (zra:status) — it
+ * never implies access to the ZRA Sync page or any of the operational
+ * routes below (zra:read/zra:sync/zra:admin).
  */
-router.get('/status', authenticateToken, requirePermission('zra:read'), async (req, res) => {
+router.get('/status', authenticateToken, requirePermission('zra:status'), async (req, res) => {
   try {
     const status = await vsdcService.getDeviceStatus();
     res.json(status);
@@ -20,9 +23,11 @@ router.get('/status', authenticateToken, requirePermission('zra:read'), async (r
 });
 
 /**
- * POST /api/vsdc/initialize — run device initialization (admin/manager)
+ * POST /api/vsdc/initialize — run device initialization/provisioning.
+ * ADMIN-only (zra:admin) — distinct from zra:sync's day-to-day sync
+ * triggers, which MANAGER also holds.
  */
-router.post('/initialize', authenticateToken, requirePermission('zra:sync'), async (req, res) => {
+router.post('/initialize', authenticateToken, requirePermission('zra:admin'), async (req, res) => {
   try {
     const result = await vsdcService.ensureDeviceInitialized();
     if (!result.success) {

@@ -11,9 +11,11 @@ import { usePermissions } from '../hooks/usePermissions';
 const money = (n) => `K${Number(n || 0).toFixed(2)}`;
 
 const CashRegisterPage = () => {
-  const { hasPermission } = usePermissions();
-  const canOperate = hasPermission('shifts:write'); // open/close own till
-  const canOversee = hasPermission('shifts:read'); // see everyone's shifts
+  const { canAccess } = usePermissions();
+  const canOperate = canAccess.operateShift; // open/use own till, cash movements, end own shift
+  const canReconcile = canAccess.reconcileShift; // count + close ANY eligible shift, never own
+  const canViewAll = canAccess.viewAllShifts; // full store-wide shift list
+  const canReopen = canAccess.reopenShift;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -21,16 +23,15 @@ const CashRegisterPage = () => {
 
   const [currentShift, setCurrentShift] = useState(null);
   const [currentReport, setCurrentReport] = useState(null);
+  const [pendingQueue, setPendingQueue] = useState([]);
   const [shifts, setShifts] = useState([]);
 
   const [showOpenModal, setShowOpenModal] = useState(false);
-  const [showCloseModal, setShowCloseModal] = useState(false);
   const [movementType, setMovementType] = useState(null);
+  const [reconcileTarget, setReconcileTarget] = useState(null); // { shift, report }
   const [historyReport, setHistoryReport] = useState(null);
-  // Held after a close so the cashier actually sees their Z-report. Without
-  // this the shift stops being "current" the moment it closes and the final
-  // reconciliation would vanish off the screen — and a cashier without
-  // shifts:read has no history table to find it in again.
+  // Held after ending/reconciling so the operator actually sees the result.
+  const [endedNotice, setEndedNotice] = useState(false);
   const [closedReport, setClosedReport] = useState(null);
   // Shift whose transaction journal is open, if any.
   const [journalShiftId, setJournalShiftId] = useState(null);
@@ -47,22 +48,27 @@ const CashRegisterPage = () => {
     return shift;
   }, [canOperate]);
 
+  const loadPendingQueue = useCallback(async () => {
+    if (!canReconcile) return;
+    setPendingQueue(await shiftApi.fetchPendingReconciliation());
+  }, [canReconcile]);
+
   const loadHistory = useCallback(async () => {
-    if (!canOversee) return;
+    if (!canViewAll) return;
     setShifts(await shiftApi.fetchShifts());
-  }, [canOversee]);
+  }, [canViewAll]);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      await Promise.all([loadCurrent(), loadHistory()]);
+      await Promise.all([loadCurrent(), loadPendingQueue(), loadHistory()]);
     } catch (err) {
       setError(err?.data?.error || err.message || 'Failed to load cash register');
     } finally {
       setLoading(false);
     }
-  }, [loadCurrent, loadHistory]);
+  }, [loadCurrent, loadPendingQueue, loadHistory]);
 
   useEffect(() => {
     loadAll();
@@ -72,7 +78,7 @@ const CashRegisterPage = () => {
     setSaving(true);
     try {
       await fn();
-      await Promise.all([loadCurrent(), loadHistory()]);
+      await Promise.all([loadCurrent(), loadPendingQueue(), loadHistory()]);
     } catch (err) {
       alert(`${failureMessage}: ${err?.data?.error || err.message}`);
     } finally {
@@ -92,16 +98,28 @@ const CashRegisterPage = () => {
       setMovementType(null);
     }, 'Error recording cash movement');
 
-  const handleCloseShift = ({ countedCash, notes }) =>
+  const handleEndShift = () =>
     runAction(async () => {
-      const shiftId = currentShift.id;
+      await shiftApi.endShift(currentShift.id);
+      setEndedNotice(true);
+    }, 'Error ending shift');
+
+  const openReconcileModal = async (shift) => {
+    try {
+      const report = await shiftApi.fetchShiftReport(shift.id);
+      setReconcileTarget({ shift, report });
+    } catch (err) {
+      alert(`Error loading shift: ${err?.data?.error || err.message}`);
+    }
+  };
+
+  const handleReconcile = ({ countedCash, notes }) =>
+    runAction(async () => {
+      const shiftId = reconcileTarget.shift.id;
       await shiftApi.closeShift(shiftId, { countedCash, notes });
-      setShowCloseModal(false);
-      // Fetch the Z-report before the shift stops being "current", and show
-      // the server's own figures — the variance stored on close is computed
-      // backend-side, so it is authoritative over the modal's preview.
+      setReconcileTarget(null);
       setClosedReport(await shiftApi.fetchShiftReport(shiftId));
-    }, 'Error closing shift');
+    }, 'Error reconciling shift');
 
   const openHistoryReport = async (shift) => {
     try {
@@ -109,6 +127,14 @@ const CashRegisterPage = () => {
     } catch (err) {
       alert(`Error loading shift report: ${err?.data?.error || err.message}`);
     }
+  };
+
+  const handleReopen = async (shift) => {
+    if (!window.confirm(`Reopen shift ${shift.shiftNumber || shift.id}? It returns to Pending Reconciliation.`)) return;
+    await runAction(async () => {
+      await shiftApi.reopenShift(shift.id);
+      setHistoryReport(null);
+    }, 'Error reopening shift');
   };
 
   if (loading) {
@@ -123,7 +149,11 @@ const CashRegisterPage = () => {
     <div className="space-y-6 p-4 sm:p-6">
       <div>
         <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Cash Register</h1>
-        <p className="text-gray-600">Open and close the till, record cash movements, reconcile the drawer</p>
+        <p className="text-gray-600">
+          {canReconcile
+            ? 'Operate your own till, and balance cashiers awaiting reconciliation'
+            : 'Open and use your till, record cash movements, end your shift'}
+        </p>
       </div>
 
       {error && (
@@ -138,9 +168,7 @@ const CashRegisterPage = () => {
       {closedReport && (
         <section className="space-y-3">
           <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center justify-between gap-3">
-            <p className="text-sm text-green-800">
-              Shift closed. Review the Z-report below — this is the final reconciliation.
-            </p>
+            <p className="text-sm text-green-800">Shift reconciled. Review the Z-report below.</p>
             <button
               onClick={() => setClosedReport(null)}
               className="px-3 py-1.5 border border-green-300 rounded-md text-sm font-medium text-green-800 hover:bg-green-100 shrink-0"
@@ -167,6 +195,16 @@ const CashRegisterPage = () => {
                 Open Shift
               </button>
             </div>
+          ) : currentShift.status === 'PENDING_RECONCILIATION' ? (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-6 text-center">
+              <span className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-800 mr-2">
+                AWAITING RECONCILIATION
+              </span>
+              <p className="text-sm text-amber-900 mt-3">
+                Your shift has ended and is locked. A supervisor or manager will count the drawer
+                and close it — you can&apos;t reconcile your own till.
+              </p>
+            </div>
           ) : (
             <>
               <div className="bg-white rounded-lg shadow p-4 flex flex-wrap items-center justify-between gap-3">
@@ -174,12 +212,16 @@ const CashRegisterPage = () => {
                   <span className="px-2 py-0.5 rounded text-xs bg-green-100 text-green-700 mr-2">
                     OPEN
                   </span>
-                  <span className="text-sm text-gray-600">
-                    Expected in drawer:{' '}
-                    <span className="font-semibold text-gray-900">
-                      {money(currentReport?.cash?.expectedCash)}
+                  {canAccess.viewExpectedCash ? (
+                    <span className="text-sm text-gray-600">
+                      Expected in drawer:{' '}
+                      <span className="font-semibold text-gray-900">
+                        {money(currentReport?.cash?.expectedCash)}
+                      </span>
                     </span>
-                  </span>
+                  ) : (
+                    <span className="text-sm text-gray-500">Till in use</span>
+                  )}
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <button
@@ -201,10 +243,11 @@ const CashRegisterPage = () => {
                     Paid Out
                   </button>
                   <button
-                    onClick={() => setShowCloseModal(true)}
-                    className="px-3 py-2 bg-red-600 text-white rounded-md text-sm font-medium hover:bg-red-700"
+                    onClick={handleEndShift}
+                    disabled={saving}
+                    className="px-3 py-2 bg-amber-600 text-white rounded-md text-sm font-medium hover:bg-amber-700 disabled:opacity-50"
                   >
-                    Close Shift
+                    End Shift
                   </button>
                 </div>
               </div>
@@ -215,14 +258,46 @@ const CashRegisterPage = () => {
         </section>
       )}
 
-      {canOversee && (
+      {canReconcile && (
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold text-gray-900">Pending Reconciliation</h2>
+          {pendingQueue.length === 0 ? (
+            <div className="bg-white rounded-lg shadow p-6 text-center text-gray-500 text-sm">
+              No shifts waiting to be balanced.
+            </div>
+          ) : (
+            <div className="bg-white rounded-lg shadow divide-y divide-gray-100">
+              {pendingQueue.map((s) => (
+                <div key={s.id} className="p-4 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium text-gray-900">
+                      {s.shiftNumber} · {s.user?.name || 'Unknown cashier'}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      Ended {s.endedAt ? new Date(s.endedAt).toLocaleString() : '—'}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => openReconcileModal(s)}
+                    className="px-3 py-2 bg-indigo-600 text-white rounded-md text-sm font-medium hover:bg-indigo-700"
+                  >
+                    Reconcile
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {canViewAll && (
         <section className="space-y-3">
           <h2 className="text-lg font-semibold text-gray-900">Shift History</h2>
           <ShiftsTable shifts={shifts} onView={openHistoryReport} />
         </section>
       )}
 
-      {!canOperate && !canOversee && (
+      {!canOperate && !canReconcile && !canViewAll && (
         <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
           You don&apos;t have permission to use the cash register.
         </div>
@@ -244,18 +319,43 @@ const CashRegisterPage = () => {
       />
 
       <CloseShiftModal
-        show={showCloseModal}
-        onClose={() => setShowCloseModal(false)}
+        show={!!reconcileTarget}
+        onClose={() => setReconcileTarget(null)}
         loading={saving}
-        onSubmit={handleCloseShift}
-        expectedCash={currentReport?.cash?.expectedCash}
-        breakdown={currentReport?.cash}
+        onSubmit={handleReconcile}
+        expectedCash={reconcileTarget?.report?.cash?.expectedCash}
+        breakdown={reconcileTarget?.report?.cash}
       />
+
+      {endedNotice && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl p-6 max-w-sm text-center space-y-3">
+            <p className="text-gray-800 text-sm">
+              Shift ended. It&apos;s now awaiting a supervisor or manager to count the drawer and
+              close it.
+            </p>
+            <button
+              onClick={() => setEndedNotice(false)}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
 
       {historyReport && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="w-full max-w-3xl max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-end mb-2">
+          <div className="w-full max-w-3xl max-h-[90vh] overflow-y-auto space-y-2">
+            <div className="flex justify-end gap-2">
+              {canReopen && historyReport.shift?.status === 'CLOSED' && (
+                <button
+                  onClick={() => handleReopen(historyReport.shift)}
+                  className="px-3 py-1.5 bg-white rounded-md text-sm font-medium text-amber-700 border border-amber-300 hover:bg-amber-50"
+                >
+                  Reopen
+                </button>
+              )}
               <button
                 onClick={() => setHistoryReport(null)}
                 className="px-3 py-1.5 bg-white rounded-md text-sm font-medium text-gray-700 hover:bg-gray-100"

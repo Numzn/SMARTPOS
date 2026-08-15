@@ -85,13 +85,14 @@ describe('Shift X/Z reports and transaction journal', () => {
 
   it('Z-report carries counted cash, variance and variance percentage', async () => {
     const user = await createTestUser();
+    const reconciler = await createTestUser({ role: 'SUPERVISOR' });
     const shift = await openShift({ userId: user.id, openingFloat: 400 });
-    await closeShift(shift.id, { countedCash: 380, userId: user.id, notes: 'drawer short' });
+    await closeShift(shift.id, { countedCash: 380, reconcilerUserId: reconciler.id, notes: 'drawer short' });
 
     const report = await getShiftReport(shift.id);
 
     expect(report.shift.status).toBe('CLOSED');
-    expect(report.shift.closedBy?.id).toBe(user.id);
+    expect(report.shift.closedBy?.id).toBe(reconciler.id);
     expect(report.shift.closingNotes).toBe('drawer short');
     expect(report.cash.expectedCash).toBe(400);
     expect(report.cash.countedCash).toBe(380);

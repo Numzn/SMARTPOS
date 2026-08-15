@@ -14,8 +14,16 @@ const {
   cleanupTestData,
   DEFAULT_BRANCH_CODE,
 } = testData;
-const { openShift, recordCashMovement, closeShift, computeExpectedCash, getShiftReport, getOpenShiftForUser } =
-  shiftLib;
+const {
+  openShift,
+  recordCashMovement,
+  endShift,
+  closeShift,
+  reopenShift,
+  computeExpectedCash,
+  getShiftReport,
+  getOpenShiftForUser,
+} = shiftLib;
 const { completeSaleAfterFiscalSuccess } = saleFiscal;
 const { completeRefundAfterFiscalSuccess, createPendingRefund } = saleRefund;
 
@@ -155,33 +163,91 @@ describe('Cash register / shift lifecycle', () => {
 
   it('closeShift computes variance (counted - expected) and marks the shift CLOSED', async () => {
     const user = await createTestUser();
+    const reconciler = await createTestUser({ role: 'SUPERVISOR' });
     const shift = await createTestShift({ userId: user.id, openingFloat: 200 });
 
-    const closed = await closeShift(shift.id, { countedCash: 195, userId: user.id, notes: 'short by 5' });
+    const closed = await closeShift(shift.id, {
+      countedCash: 195,
+      reconcilerUserId: reconciler.id,
+      notes: 'short by 5',
+    });
 
     expect(closed.status).toBe('CLOSED');
     expect(closed.expectedCash).toBe(200);
     expect(closed.countedCash).toBe(195);
     expect(closed.variance).toBe(-5);
     expect(closed.closedAt).not.toBeNull();
+    expect(closed.closedByUserId).toBe(reconciler.id);
+  });
+
+  it('rejects self-reconciliation regardless of who is passed as reconciler being the shift owner', async () => {
+    const user = await createTestUser();
+    const shift = await createTestShift({ userId: user.id, openingFloat: 100 });
+
+    await expect(
+      closeShift(shift.id, { countedCash: 100, reconcilerUserId: user.id })
+    ).rejects.toMatchObject({ status: 403, code: 'SELF_RECONCILE_DENIED' });
   });
 
   it('rejects closing an already-closed shift and rejects a negative counted amount', async () => {
     const user = await createTestUser();
+    const reconciler = await createTestUser({ role: 'SUPERVISOR' });
     const shift = await createTestShift({ userId: user.id, openingFloat: 0, status: 'CLOSED' });
 
-    await expect(closeShift(shift.id, { countedCash: 10, userId: user.id })).rejects.toMatchObject({
-      status: 409,
-    });
+    await expect(
+      closeShift(shift.id, { countedCash: 10, reconcilerUserId: reconciler.id })
+    ).rejects.toMatchObject({ status: 409 });
 
     const openShiftRow = await createTestShift({ userId: user.id, openingFloat: 0 });
-    await expect(closeShift(openShiftRow.id, { countedCash: -1, userId: user.id })).rejects.toMatchObject({
-      status: 400,
-    });
+    await expect(
+      closeShift(openShiftRow.id, { countedCash: -1, reconcilerUserId: reconciler.id })
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('endShift moves an OPEN shift to PENDING_RECONCILIATION and blocks further cash movements', async () => {
+    const user = await createTestUser();
+    const shift = await createTestShift({ userId: user.id, openingFloat: 50 });
+
+    const ended = await endShift(shift.id, { userId: user.id });
+    expect(ended.status).toBe('PENDING_RECONCILIATION');
+    expect(ended.endedAt).not.toBeNull();
+
+    await expect(
+      recordCashMovement(shift.id, { type: 'CASH_IN', amount: 10, userId: user.id })
+    ).rejects.toMatchObject({ status: 409 });
+
+    await expect(endShift(shift.id, { userId: user.id })).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('closeShift accepts a PENDING_RECONCILIATION shift (the normal end -> reconcile path)', async () => {
+    const user = await createTestUser();
+    const reconciler = await createTestUser({ role: 'SUPERVISOR' });
+    const shift = await createTestShift({ userId: user.id, openingFloat: 50 });
+
+    await endShift(shift.id, { userId: user.id });
+    const closed = await closeShift(shift.id, { countedCash: 50, reconcilerUserId: reconciler.id });
+    expect(closed.status).toBe('CLOSED');
+  });
+
+  it('reopenShift resets a CLOSED shift to PENDING_RECONCILIATION and clears the reconciliation figures', async () => {
+    const user = await createTestUser();
+    const reconciler = await createTestUser({ role: 'SUPERVISOR' });
+    const shift = await createTestShift({ userId: user.id, openingFloat: 50 });
+    await closeShift(shift.id, { countedCash: 50, reconcilerUserId: reconciler.id });
+
+    const reopened = await reopenShift(shift.id, { notes: 'recount requested' });
+    expect(reopened.status).toBe('PENDING_RECONCILIATION');
+    expect(reopened.countedCash).toBeNull();
+    expect(reopened.expectedCash).toBeNull();
+    expect(reopened.variance).toBeNull();
+    expect(reopened.closedAt).toBeNull();
+
+    await expect(reopenShift(shift.id)).rejects.toMatchObject({ status: 409 });
   });
 
   it('getShiftReport returns cash + tender breakdowns, matching countedCash/variance once closed', async () => {
     const user = await createTestUser();
+    const reconciler = await createTestUser({ role: 'SUPERVISOR' });
     const shift = await createTestShift({ userId: user.id, openingFloat: 50 });
     const product = await createSellableProduct({ stock: 10 });
 
@@ -199,7 +265,7 @@ describe('Cash register / shift lifecycle', () => {
     expect(xReport.cash.expectedCash).toBe(50 + 232); // 2*100*1.16 = 232
     expect(xReport.saleCount).toBe(1);
 
-    await closeShift(shift.id, { countedCash: 282, userId: user.id });
+    await closeShift(shift.id, { countedCash: 282, reconcilerUserId: reconciler.id });
     const zReport = await getShiftReport(shift.id);
     expect(zReport.shift.status).toBe('CLOSED');
     expect(zReport.cash.countedCash).toBe(282);
@@ -236,7 +302,8 @@ describe('Cash register / shift lifecycle', () => {
     const found = await getOpenShiftForUser(user.id, DEFAULT_BRANCH_CODE);
     expect(found.id).toBe(shift.id);
 
-    await closeShift(shift.id, { countedCash: 0, userId: user.id });
+    const reconciler = await createTestUser({ role: 'SUPERVISOR' });
+    await closeShift(shift.id, { countedCash: 0, reconcilerUserId: reconciler.id });
     expect(await getOpenShiftForUser(user.id, DEFAULT_BRANCH_CODE)).toBeNull();
   });
 });
