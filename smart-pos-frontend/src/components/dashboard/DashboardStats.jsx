@@ -1,5 +1,6 @@
 import React from 'react';
 import { DollarSign, ShoppingCart, Users, Clock } from 'lucide-react';
+import StatCard from '../ui/StatCard';
 
 const DashboardStats = ({ stats, isLoading }) => {
   const formatCurrency = (amount) =>
@@ -24,19 +25,8 @@ const DashboardStats = ({ stats, isLoading }) => {
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-      {cards.map(({ title, value, icon, mono }) => (
-        <div key={title} className="panel">
-          <div className="panel-body flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">{title}</p>
-              <p className={mono ? 'stat-value text-base mt-1' : 'stat-value mt-1'}>{value}</p>
-            </div>
-            {React.createElement(icon, {
-              className: 'w-4 h-4 text-gray-400 shrink-0',
-              strokeWidth: 1.5,
-            })}
-          </div>
-        </div>
+      {cards.map((card) => (
+        <StatCard key={card.title} {...card} />
       ))}
     </div>
   );

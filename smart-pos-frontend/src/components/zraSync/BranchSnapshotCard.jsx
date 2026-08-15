@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Building2, AlertTriangle } from 'lucide-react';
 import { fetchBranches } from '../../api/branchesApi';
 import { syncBranches } from '../../api/vsdcApi';
 
@@ -49,23 +50,27 @@ export default function BranchSnapshotCard({ canSync }) {
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-sm p-6">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-medium text-gray-900">🏢 Branch Registration</h3>
+    <div className="panel">
+      <div className="panel-header flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Building2 className="w-4 h-4 text-gray-500" strokeWidth={1.5} />
+          <h3 className="text-sm font-semibold text-gray-900">Branch Registration</h3>
+        </div>
         {canSync && (
-          <button
-            type="button"
-            onClick={handleSync}
-            disabled={syncing || loading}
-            className="px-3 py-1.5 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50"
-          >
+          <button type="button" onClick={handleSync} disabled={syncing || loading} className="btn btn-primary !px-3 !py-1.5">
             {syncing ? 'Syncing…' : 'Sync now'}
           </button>
         )}
       </div>
+      <div className="panel-body">
 
       {loading && <p className="text-sm text-gray-500">Loading…</p>}
-      {!loading && loadError && <p className="text-sm text-red-600">⚠️ {loadError}</p>}
+      {!loading && loadError && (
+        <p className="text-sm text-red-600 flex items-center gap-1.5">
+          <AlertTriangle className="w-3.5 h-3.5" strokeWidth={1.75} />
+          {loadError}
+        </p>
+      )}
 
       {!loading && !loadError && branches.length === 0 && (
         <p className="text-sm text-gray-500">No branches found.</p>
@@ -121,8 +126,14 @@ export default function BranchSnapshotCard({ canSync }) {
         </div>
       )}
 
-      {syncError && <p className="text-sm text-red-600 mt-3">⚠️ {syncError}</p>}
+      {syncError && (
+        <p className="text-sm text-red-600 mt-3 flex items-center gap-1.5">
+          <AlertTriangle className="w-3.5 h-3.5" strokeWidth={1.75} />
+          {syncError}
+        </p>
+      )}
       {syncSuccess && !syncError && <p className="text-sm text-green-700 mt-3">{syncSuccess}</p>}
+      </div>
     </div>
   );
 }

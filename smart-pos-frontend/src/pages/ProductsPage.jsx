@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { Download, Upload, Satellite, Plus, Package, CheckCircle2, Tag, AlertTriangle, Search } from 'lucide-react';
 import ProductImportModal from '../components/products/ProductImportModal';
 import BulkRegisterModal from '../components/products/BulkRegisterModal';
 import { productImportApi } from '../services/productImportService';
 import ProductModal from '../components/ProductModal';
 import ProductsTable from '../components/ProductsTable';
 import ItemCompositionModal from '../components/products/ItemCompositionModal';
+import StatCard from '../components/ui/StatCard';
 import { productApi, categoryApi, inventoryApi } from '../services/productService';
 import {
   validateProductForm,
@@ -288,117 +290,81 @@ const ProductsPage = () => {
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Product Catalog</h1>
           <p className="text-gray-600">Manage your product information and pricing</p>
-        </div>              <div className="flex gap-2">
-                <button
-                  onClick={handleExport}
-                  className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
-                >
-                  📥 Export
-                </button>
-                <button
-                  onClick={() => setShowImportModal(true)}
-                  className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
-                >
-                  📤 Import
-                </button>
-                <button
-                  onClick={() => setShowBulkRegisterModal(true)}
-                  className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
-                >
-                  🛰️ Register pending
-                  {pendingRegistrationCount > 0 && (
-                    <span className="ml-1.5 inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
-                      {pendingRegistrationCount}
-                    </span>
-                  )}
-                </button>
-                <button
-                  onClick={() => setShowAddModal(true)}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-                >
-                  ➕ Add Product
-                </button>
-              </div>
-            </div>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={handleExport} className="btn btn-secondary">
+            <Download className="w-4 h-4" strokeWidth={1.5} />
+            Export
+          </button>
+          <button onClick={() => setShowImportModal(true)} className="btn btn-secondary">
+            <Upload className="w-4 h-4" strokeWidth={1.5} />
+            Import
+          </button>
+          <button onClick={() => setShowBulkRegisterModal(true)} className="btn btn-secondary">
+            <Satellite className="w-4 h-4" strokeWidth={1.5} />
+            Register pending
+            {pendingRegistrationCount > 0 && (
+              <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                {pendingRegistrationCount}
+              </span>
+            )}
+          </button>
+          <button onClick={() => setShowAddModal(true)} className="btn btn-primary">
+            <Plus className="w-4 h-4" strokeWidth={1.5} />
+            Add Product
+          </button>
+        </div>
+      </div>
 
-            {/* Stats Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div className="bg-white rounded-lg shadow p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-600">Total Products</p>
-                    <p className="text-2xl font-bold text-gray-900">{products.length}</p>
-                  </div>
-                  <span className="text-2xl">📦</span>
-                </div>
-              </div>
+      {/* Stats Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <StatCard title="Total Products" value={products.length} icon={Package} mono />
+        <StatCard
+          title="Active Products"
+          value={products.filter((p) => p.isActive).length}
+          icon={CheckCircle2}
+          mono
+          tone="text-green-600"
+        />
+        <StatCard title="Categories" value={categories.length} icon={Tag} mono tone="text-blue-600" />
+        <StatCard
+          title="Low Stock Items"
+          value={products.filter((p) => getInventoryInfoForProduct(p.id).lowStockAlert).length}
+          icon={AlertTriangle}
+          mono
+          tone="text-orange-600"
+        />
+      </div>
 
-              <div className="bg-white rounded-lg shadow p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-600">Active Products</p>
-                    <p className="text-2xl font-bold text-green-600">
-                      {products.filter(p => p.isActive).length}
-                    </p>
-                  </div>
-                  <span className="text-2xl">✅</span>
-                </div>
-              </div>
+      {/* Filters and Search */}
+      <div className="panel">
+        <div className="panel-body flex flex-col md:flex-row gap-3 items-center">
+          <div className="relative flex-1 w-full">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search products…"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="input-sys pl-8"
+            />
+          </div>
+          <select
+            value={filterBy}
+            onChange={(e) => setFilterBy(e.target.value)}
+            className="input-sys w-auto"
+          >
+            <option value="all">All Products</option>
+            <option value="active">Active Only</option>
+            <option value="inactive">Inactive Only</option>
+            <option value="low-stock">Low Stock</option>
+            <option value="out-of-stock">Out of Stock</option>
+          </select>
+        </div>
+      </div>
 
-              <div className="bg-white rounded-lg shadow p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-600">Categories</p>
-                    <p className="text-2xl font-bold text-blue-600">{categories.length}</p>
-                  </div>
-                  <span className="text-2xl">🏷️</span>
-                </div>
-              </div>
-
-              <div className="bg-white rounded-lg shadow p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-600">Low Stock Items</p>
-                    <p className="text-2xl font-bold text-orange-600">
-                      {products.filter(p => getInventoryInfoForProduct(p.id).lowStockAlert).length}
-                    </p>
-                  </div>
-                  <span className="text-2xl">⚠️</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Filters and Search */}
-            <div className="bg-white rounded-lg shadow p-4">
-              <div className="flex flex-col md:flex-row gap-4 items-center">
-                <div className="relative flex-1">
-                  <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">🔍</span>
-                  <input
-                    type="text"
-                    placeholder="Search products..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-                <div className="flex gap-2">
-                  <select
-                    value={filterBy}
-                    onChange={(e) => setFilterBy(e.target.value)}
-                    className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="all">All Products</option>
-                    <option value="active">Active Only</option>
-                    <option value="inactive">Inactive Only</option>
-                    <option value="low-stock">Low Stock</option>
-                    <option value="out-of-stock">Out of Stock</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            {/* Products Table */}
-            <ProductsTable
+      {/* Products Table */}
+      <ProductsTable
               products={filteredProducts}
               categories={categories}
               getInventoryInfo={getInventoryInfoForProduct}

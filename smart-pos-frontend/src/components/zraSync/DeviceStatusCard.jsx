@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Satellite, AlertTriangle } from 'lucide-react';
 import { fetchDeviceStatus, initializeDevice } from '../../api/vsdcApi';
 
 function formatDateTime(value) {
@@ -45,23 +46,27 @@ export default function DeviceStatusCard({ canSync }) {
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-sm p-6">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-medium text-gray-900">📡 Device Initialisation</h3>
+    <div className="panel">
+      <div className="panel-header flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Satellite className="w-4 h-4 text-gray-500" strokeWidth={1.5} />
+          <h3 className="text-sm font-semibold text-gray-900">Device Initialisation</h3>
+        </div>
         {canSync && (
-          <button
-            type="button"
-            onClick={handleInitialize}
-            disabled={initializing || loading}
-            className="px-3 py-1.5 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50"
-          >
+          <button type="button" onClick={handleInitialize} disabled={initializing || loading} className="btn btn-primary !px-3 !py-1.5">
             {initializing ? 'Initializing…' : 'Initialize'}
           </button>
         )}
       </div>
+      <div className="panel-body">
 
       {loading && <p className="text-sm text-gray-500">Loading…</p>}
-      {!loading && loadError && <p className="text-sm text-red-600">⚠️ {loadError}</p>}
+      {!loading && loadError && (
+        <p className="text-sm text-red-600 flex items-center gap-1.5">
+          <AlertTriangle className="w-3.5 h-3.5" strokeWidth={1.75} />
+          {loadError}
+        </p>
+      )}
 
       {!loading && !loadError && status && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -94,10 +99,16 @@ export default function DeviceStatusCard({ canSync }) {
         </div>
       )}
 
-      {initError && <p className="text-sm text-red-600 mt-3">⚠️ {initError}</p>}
+      {initError && (
+        <p className="text-sm text-red-600 mt-3 flex items-center gap-1.5">
+          <AlertTriangle className="w-3.5 h-3.5" strokeWidth={1.75} />
+          {initError}
+        </p>
+      )}
       {initSuccess && !initError && (
         <p className="text-sm text-green-700 mt-3">Device initialized successfully.</p>
       )}
+      </div>
     </div>
   );
 }

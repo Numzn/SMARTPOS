@@ -1,5 +1,20 @@
 import React, { useEffect, useState } from 'react';
+import {
+  AlertTriangle,
+  FileText,
+  DollarSign,
+  Receipt,
+  BarChart2,
+  Landmark,
+  Clock,
+  CheckCircle2,
+  XCircle,
+  TrendingUp,
+  ClipboardList,
+  RefreshCw,
+} from 'lucide-react';
 import { fetchReportSummary, fetchWeeklyReport, downloadTransactionsCsv } from '../../api/reportsApi';
+import StatCard from '../ui/StatCard';
 
 const money = (n) => `K${Number(n || 0).toFixed(2)}`;
 
@@ -76,22 +91,24 @@ const OverviewTab = () => {
 
   if (loading) {
     return (
-      <div className="bg-white rounded-lg shadow-sm p-10 text-center text-gray-500">
-        Loading reports…
+      <div className="panel">
+        <div className="panel-body p-10 text-center text-gray-500">Loading reports…</div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="bg-white rounded-lg shadow-sm p-6">
-        <p className="text-red-600 font-medium">⚠️ {error}</p>
-        <button
-          onClick={loadReports}
-          className="mt-4 bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700"
-        >
-          Retry
-        </button>
+      <div className="panel">
+        <div className="panel-body">
+          <p className="text-red-600 font-medium flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4" strokeWidth={1.75} />
+            {error}
+          </p>
+          <button onClick={loadReports} className="btn btn-primary mt-4">
+            Retry
+          </button>
+        </div>
       </div>
     );
   }
@@ -102,62 +119,33 @@ const OverviewTab = () => {
   return (
     <div className="space-y-6">
       <div className="flex justify-end">
-        <button
-          onClick={exportRecent}
-          disabled={exporting}
-          className="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 transition duration-150 disabled:opacity-60"
-        >
-          {exporting ? 'Exporting…' : '📄 Export (last 30 days)'}
+        <button onClick={exportRecent} disabled={exporting} className="btn btn-primary">
+          <FileText className="w-4 h-4" strokeWidth={1.5} />
+          {exporting ? 'Exporting…' : 'Export (last 30 days)'}
         </button>
       </div>
-      {exportError && <p className="text-red-600 text-sm">⚠️ {exportError}</p>}
+      {exportError && (
+        <p className="text-red-600 text-sm flex items-center gap-1.5">
+          <AlertTriangle className="w-3.5 h-3.5" strokeWidth={1.75} />
+          {exportError}
+        </p>
+      )}
 
       {/* Quick Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <div className="flex items-center">
-            <span className="text-3xl mr-3">💰</span>
-            <div>
-              <p className="text-sm font-medium text-gray-600">Today&apos;s Sales</p>
-              <p className="text-2xl font-bold text-gray-900">{money(today.sales)}</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <div className="flex items-center">
-            <span className="text-3xl mr-3">🧾</span>
-            <div>
-              <p className="text-sm font-medium text-gray-600">Transactions</p>
-              <p className="text-2xl font-bold text-gray-900">{today.transactions || 0}</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <div className="flex items-center">
-            <span className="text-3xl mr-3">📊</span>
-            <div>
-              <p className="text-sm font-medium text-gray-600">Avg Transaction</p>
-              <p className="text-2xl font-bold text-gray-900">{money(today.avgTransaction)}</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <div className="flex items-center">
-            <span className="text-3xl mr-3">🏛️</span>
-            <div>
-              <p className="text-sm font-medium text-gray-600">Tax Collected (today)</p>
-              <p className="text-2xl font-bold text-gray-900">{money(today.tax)}</p>
-            </div>
-          </div>
-        </div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <StatCard title="Today's Sales" value={money(today.sales)} icon={DollarSign} />
+        <StatCard title="Transactions" value={today.transactions || 0} icon={Receipt} mono />
+        <StatCard title="Avg Transaction" value={money(today.avgTransaction)} icon={BarChart2} />
+        <StatCard title="Tax Collected (today)" value={money(today.tax)} icon={Landmark} />
       </div>
 
       {/* Fiscal Status Panel */}
-      <div className="bg-white rounded-lg shadow-sm p-6">
-        <h3 className="text-lg font-medium text-gray-900 mb-4">🏛️ ZRA VSDC Fiscal Status</h3>
+      <div className="panel">
+        <div className="panel-header flex items-center gap-2">
+          <Landmark className="w-4 h-4 text-gray-500" strokeWidth={1.5} />
+          <h3 className="text-sm font-semibold text-gray-900">ZRA VSDC Fiscal Status</h3>
+        </div>
+        <div className="panel-body">
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="space-y-4">
@@ -186,8 +174,9 @@ const OverviewTab = () => {
                 <p className="font-medium text-gray-900">Pending Submission</p>
                 <p className="text-sm text-gray-600">Not yet accepted by VSDC</p>
               </div>
-              <span className="inline-flex px-3 py-1 text-sm font-semibold rounded-full bg-yellow-100 text-yellow-800">
-                ⏳ {fiscal.pending || 0}
+              <span className="inline-flex items-center gap-1 px-3 py-1 text-sm font-semibold rounded-full bg-yellow-100 text-yellow-800">
+                <Clock className="w-3.5 h-3.5" strokeWidth={1.75} />
+                {fiscal.pending || 0}
               </span>
             </div>
 
@@ -196,8 +185,9 @@ const OverviewTab = () => {
                 <p className="font-medium text-gray-900">Submitted Today</p>
                 <p className="text-sm text-gray-600">Accepted by VSDC today</p>
               </div>
-              <span className="inline-flex px-3 py-1 text-sm font-semibold rounded-full bg-green-100 text-green-800">
-                ✅ {fiscal.submittedToday || 0}
+              <span className="inline-flex items-center gap-1 px-3 py-1 text-sm font-semibold rounded-full bg-green-100 text-green-800">
+                <CheckCircle2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                {fiscal.submittedToday || 0}
               </span>
             </div>
 
@@ -207,19 +197,24 @@ const OverviewTab = () => {
                   <p className="font-medium text-gray-900">Fiscal Failures</p>
                   <p className="text-sm text-gray-600">Require resubmission</p>
                 </div>
-                <span className="inline-flex px-3 py-1 text-sm font-semibold rounded-full bg-red-100 text-red-800">
-                  ❌ {fiscal.failed}
+                <span className="inline-flex items-center gap-1 px-3 py-1 text-sm font-semibold rounded-full bg-red-100 text-red-800">
+                  <XCircle className="w-3.5 h-3.5" strokeWidth={1.75} />
+                  {fiscal.failed}
                 </span>
               </div>
             )}
           </div>
         </div>
+        </div>
       </div>
 
       {/* Weekly Sales Chart */}
-      <div className="bg-white rounded-lg shadow-sm p-6">
-        <h3 className="text-lg font-medium text-gray-900 mb-4">📈 Last 7 Days</h3>
-
+      <div className="panel">
+        <div className="panel-header flex items-center gap-2">
+          <TrendingUp className="w-4 h-4 text-gray-500" strokeWidth={1.5} />
+          <h3 className="text-sm font-semibold text-gray-900">Last 7 Days</h3>
+        </div>
+        <div className="panel-body">
         {weekly.length === 0 ? (
           <p className="text-gray-500">No completed sales in this period.</p>
         ) : (
@@ -243,36 +238,28 @@ const OverviewTab = () => {
             ))}
           </div>
         )}
+        </div>
       </div>
 
       {/* Report Actions */}
-      <div className="bg-white rounded-lg shadow-sm p-6">
-        <h3 className="text-lg font-medium text-gray-900 mb-4">📋 Report Actions</h3>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <button
-            onClick={exportToday}
-            disabled={exporting}
-            className="flex items-center justify-center px-4 py-3 border border-gray-300 rounded-md hover:bg-gray-50 transition duration-150 disabled:opacity-60"
-          >
-            <span className="mr-2">📊</span>
+      <div className="panel">
+        <div className="panel-header flex items-center gap-2">
+          <ClipboardList className="w-4 h-4 text-gray-500" strokeWidth={1.5} />
+          <h3 className="text-sm font-semibold text-gray-900">Report Actions</h3>
+        </div>
+        <div className="panel-body grid grid-cols-1 md:grid-cols-3 gap-3">
+          <button onClick={exportToday} disabled={exporting} className="btn btn-secondary justify-center">
+            <BarChart2 className="w-4 h-4" strokeWidth={1.5} />
             Export Today (CSV)
           </button>
 
-          <button
-            onClick={exportRecent}
-            disabled={exporting}
-            className="flex items-center justify-center px-4 py-3 border border-gray-300 rounded-md hover:bg-gray-50 transition duration-150 disabled:opacity-60"
-          >
-            <span className="mr-2">📈</span>
+          <button onClick={exportRecent} disabled={exporting} className="btn btn-secondary justify-center">
+            <TrendingUp className="w-4 h-4" strokeWidth={1.5} />
             Export 30 Days (CSV)
           </button>
 
-          <button
-            onClick={loadReports}
-            className="flex items-center justify-center px-4 py-3 border border-gray-300 rounded-md hover:bg-gray-50 transition duration-150"
-          >
-            <span className="mr-2">🔄</span>
+          <button onClick={loadReports} className="btn btn-secondary justify-center">
+            <RefreshCw className="w-4 h-4" strokeWidth={1.5} />
             Refresh
           </button>
         </div>

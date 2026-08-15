@@ -1,20 +1,21 @@
 import React from 'react';
+import { Clock, BarChart2, Pencil, Puzzle, Trash2 } from 'lucide-react';
 import { getRegistrationStatusBadge } from '../utils/productUtils';
 
-const ProductsTable = ({ 
-  products, 
-  categories, 
-  getInventoryInfo, 
-  getStockStatus, 
+const ProductsTable = ({
+  products,
+  categories,
+  getInventoryInfo,
+  getStockStatus,
   onEdit,
   onDelete,
   onComposition,
   navigateToInventory
 }) => {
   return (
-    <div className="bg-white rounded-lg shadow">
-      <div className="px-6 py-4 border-b border-gray-200">
-        <h3 className="text-lg font-medium text-gray-900">Product List</h3>
+    <div className="panel">
+      <div className="panel-header">
+        <h3 className="text-sm font-semibold text-gray-900">Product List</h3>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full">
@@ -43,7 +44,10 @@ const ProductsTable = ({
                       <div className="font-medium text-gray-900">{product.name}</div>
                       <div className="text-sm text-gray-500">{product.description}</div>
                       {product.hasExpiry && (
-                        <div className="text-xs text-orange-600">⏰ Expires in {product.shelfLifeDays} days</div>
+                        <div className="text-xs text-orange-600 flex items-center gap-1">
+                          <Clock className="w-3 h-3" strokeWidth={1.75} />
+                          Expires in {product.shelfLifeDays} days
+                        </div>
                       )}
                     </div>
                   </td>
@@ -70,9 +74,10 @@ const ProductsTable = ({
                       </span>
                       <button
                         onClick={() => navigateToInventory(product.id, product.name)}
-                        className="text-xs text-blue-600 hover:text-blue-800"
+                        className="text-xs text-blue-600 hover:text-blue-800 inline-flex items-center gap-1"
                       >
-                        📊 View
+                        <BarChart2 className="w-3 h-3" strokeWidth={1.75} />
+                        View
                       </button>
                     </div>
                   </td>
@@ -135,21 +140,24 @@ const ProductsTable = ({
                     <div className="flex gap-2">
                       <button
                         onClick={() => onEdit(product)}
-                        className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-xs"
+                        className="btn btn-secondary !px-2.5 !py-1 !text-xs"
                       >
-                        ✏️ Edit
+                        <Pencil className="w-3 h-3" strokeWidth={1.75} />
+                        Edit
                       </button>
                       <button
                         onClick={() => onComposition(product)}
-                        className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded text-xs"
+                        className="btn btn-secondary !px-2.5 !py-1 !text-xs"
                       >
-                        🧩 Composition
+                        <Puzzle className="w-3 h-3" strokeWidth={1.75} />
+                        Composition
                       </button>
                       <button
                         onClick={() => onDelete(product.id)}
-                        className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-xs"
+                        className="btn btn-secondary !px-2.5 !py-1 !text-xs !text-red-600 hover:!bg-red-50"
                       >
-                        🗑️ Delete
+                        <Trash2 className="w-3 h-3" strokeWidth={1.75} />
+                        Delete
                       </button>
                     </div>
                   </td>

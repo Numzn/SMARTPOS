@@ -79,7 +79,7 @@ const ProductModal = ({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Basic Information */}
           <div className="md:col-span-2">
-            <h4 className="font-medium text-gray-900 mb-2 border-b pb-2">📋 Basic Information</h4>
+            <h4 className="font-medium text-gray-900 mb-2 border-b pb-2">Basic Information</h4>
           </div>
           
           <div>
@@ -156,7 +156,7 @@ const ProductModal = ({
             {errors.categoryId && <p className="text-red-500 text-xs mt-1">{errors.categoryId}</p>}
             {categories.length === 0 && (
               <p className="text-sm text-gray-500 mt-1">
-                📝 Categories will be created automatically when you open this form.
+                Categories will be created automatically when you open this form.
               </p>
             )}
           </div>
@@ -297,7 +297,7 @@ const ProductModal = ({
           {!isEdit && (
             <>
               <div className="md:col-span-2">
-                <h4 className="font-medium text-gray-900 mb-2 border-b pb-2">📦 Initial Stock (Optional)</h4>
+                <h4 className="font-medium text-gray-900 mb-2 border-b pb-2">Initial Stock (Optional)</h4>
                 <p className="text-sm text-gray-600 mb-2">You can add initial stock now or manage inventory separately.</p>
               </div>
               
@@ -328,7 +328,7 @@ const ProductModal = ({
           {/* Current Inventory Status - Only show for Edit mode */}
           {isEdit && selectedProduct && (
             <div className="md:col-span-2">
-              <h4 className="font-medium text-gray-900 mb-2 border-b pb-2">📦 Current Inventory Status</h4>
+              <h4 className="font-medium text-gray-900 mb-2 border-b pb-2">Current Inventory Status</h4>
               <div className="bg-gray-50 p-3 rounded-md">
                 <p className="text-sm text-gray-600">
                   Current Stock: <span className="font-medium">{getInventoryInfo(selectedProduct.id).currentStock || 0}</span> units
@@ -343,7 +343,7 @@ const ProductModal = ({
           {/* ZRA Registration Status - Only show for Edit mode */}
           {isEdit && selectedProduct && (
             <div className="md:col-span-2">
-              <h4 className="font-medium text-gray-900 mb-2 border-b pb-2">🏛️ ZRA Registration Status</h4>
+              <h4 className="font-medium text-gray-900 mb-2 border-b pb-2">ZRA Registration Status</h4>
               <div className="bg-gray-50 p-3 rounded-md">
                 {(() => {
                   const reg = getRegistrationStatusBadge(selectedProduct.zraRegistrationStatus);
