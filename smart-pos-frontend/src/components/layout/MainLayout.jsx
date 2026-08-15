@@ -4,6 +4,7 @@ import { Menu, X, Search, Bell, LogOut, ChevronDown } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePermissions } from '../../hooks/usePermissions';
 import { NAV_ITEMS } from './navItems';
+import SidebarShiftControl from './SidebarShiftControl';
 
 // A stable top-level component, not one defined inside MainLayout's render
 // body — a component declared per-render gets a new identity every time, so
@@ -44,6 +45,8 @@ const Sidebar = ({ navigation, activePath, onNavigate, onClose }) => (
         );
       })}
     </nav>
+
+    <SidebarShiftControl refreshKey={activePath} />
 
     <div className="p-3 border-t border-white/10 text-[11px] text-gray-500">
       ZRA VSDC · v2.0
