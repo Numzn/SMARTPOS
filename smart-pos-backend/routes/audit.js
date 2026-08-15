@@ -6,17 +6,19 @@ const { authenticateToken, requirePermission } = require('../middleware/auth');
 /**
  * GET /api/audit
  * Query the audit trail. All filters optional.
- * query: entityType, entityId, eventType, userId, startDate, endDate, limit, offset
+ * query: entityType, entityId, eventType, userId, riskLevel, success, startDate, endDate, limit, offset
  */
 router.get('/', authenticateToken, requirePermission('audit:read'), async (req, res) => {
   try {
-    const { entityType, entityId, eventType, userId, startDate, endDate } = req.query;
+    const { entityType, entityId, eventType, userId, riskLevel, success, startDate, endDate } = req.query;
     const limit = parseInt(req.query.limit, 10) || 100;
     const offset = parseInt(req.query.offset, 10) || 0;
 
     const result = await auditService.getAuditTrail(entityType, entityId, {
       eventType,
       userId,
+      riskLevel,
+      success,
       startDate,
       endDate,
       limit,

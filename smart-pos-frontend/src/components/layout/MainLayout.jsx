@@ -21,6 +21,7 @@ import {
   ShoppingCart,
   Wallet,
   Satellite,
+  History,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -40,6 +41,7 @@ const NAV_ITEMS = [
   { name: 'Settings', href: '/settings', icon: Settings, show: (p) => p.viewSettings || p.manageSettings },
   { name: 'Printers', href: '/printers', icon: Printer, show: (p) => p.viewSettings || p.manageSettings },
   { name: 'ZRA Sync', href: '/zra-sync', icon: Satellite, show: (p) => p.viewZRAStatus },
+  { name: 'Audit Log', href: '/audit', icon: History, show: (p) => p.viewAuditLog },
 ];
 
 // A stable top-level component, not one defined inside MainLayout's render

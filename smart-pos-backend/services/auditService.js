@@ -304,6 +304,8 @@ class AuditService {
       if (entityId) where.entityId = entityId
       if (options.eventType) where.eventType = options.eventType
       if (options.userId) where.userId = options.userId
+      if (options.riskLevel) where.riskLevel = options.riskLevel
+      if (options.success != null) where.success = options.success === true || options.success === 'true'
       if (options.startDate || options.endDate) {
         where.timestamp = {}
         if (options.startDate) where.timestamp.gte = new Date(options.startDate)

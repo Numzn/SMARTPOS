@@ -26,6 +26,7 @@ const CustomersPage = lazy(() => import('./pages/CustomersPage'));
 const SuppliersPage = lazy(() => import('./pages/SuppliersPage'));
 const PurchaseOrdersPage = lazy(() => import('./pages/PurchaseOrdersPage'));
 const ZraSyncPage = lazy(() => import('./pages/ZraSyncPage'));
+const AuditLogPage = lazy(() => import('./pages/AuditLogPage'));
 
 function App() {
   return (
@@ -60,6 +61,7 @@ function App() {
               <Route path="settings" element={<SettingsPage />} />
               <Route path="printers" element={<PrintersPage />} />
               <Route path="zra-sync" element={<ZraSyncPage />} />
+              <Route path="audit" element={<AuditLogPage />} />
             </Route>
 
             {/* Catch all redirect */}
