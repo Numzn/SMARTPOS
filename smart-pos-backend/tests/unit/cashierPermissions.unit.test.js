@@ -21,7 +21,7 @@ describe('CASHIER permission set', () => {
       'sales:read',
       'sales:write',
       'receipts:read',
-      'shifts:recordMovement',
+      'shifts:operate',
       'customers:read',
       'customers:write',
       'zra:status',
@@ -30,8 +30,8 @@ describe('CASHIER permission set', () => {
     }
   });
 
-  it('REGRESSION: cannot open or end a shift — only Supervisor+ operates the till lifecycle', () => {
-    expect(PERMISSIONS.CASHIER).not.toContain('shifts:operate');
+  it('REGRESSION: can open and request-end a shift, but ending it always requires a Supervisor+ PIN (enforced at POST /:id/end, not by permission)', () => {
+    expect(PERMISSIONS.CASHIER).toContain('shifts:operate');
   });
 
   it('stays read-only on fiscal operations — status yes, page access/submission/sync/admin no', () => {
@@ -55,6 +55,7 @@ describe('CASHIER permission set', () => {
       'shifts:reconcile',
       'shifts:viewAll',
       'shifts:reopen',
+      'shifts:adjust',
     ]) {
       expect(PERMISSIONS.CASHIER).not.toContain(permission);
     }
@@ -85,7 +86,7 @@ describe('SUPERVISOR permission set', () => {
   });
 
   it('does not automatically inherit store-wide oversight or management modules', () => {
-    for (const permission of ['shifts:viewAll', 'shifts:reopen', 'products:read', 'inventory:read', 'reports:read', 'zra:read', 'settings:read']) {
+    for (const permission of ['shifts:viewAll', 'shifts:reopen', 'shifts:adjust', 'products:read', 'inventory:read', 'reports:read', 'zra:read', 'settings:read']) {
       expect(PERMISSIONS.SUPERVISOR).not.toContain(permission);
     }
   });

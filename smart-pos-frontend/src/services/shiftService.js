@@ -51,18 +51,55 @@ export const shiftApi = {
     return apiFetch(`/shifts/${id}/transactions${qs ? `?${qs}` : ''}`);
   },
 
-  closeShift: (id, { countedCash, notes }) =>
+  /**
+   * Reconcile: reads the counted total from the shift's own
+   * CashierDeclaration (submitDeclaration below) rather than accepting one
+   * here — the backend computes variance from ZReport.expectedClosingCash
+   * (frozen at end-time) vs the declaration, never a number passed in this
+   * call.
+   */
+  closeShift: (id, { notes } = {}) =>
     apiFetch(`/shifts/${id}/close`, {
       method: 'POST',
-      body: JSON.stringify({ countedCash, notes }),
+      body: JSON.stringify({ notes }),
     }),
 
   /**
    * Cashier's "I'm done" action — locks the drawer, hands it off for
    * reconciliation, exposes no financial figures. Segregation of duties:
    * this is the only self-service end-of-shift action a Cashier has.
+   * Requires a Supervisor+ approvalId (see SupervisorApprovalModal,
+   * actionType="SHIFT_END") — the backend rejects the call without one.
    */
-  endShift: (id) => apiFetch(`/shifts/${id}/end`, { method: 'POST' }),
+  endShift: (id, { approvalId }) =>
+    apiFetch(`/shifts/${id}/end`, {
+      method: 'POST',
+      body: JSON.stringify({ approvalId }),
+    }),
+
+  /**
+   * The frozen Z-report artifact for an ended shift — never recomputed.
+   * Carries the declaration nested (`.declaration`) once the cashier has
+   * submitted one; there's no separate GET for the declaration alone.
+   */
+  fetchZReport: (id) => apiFetch(`/shifts/${id}/z-report`),
+
+  /**
+   * The cashier's own physical cash count for their own ended shift.
+   * Immutable once submitted — a correction is a ShiftAdjustment
+   * (createAdjustment below), never a re-submission.
+   */
+  submitDeclaration: (id, { declaredTotal, denominations }) =>
+    apiFetch(`/shifts/${id}/declaration`, {
+      method: 'POST',
+      body: JSON.stringify({ declaredTotal, denominations }),
+    }),
+
+  /** Back-office: every currently OPEN shift, store-wide. */
+  fetchActiveTills: async () => {
+    const data = await apiFetch('/shifts/active-tills');
+    return data.shifts || [];
+  },
 
   /** Shifts awaiting a Supervisor+ to count and close them. */
   fetchPendingReconciliation: async () => {
@@ -75,5 +112,27 @@ export const shiftApi = {
     apiFetch(`/shifts/${id}/reopen`, {
       method: 'POST',
       body: JSON.stringify({ notes }),
+    }),
+
+  /**
+   * The only way a variance's story changes after the fact — never touches
+   * the original ZReport/CashierDeclaration rows.
+   */
+  createAdjustment: (id, { reason, resolutionNote }) =>
+    apiFetch(`/shifts/${id}/adjustments`, {
+      method: 'POST',
+      body: JSON.stringify({ reason, resolutionNote }),
+    }),
+
+  fetchAdjustments: async (id) => {
+    const data = await apiFetch(`/shifts/${id}/adjustments`);
+    return data.adjustments || [];
+  },
+
+  /** Cash removed to the safe — its own reporting line, not a plain payout. */
+  recordSafeDrop: (id, { amount, safeId, witnessUserId, reason }) =>
+    apiFetch(`/shifts/${id}/safe-drop`, {
+      method: 'POST',
+      body: JSON.stringify({ amount, safeId, witnessUserId, reason }),
     }),
 };

@@ -6,6 +6,8 @@ import CartSection from './CartSection';
 import StatusBar from './StatusBar';
 import CheckoutModal from '../../CheckoutModal';
 import SupervisorApprovalModal from './SupervisorApprovalModal';
+import { useEndShiftFlow } from '../../../hooks/useEndShiftFlow';
+import { usePermissions } from '../../../hooks/usePermissions';
 import {
   fetchProducts,
   fetchCategories,
@@ -23,6 +25,8 @@ import { mapPrinterStatusLabel } from '../../../lib/printReceipt';
 import { calculateCartTotals } from '../../../utils/cartTotals';
 
 const CashierDashboard = () => {
+  const { canAccess } = usePermissions();
+  const endShiftFlow = useEndShiftFlow({ enabled: canAccess.operateShift });
   const [activeTab, setActiveTab] = useState('quickshop');
   const [currentTime, setCurrentTime] = useState(new Date());
   const [showCheckout, setShowCheckout] = useState(false);
@@ -216,6 +220,15 @@ const CashierDashboard = () => {
     setStockNotice(message);
     window.setTimeout(() => setStockNotice(''), 3000);
   };
+
+  // "Shift sealed — Z-000184 generated" confirmation, matching the existing
+  // "no financial figures shown to the cashier" discipline — endShiftFlow
+  // never exposes expected cash/variance, only the Z-number.
+  useEffect(() => {
+    if (endShiftFlow.lastZNumber) {
+      showStockNotice(`Shift sealed — ${endShiftFlow.lastZNumber} generated`);
+    }
+  }, [endShiftFlow.lastZNumber]);
 
   // POS Control Phase 1 — the committed cart is server state, opened lazily
   // on the first scan of a transaction so browsing never creates an empty
@@ -445,7 +458,14 @@ const CashierDashboard = () => {
 
   return (
     <div className="h-full flex flex-col bg-surface">
-      <CashierHeader currentTime={currentTime} />
+      <CashierHeader
+        currentTime={currentTime}
+        shift={endShiftFlow.shift}
+        shiftLoading={endShiftFlow.loading}
+        ending={endShiftFlow.ending}
+        shiftError={endShiftFlow.error}
+        onEndShift={endShiftFlow.requestEndShift}
+      />
 
       <CashierTabs activeTab={activeTab} onTabChange={setActiveTab} />
 
@@ -493,6 +513,15 @@ const CashierDashboard = () => {
         }
         itemLabel={pendingReversal?.name}
         onApproved={handleReversalApproved}
+      />
+
+      <SupervisorApprovalModal
+        open={endShiftFlow.modalOpen}
+        onClose={endShiftFlow.closeModal}
+        actionType="SHIFT_END"
+        target={endShiftFlow.shift ? { shiftId: endShiftFlow.shift.id } : undefined}
+        itemLabel={endShiftFlow.shift ? `Shift ${endShiftFlow.shift.shiftNumber || endShiftFlow.shift.id}` : undefined}
+        onApproved={endShiftFlow.handleApproved}
       />
     </div>
   );

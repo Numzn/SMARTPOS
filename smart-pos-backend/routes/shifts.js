@@ -5,6 +5,7 @@ const {
   shiftInclude,
   getOpenShiftForUser,
   getOpenShiftForBranch,
+  getActiveTills,
   openShift,
   recordCashMovement,
   endShift,
@@ -13,9 +14,13 @@ const {
   getShiftReport,
   getShiftTransactions,
 } = require('../lib/shift');
+const { submitDeclaration } = require('../lib/cashierDeclaration');
+const { createAdjustment, listAdjustments } = require('../lib/shiftAdjustment');
 const { authenticateToken, requirePermission, requireAnyPermission } = require('../middleware/auth');
 const { DEFAULT_BRANCH } = require('../lib/inventoryStock');
 const auditService = require('../services/auditService');
+
+const round2 = (n) => parseFloat((n || 0).toFixed(2));
 
 // Cash figures a viewer without shifts:viewExpected/shifts:viewVariance must
 // never see, on their own shift or anyone else's — this is the field-level
@@ -52,13 +57,19 @@ function stripShiftFigures(shift, permissions) {
 // A caller may reach their own shift via shifts:operate (ownership required),
 // any shift via shifts:viewAll / shifts:reconcile (reconcile because the
 // pending-reconciliation queue needs to inspect a shift before closing it),
-// or — a Cashier, shifts:recordMovement only — the branch's currently active
-// shift (OPEN or PENDING_RECONCILIATION), never arbitrary history.
+// or — shifts:recordMovement only — the branch's currently active shift
+// (OPEN or PENDING_RECONCILIATION), never arbitrary history.
 const CAN_VIEW_ANY = ['shifts:viewAll', 'shifts:reconcile'];
 
 function canViewShift(shift, req) {
   if (CAN_VIEW_ANY.some((p) => req.user.permissions.includes(p))) return true;
-  if (req.user.permissions.includes('shifts:operate') && shift.userId === req.user.userId) return true;
+  if (
+    req.user.permissions.includes('shifts:operate') &&
+    shift.userId === req.user.userId &&
+    ['OPEN', 'PENDING_RECONCILIATION'].includes(shift.status)
+  ) {
+    return true;
+  }
   if (
     req.user.permissions.includes('shifts:recordMovement') &&
     shift.branchId === req.user.branchId &&
@@ -71,9 +82,9 @@ function canViewShift(shift, req) {
 
 /**
  * GET /api/shifts/current — the requesting user's currently open shift
- * (shifts:operate holders — Supervisor/Manager/Admin, who each open their
- * own), or the branch's currently active shift (shifts:recordMovement only
- * — Cashier, who never opens one themselves).
+ * (shifts:operate holders open their own), or the branch's currently active
+ * shift (shifts:recordMovement only — a role that acts on a till without
+ * ever opening one itself).
  */
 router.get(
   '/current',
@@ -97,6 +108,21 @@ router.get(
 );
 
 /**
+ * GET /api/shifts/active-tills — every currently OPEN shift, store-wide.
+ * The back office's "Active Tills" view. Registered before GET /:id so this
+ * fixed path can never be shadowed by the :id wildcard.
+ */
+router.get('/active-tills', authenticateToken, requirePermission('shifts:viewAll'), async (req, res) => {
+  try {
+    const shifts = await getActiveTills();
+    res.json({ shifts: shifts.map((s) => stripShiftFigures(s, req.user.permissions)) });
+  } catch (error) {
+    console.error('Error listing active tills:', error);
+    res.status(500).json({ error: 'Failed to list active tills' });
+  }
+});
+
+/**
  * GET /api/shifts — list shifts.
  *
  * shifts:viewAll sees the full store-wide list with whatever filters are
@@ -104,6 +130,12 @@ router.get(
  * reconciliation queue — status is forced to PENDING_RECONCILIATION and
  * every other filter is ignored, so a Supervisor can't widen this into a
  * general shift browser just by adding query params.
+ *
+ * PENDING_RECONCILIATION rows additionally carry zNumber/hasDeclaration (and,
+ * for a viewer with shifts:viewExpected/viewVariance, a declared-total/
+ * variance preview) so the back office can visually separate "awaiting
+ * declaration" from "declared, awaiting manager review" without a
+ * round-trip per row.
  */
 router.get(
   '/',
@@ -135,8 +167,41 @@ router.get(
         prisma.shift.count({ where }),
       ]);
 
+      const shiftIds = shifts.map((s) => s.id);
+      const [declarations, zReports] = await Promise.all([
+        shiftIds.length
+          ? prisma.cashierDeclaration.findMany({ where: { shiftId: { in: shiftIds } } })
+          : Promise.resolve([]),
+        shiftIds.length
+          ? prisma.zReport.findMany({
+              where: { shiftId: { in: shiftIds } },
+              select: { shiftId: true, zNumber: true, expectedClosingCash: true },
+            })
+          : Promise.resolve([]),
+      ]);
+      const declByShift = new Map(declarations.map((d) => [d.shiftId, d]));
+      const zByShift = new Map(zReports.map((z) => [z.shiftId, z]));
+      const canViewExpected = req.user.permissions.includes('shifts:viewExpected');
+      const canViewVariance = req.user.permissions.includes('shifts:viewVariance');
+
       res.json({
-        shifts: shifts.map((s) => stripShiftFigures(s, req.user.permissions)),
+        shifts: shifts.map((s) => {
+          const decl = declByShift.get(s.id);
+          const z = zByShift.get(s.id);
+          return {
+            ...stripShiftFigures(s, req.user.permissions),
+            zNumber: z?.zNumber ?? null,
+            hasDeclaration: !!decl,
+            declaration:
+              decl && canViewExpected
+                ? {
+                    declaredTotal: decl.declaredTotal,
+                    declaredAt: decl.declaredAt,
+                    variance: canViewVariance && z ? round2(decl.declaredTotal - z.expectedClosingCash) : undefined,
+                  }
+                : null,
+          };
+        }),
         total,
         page,
         limit,
@@ -149,7 +214,7 @@ router.get(
 );
 
 /**
- * POST /api/shifts/open — open a till session for the requesting cashier.
+ * POST /api/shifts/open — open a till for the requesting user.
  */
 router.post('/open', authenticateToken, requirePermission('shifts:operate'), async (req, res) => {
   try {
@@ -202,10 +267,10 @@ router.get(
 );
 
 /**
- * GET /api/shifts/:id/report — X-report (open/pending) or Z-report (closed).
- * expectedCash/countedCash/variance are stripped for a caller lacking
- * shifts:viewExpected/shifts:viewVariance — including the cashier viewing
- * their own shift, which is the whole point of this endpoint's redesign.
+ * GET /api/shifts/:id/report — X-report (still OPEN, no ZReport yet) or the
+ * frozen Z figures (PENDING_RECONCILIATION/CLOSED — see lib/shift.js's
+ * getShiftReport, which prefers the ZReport once one exists). Field-stripped
+ * the same as everywhere else in this file.
  */
 router.get(
   '/:id/report',
@@ -229,6 +294,41 @@ router.get(
     }
   }
 );
+
+/**
+ * GET /api/shifts/:id/z-report — the immutable ZReport row itself, in full
+ * (every field the Z froze — safe drops, sales-by-method, etc., not just the
+ * summary shape GET /:id/report returns). shifts:viewExpected-gated — the
+ * shift's own cashier never sees this, same segregation of duties as
+ * everywhere else; they only ever see the operational "Z-000184 generated"
+ * confirmation from POST /:id/end's response, never the figures.
+ */
+router.get('/:id/z-report', authenticateToken, requirePermission('shifts:viewExpected'), async (req, res) => {
+  try {
+    const shift = await prisma.shift.findUnique({ where: { id: req.params.id } });
+    if (!shift) {
+      return res.status(404).json({ error: 'Shift not found' });
+    }
+    if (!canViewShift(shift, req)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    const zReport = await prisma.zReport.findUnique({
+      where: { shiftId: req.params.id },
+      include: {
+        cashier: { select: { id: true, name: true, email: true } },
+        authorizedBy: { select: { id: true, name: true, email: true } },
+        declaration: true,
+      },
+    });
+    if (!zReport) {
+      return res.status(404).json({ error: 'No Z report exists for this shift yet' });
+    }
+    res.json(req.user.permissions.includes('shifts:viewVariance') ? zReport : { ...zReport, declaration: null });
+  } catch (error) {
+    console.error('Error fetching Z report:', error);
+    res.status(500).json({ error: 'Failed to fetch Z report' });
+  }
+});
 
 /**
  * GET /api/shifts/:id/transactions — the Shift Transaction Journal: every
@@ -265,12 +365,10 @@ router.get(
   }
 );
 
-// A cash movement may be recorded by: the shift's owner (Supervisor/Manager/
-// Admin working their own till, shifts:operate), a Cashier
-// (shifts:recordMovement) acting on the branch's OPEN shift regardless of
-// who opened it — this is the whole point of the split, a Cashier who never
-// opens a shift still needs to record cash-in/out/paid-out on the till
-// they're actually working — or shifts:viewAll as a store-wide override.
+// A cash movement may be recorded by: the shift's owner (shifts:operate
+// working their own till), a holder of shifts:recordMovement acting on the
+// branch's OPEN shift regardless of who opened it, or shifts:viewAll as a
+// store-wide override.
 function canRecordMovement(shift, req) {
   if (shift.userId === req.user.userId) return true;
   if (req.user.permissions.includes('shifts:viewAll')) return true;
@@ -294,16 +392,21 @@ function handleCashMovement(type) {
         amount: req.body.amount,
         reason: req.body.reason,
         userId: req.user.userId,
+        safeId: req.body.safeId,
+        witnessUserId: req.body.witnessUserId,
       });
 
-      auditService.safeLog(auditService.eventTypes.CASH_MOVEMENT, {
-        ...auditService.contextFromReq(req),
-        entityType: 'SHIFT',
-        entityId: req.params.id,
-        action: type,
-        newValues: { amount: req.body.amount, reason: req.body.reason || null },
-        description: `${type} of ${req.body.amount} recorded on shift ${req.params.id}`,
-      });
+      auditService.safeLog(
+        type === 'SAFE_DROP' ? auditService.eventTypes.SAFE_DROP : auditService.eventTypes.CASH_MOVEMENT,
+        {
+          ...auditService.contextFromReq(req),
+          entityType: 'SHIFT',
+          entityId: req.params.id,
+          action: type,
+          newValues: { amount: req.body.amount, reason: req.body.reason || null, safeId: req.body.safeId || null },
+          description: `${type} of ${req.body.amount} recorded on shift ${req.params.id}`,
+        }
+      );
 
       res.json(stripShiftFigures(updated, req.user.permissions));
     } catch (error) {
@@ -317,14 +420,23 @@ const canOperateOrRecordMovement = requireAnyPermission('shifts:operate', 'shift
 router.post('/:id/cash-in', authenticateToken, canOperateOrRecordMovement, handleCashMovement('CASH_IN'));
 router.post('/:id/cash-out', authenticateToken, canOperateOrRecordMovement, handleCashMovement('CASH_OUT'));
 router.post('/:id/paid-out', authenticateToken, canOperateOrRecordMovement, handleCashMovement('PAID_OUT'));
+// Safe drops are cashier-initiated like any other cash movement — not
+// manager-authorized like ending a shift. The optional safeId/witnessUserId
+// in the body are just extra recorded detail, not an approval step.
+router.post('/:id/safe-drop', authenticateToken, canOperateOrRecordMovement, handleCashMovement('SAFE_DROP'));
 
 /**
- * POST /api/shifts/:id/end — cashier's "I'm done" action. Locks the drawer,
- * hands it off for reconciliation, exposes no financial figures. This is
- * the only self-service action available once a cashier is finished — they
- * cannot close/reconcile their own shift (see POST /:id/close below).
+ * POST /api/shifts/:id/end — request (and, with a valid ticket, complete)
+ * ending a shift. Requires a consumed SHIFT_END approval ticket
+ * (approvalId in the body, minted via POST /api/till/approvals) — a
+ * Supervisor+ PIN, no exceptions, enforced here regardless of who's calling
+ * (even a Supervisor ending their own shift needs a second person; self-
+ * approval is unconditionally blocked in lib/approval.js). Atomically
+ * generates the immutable ZReport and locks the shift for reconciliation —
+ * this endpoint's response never includes financial figures beyond what
+ * stripShiftFigures already allows the caller to see.
  */
-router.post('/:id/end', authenticateToken, requirePermission('shifts:operate'), async (req, res) => {
+router.post('/:id/end', authenticateToken, canOperateOrRecordMovement, async (req, res) => {
   try {
     const shift = await prisma.shift.findUnique({ where: { id: req.params.id } });
     if (!shift) {
@@ -336,41 +448,90 @@ router.post('/:id/end', authenticateToken, requirePermission('shifts:operate'), 
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    const ended = await endShift(req.params.id, { userId: req.user.userId });
+    const { shift: ended, zReport } = await endShift(req.params.id, { approvalId: req.body.approvalId });
 
-    auditService.safeLog(auditService.eventTypes.SHIFT_CLOSE, {
+    auditService.safeLog(auditService.eventTypes.SHIFT_END_AUTHORIZED, {
       ...auditService.contextFromReq(req),
       entityType: 'SHIFT',
       entityId: ended.id,
       action: 'END',
-      description: `Shift ${ended.id} ended by ${req.user.email || req.user.userId}, awaiting reconciliation`,
+      newValues: { approvalId: req.body.approvalId, zNumber: zReport.zNumber },
+      description: `Shift ${ended.id} ended by ${req.user.email || req.user.userId}, authorized via approval ${req.body.approvalId} — ${zReport.zNumber} generated`,
+    });
+    auditService.safeLog(auditService.eventTypes.Z_REPORT_GENERATED, {
+      ...auditService.contextFromReq(req),
+      entityType: 'Z_REPORT',
+      entityId: zReport.id,
+      action: 'GENERATE',
+      description: `${zReport.zNumber} generated for shift ${ended.id}`,
     });
 
-    // No expectedCash/countedCash/variance to strip — endShift() never
-    // computes or stores them — but stripShiftFigures is still applied for
-    // consistency with every other shift-shaped response.
-    res.json(stripShiftFigures(ended, req.user.permissions));
+    res.json({
+      shift: stripShiftFigures(ended, req.user.permissions),
+      zNumber: zReport.zNumber,
+    });
   } catch (error) {
+    if (error.code === 'SELF_APPROVAL_DENIED' || error.code === 'APPROVAL_REQUIRED') {
+      auditService.safeLog(auditService.eventTypes.PERMISSION_DENIED, {
+        ...auditService.contextFromReq(req),
+        entityType: 'SHIFT',
+        entityId: req.params.id,
+        description: `Blocked shift-end attempt without a valid SHIFT_END approval: ${error.code}`,
+        success: false,
+      });
+    }
     console.error('Error ending shift:', error);
-    res.status(error.status || 500).json({ error: error.message || 'Failed to end shift' });
+    res.status(error.status || 500).json({ error: error.message || 'Failed to end shift', code: error.code });
   }
 });
 
 /**
- * POST /api/shifts/:id/close — count the drawer, compute variance, close
- * the shift. This is the reconciliation action: shifts:reconcile only, and
- * the reconciler can never be the shift's own owner (hard-enforced in
- * lib/shift.js:closeShift, independent of permissions — see SELF_RECONCILE_DENIED).
+ * POST /api/shifts/:id/declaration — the cashier's own physical cash count,
+ * submitted independently of the till (never at the POS). Ownership is
+ * enforced inside lib/cashierDeclaration.js itself (the shift's own cashier
+ * only) — this is the one place ownership, not a broader permission, is the
+ * correct check, since a declaration is inherently personal.
+ */
+router.post('/:id/declaration', authenticateToken, canOperateOrRecordMovement, async (req, res) => {
+  try {
+    const declaration = await submitDeclaration(req.params.id, {
+      declaredByUserId: req.user.userId,
+      declaredTotal: req.body.declaredTotal,
+      denominations: req.body.denominations,
+    });
+
+    auditService.safeLog(auditService.eventTypes.CASHIER_DECLARATION_SUBMITTED, {
+      ...auditService.contextFromReq(req),
+      entityType: 'SHIFT',
+      entityId: req.params.id,
+      action: 'DECLARE',
+      newValues: { declaredTotal: declaration.declaredTotal },
+      description: `Cashier declaration submitted for shift ${req.params.id}: ${declaration.declaredTotal}`,
+    });
+
+    res.status(201).json(declaration);
+  } catch (error) {
+    console.error('Error submitting declaration:', error);
+    res.status(error.status || 500).json({ error: error.message || 'Failed to submit declaration', code: error.code });
+  }
+});
+
+/**
+ * POST /api/shifts/:id/close — reconcile. Compares the frozen
+ * ZReport.expectedClosingCash against the cashier's own
+ * CashierDeclaration.declaredTotal — neither figure is entered or
+ * recomputed here, both already exist (lib/shift.js:closeShift). The
+ * reconciler can never be the shift's own owner (hard-enforced independent
+ * of permissions — see SELF_RECONCILE_DENIED).
  */
 router.post('/:id/close', authenticateToken, requirePermission('shifts:reconcile'), async (req, res) => {
   try {
     const closed = await closeShift(req.params.id, {
-      countedCash: req.body.countedCash,
       reconcilerUserId: req.user.userId,
       notes: req.body.notes,
     });
 
-    auditService.safeLog(auditService.eventTypes.SHIFT_CLOSE, {
+    auditService.safeLog(auditService.eventTypes.SHIFT_RECONCILED, {
       ...auditService.contextFromReq(req),
       entityType: 'SHIFT',
       entityId: closed.id,
@@ -383,6 +544,15 @@ router.post('/:id/close', authenticateToken, requirePermission('shifts:reconcile
       description: `Shift ${closed.id} reconciled by ${req.user.email || req.user.userId} — variance ${closed.variance}`,
       riskLevel: Math.abs(closed.variance || 0) > 0 ? 'MEDIUM' : 'LOW',
     });
+    if (closed.variance) {
+      auditService.safeLog(auditService.eventTypes.SHIFT_VARIANCE_FLAGGED, {
+        ...auditService.contextFromReq(req),
+        entityType: 'SHIFT',
+        entityId: closed.id,
+        description: `Shift ${closed.id} reconciled with a variance of ${closed.variance}`,
+        riskLevel: 'MEDIUM',
+      });
+    }
 
     res.json(closed);
   } catch (error) {
@@ -396,7 +566,49 @@ router.post('/:id/close', authenticateToken, requirePermission('shifts:reconcile
       });
     }
     console.error('Error closing shift:', error);
-    res.status(error.status || 500).json({ error: error.message || 'Failed to close shift' });
+    res.status(error.status || 500).json({ error: error.message || 'Failed to close shift', code: error.code });
+  }
+});
+
+/**
+ * POST /api/shifts/:id/adjustments — the only way a recorded variance's
+ * story ever changes. Never touches the original ZReport/CashierDeclaration
+ * rows (lib/shiftAdjustment.js) — a separate, additive, audited fact.
+ * shifts:adjust is deliberately a step up from shifts:reconcile — not every
+ * reconciler should be able to write off a variance.
+ */
+router.post('/:id/adjustments', authenticateToken, requirePermission('shifts:adjust'), async (req, res) => {
+  try {
+    const adjustment = await createAdjustment(req.params.id, {
+      adjustedByUserId: req.user.userId,
+      reason: req.body.reason,
+      resolutionNote: req.body.resolutionNote,
+    });
+
+    auditService.safeLog(auditService.eventTypes.SHIFT_ADJUSTMENT_CREATED, {
+      ...auditService.contextFromReq(req),
+      entityType: 'SHIFT',
+      entityId: req.params.id,
+      action: 'ADJUST',
+      newValues: { reason: adjustment.reason, resolutionNote: adjustment.resolutionNote },
+      description: `Adjustment recorded for shift ${req.params.id}: ${adjustment.reason}`,
+      riskLevel: 'MEDIUM',
+    });
+
+    res.status(201).json(adjustment);
+  } catch (error) {
+    console.error('Error creating adjustment:', error);
+    res.status(error.status || 500).json({ error: error.message || 'Failed to create adjustment' });
+  }
+});
+
+router.get('/:id/adjustments', authenticateToken, requirePermission('shifts:reconcile'), async (req, res) => {
+  try {
+    const adjustments = await listAdjustments(req.params.id);
+    res.json({ adjustments });
+  } catch (error) {
+    console.error('Error listing adjustments:', error);
+    res.status(500).json({ error: 'Failed to list adjustments' });
   }
 });
 
@@ -404,6 +616,8 @@ router.post('/:id/close', authenticateToken, requirePermission('shifts:reconcile
  * POST /api/shifts/:id/reopen — Manager+ override for a shift closed in
  * error. Not available to Supervisor (shifts:reconcile does not imply
  * shifts:reopen) — reopening is a step up from reconciling, not part of it.
+ * The shift's CashierDeclaration stays attached (a fresh declaration is not
+ * required) — only the reconciliation decision is redone against it.
  */
 router.post('/:id/reopen', authenticateToken, requirePermission('shifts:reopen'), async (req, res) => {
   try {

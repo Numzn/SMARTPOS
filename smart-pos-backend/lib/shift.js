@@ -6,6 +6,8 @@
 const prisma = require('./prisma');
 const { DEFAULT_BRANCH } = require('./inventoryStock');
 const { nextSequentialNumber } = require('./sequentialNumber');
+const { createZReport } = require('./zReport');
+const { consumeApproval } = require('./approval');
 
 const round2 = (n) => parseFloat((n || 0).toFixed(2));
 
@@ -32,6 +34,20 @@ async function getOpenShiftForBranch(branchId = DEFAULT_BRANCH) {
     where: { branchId, status: 'OPEN' },
     orderBy: { openedAt: 'desc' },
     include: shiftInclude,
+  });
+}
+
+/**
+ * Every currently OPEN shift, across all branches — the back-office "Active
+ * Tills" view. Deliberately unfiltered by branch (unlike getOpenShiftForBranch)
+ * since a manager overseeing the whole store needs to see every register at
+ * once, not just their own branch's.
+ */
+async function getActiveTills() {
+  return prisma.shift.findMany({
+    where: { status: 'OPEN' },
+    include: shiftInclude,
+    orderBy: { openedAt: 'asc' },
   });
 }
 
@@ -76,8 +92,8 @@ async function openShift({ userId, branchId = DEFAULT_BRANCH, openingFloat = 0, 
   });
 }
 
-async function recordCashMovement(shiftId, { type, amount, reason, userId }) {
-  if (!['CASH_IN', 'CASH_OUT', 'PAID_OUT'].includes(type)) {
+async function recordCashMovement(shiftId, { type, amount, reason, userId, safeId, witnessUserId }) {
+  if (!['CASH_IN', 'CASH_OUT', 'PAID_OUT', 'SAFE_DROP'].includes(type)) {
     const err = new Error(`Invalid cash movement type: ${type}`);
     err.status = 400;
     throw err;
@@ -109,7 +125,15 @@ async function recordCashMovement(shiftId, { type, amount, reason, userId }) {
   }
 
   await prisma.shiftCashMovement.create({
-    data: { shiftId, type, amount: value, reason: reason || null, userId },
+    data: {
+      shiftId,
+      type,
+      amount: value,
+      reason: reason || null,
+      userId,
+      safeId: type === 'SAFE_DROP' ? safeId || null : null,
+      witnessUserId: type === 'SAFE_DROP' ? witnessUserId || null : null,
+    },
   });
 
   return prisma.shift.findUnique({ where: { id: shiftId }, include: shiftInclude });
@@ -117,12 +141,18 @@ async function recordCashMovement(shiftId, { type, amount, reason, userId }) {
 
 /**
  * Expected cash in the drawer: opening float, plus completed cash sales,
- * minus completed cash refunds, plus/minus recorded cash movements. Only
+ * minus completed cash refunds, plus/minus recorded cash movements
+ * (including safe drops, subtracted the same way a payout is). Only
  * COMPLETED sales/refunds count — a PENDING or FISCAL_FAILED sale never
  * became a real, fiscally-recorded transaction.
+ *
+ * `db` defaults to the module-level prisma client but accepts an active `tx`
+ * so a caller (notably Z-report generation) can compute this figure inside
+ * the same transaction that freezes it — the whole point of a Z report is
+ * that nothing can change between "compute" and "persist."
  */
-async function computeExpectedCash(shiftId) {
-  const shift = await prisma.shift.findUnique({ where: { id: shiftId } });
+async function computeExpectedCash(shiftId, db = prisma) {
+  const shift = await db.shift.findUnique({ where: { id: shiftId } });
   if (!shift) {
     const err = new Error('Shift not found');
     err.status = 404;
@@ -130,15 +160,15 @@ async function computeExpectedCash(shiftId) {
   }
 
   const [salesAgg, refundsAgg, movements] = await Promise.all([
-    prisma.sale.aggregate({
+    db.sale.aggregate({
       where: { shiftId, status: 'COMPLETED', paymentMethod: 'CASH' },
       _sum: { total: true },
     }),
-    prisma.refund.aggregate({
+    db.refund.aggregate({
       where: { shiftId, status: 'COMPLETED', paymentMethod: 'CASH' },
       _sum: { total: true },
     }),
-    prisma.shiftCashMovement.groupBy({
+    db.shiftCashMovement.groupBy({
       by: ['type'],
       where: { shiftId },
       _sum: { amount: true },
@@ -151,8 +181,9 @@ async function computeExpectedCash(shiftId) {
   const cashIn = byType.CASH_IN || 0;
   const cashOut = byType.CASH_OUT || 0;
   const paidOut = byType.PAID_OUT || 0;
+  const safeDropsTotal = byType.SAFE_DROP || 0;
 
-  const expectedCash = shift.openingFloat + cashSales - cashRefunds + cashIn - cashOut - paidOut;
+  const expectedCash = shift.openingFloat + cashSales - cashRefunds + cashIn - cashOut - paidOut - safeDropsTotal;
 
   return {
     openingFloat: shift.openingFloat,
@@ -161,17 +192,97 @@ async function computeExpectedCash(shiftId) {
     cashIn,
     cashOut,
     paidOut,
+    safeDropsTotal,
     expectedCash: parseFloat(expectedCash.toFixed(2)),
   };
 }
 
 /**
- * Cashier's "I'm done" action — locks the drawer against further cash
- * movements and hands it off for reconciliation, but computes and exposes
- * no financial figures. Segregation of duties: the cashier who worked the
- * till is never the one who finds out (or decides) whether it balances.
+ * Gathers every figure a Z report freezes, scoped to `tx` so it runs inside
+ * the same transaction that will persist it. Shares its aggregation shape
+ * with getShiftReport() below by design — a Z report is exactly "what
+ * getShiftReport() would say right now," just written down permanently
+ * instead of recomputed live forever after.
  */
-async function endShift(shiftId, { userId }) {
+async function buildZReportTotals(tx, shiftId) {
+  const shift = await tx.shift.findUnique({ where: { id: shiftId } });
+  if (!shift) {
+    const err = new Error('Shift not found');
+    err.status = 404;
+    throw err;
+  }
+
+  const [breakdown, salesByMethod, salesTotals, refundTotals, saleCount, cancelledCount, safeDropRows] =
+    await Promise.all([
+      computeExpectedCash(shiftId, tx),
+      tx.sale.groupBy({
+        by: ['paymentMethod'],
+        where: { shiftId, status: 'COMPLETED' },
+        _sum: { total: true },
+        _count: true,
+      }),
+      tx.sale.aggregate({
+        where: { shiftId, status: 'COMPLETED' },
+        _sum: { total: true, subtotal: true, tax: true, discount: true },
+      }),
+      tx.refund.aggregate({
+        where: { shiftId, status: 'COMPLETED' },
+        _sum: { total: true },
+      }),
+      tx.sale.count({ where: { shiftId, status: 'COMPLETED' } }),
+      tx.sale.count({ where: { shiftId, status: 'CANCELLED' } }),
+      tx.shiftCashMovement.findMany({ where: { shiftId, type: 'SAFE_DROP' }, orderBy: { createdAt: 'asc' } }),
+    ]);
+
+  const netSales = salesTotals._sum.subtotal || 0;
+  const discounts = salesTotals._sum.discount || 0;
+  const grossSales = netSales + discounts;
+
+  return {
+    branchId: shift.branchId,
+    cashierUserId: shift.userId,
+    shiftOpenedAt: shift.openedAt,
+    shiftEndedAt: new Date(),
+    openingFloat: shift.openingFloat,
+    grossSales: round2(grossSales),
+    discounts: round2(discounts),
+    netSales: round2(netSales),
+    tax: round2(salesTotals._sum.tax || 0),
+    refunds: round2(refundTotals._sum.total || 0),
+    cancelledCount,
+    transactionCount: saleCount,
+    salesByMethod: salesByMethod.map((m) => ({
+      paymentMethod: m.paymentMethod,
+      total: round2(m._sum.total || 0),
+      count: m._count,
+    })),
+    cashSales: breakdown.cashSales,
+    cashRefunds: breakdown.cashRefunds,
+    cashIn: breakdown.cashIn,
+    cashOut: breakdown.cashOut,
+    paidOut: breakdown.paidOut,
+    safeDrops: safeDropRows.map((d) => ({
+      id: d.id,
+      amount: d.amount,
+      createdAt: d.createdAt,
+      safeId: d.safeId,
+      witnessUserId: d.witnessUserId,
+    })),
+    safeDropsTotal: breakdown.safeDropsTotal,
+    expectedClosingCash: breakdown.expectedCash,
+  };
+}
+
+/**
+ * End a shift — Supervisor+ PIN required, no exceptions (including for a
+ * Supervisor ending their own shift; self-approval is unconditionally
+ * blocked in lib/approval.js). Atomically: consumes the SHIFT_END approval
+ * ticket, freezes every figure into an immutable ZReport row, and locks the
+ * shift for reconciliation. No financial figures are exposed by this
+ * function's return value beyond what's already frozen into the ZReport —
+ * the caller (route layer) decides what to show whom.
+ */
+async function endShift(shiftId, { approvalId }) {
   const shift = await prisma.shift.findUnique({ where: { id: shiftId } });
   if (!shift) {
     const err = new Error('Shift not found');
@@ -184,36 +295,70 @@ async function endShift(shiftId, { userId }) {
     throw err;
   }
 
-  return prisma.shift.update({
-    where: { id: shiftId },
-    data: {
-      status: 'PENDING_RECONCILIATION',
-      endedAt: new Date(),
-    },
-    include: shiftInclude,
+  return prisma.$transaction(async (tx) => {
+    const approver = await consumeApproval(tx, approvalId, {
+      actionType: 'SHIFT_END',
+      sessionId: null,
+      target: { shiftId },
+    });
+
+    const totals = await buildZReportTotals(tx, shiftId);
+    const zReport = await createZReport(tx, shiftId, {
+      ...totals,
+      authorizedByUserId: approver.id,
+      supervisorApprovalId: approvalId,
+    });
+
+    const updatedShift = await tx.shift.update({
+      where: { id: shiftId },
+      data: { status: 'PENDING_RECONCILIATION', endedAt: totals.shiftEndedAt },
+      include: shiftInclude,
+    });
+
+    return { shift: updatedShift, zReport };
   });
 }
 
 /**
- * Reconcile (count + close) a shift. Runnable on an OPEN shift directly (a
- * supervisor doing a spot-check) or, the normal path, one already ended by
- * its cashier (PENDING_RECONCILIATION).
- *
- * `reconcilerUserId` must differ from the shift's owner — this is a hard
+ * Auto-backfill a ZReport for a shift that reached PENDING_RECONCILIATION
+ * before this feature existed (no PIN-gated endShift() ever ran for it).
+ * Same totals computation as a normal Z, just missing a real consumed
+ * approval ticket to point to — `backfilled: true` marks it as such so it
+ * stays visually distinguishable from a properly authorized one if that
+ * ever matters for an audit. Only ever called from closeShift() below, and
+ * only when no ZReport already exists.
+ */
+async function backfillZReport(tx, shiftId, { triggeredByUserId = null } = {}) {
+  const totals = await buildZReportTotals(tx, shiftId);
+  return createZReport(tx, shiftId, {
+    ...totals,
+    authorizedByUserId: triggeredByUserId,
+    supervisorApprovalId: null,
+    backfilled: true,
+  });
+}
+
+/**
+ * Reconcile a shift: compares the frozen ZReport.expectedClosingCash against
+ * the cashier's own CashierDeclaration.declaredTotal — neither number is
+ * recomputed or re-entered here, both already exist and are read-only by
+ * this point. `reconcilerUserId` must differ from the shift's owner — a hard
  * invariant, not permission-gated, mirroring SELF_APPROVAL_DENIED in
  * lib/approval.js: a till can never be balanced by the person who worked
  * it, regardless of what role or permissions that person holds (including
  * ADMIN — segregation of duties is structural, not a privilege check).
  */
-async function closeShift(shiftId, { countedCash, reconcilerUserId, notes }) {
+async function closeShift(shiftId, { reconcilerUserId, notes }) {
   const shift = await prisma.shift.findUnique({ where: { id: shiftId } });
   if (!shift) {
     const err = new Error('Shift not found');
     err.status = 404;
     throw err;
   }
-  if (!['OPEN', 'PENDING_RECONCILIATION'].includes(shift.status)) {
-    const err = new Error('Shift is already closed');
+  if (shift.status !== 'PENDING_RECONCILIATION') {
+    const err = new Error(
+      shift.status === 'CLOSED' ? 'Shift is already closed' : 'Shift must be ended before it can be reconciled'
+    );
     err.status = 409;
     throw err;
   }
@@ -229,28 +374,48 @@ async function closeShift(shiftId, { countedCash, reconcilerUserId, notes }) {
     throw err;
   }
 
-  const counted = Number(countedCash);
-  if (!Number.isFinite(counted) || counted < 0) {
-    const err = new Error('countedCash must be a non-negative number');
-    err.status = 400;
+  const declaration = await prisma.cashierDeclaration.findUnique({ where: { shiftId } });
+  if (!declaration) {
+    const err = new Error('The cashier has not submitted a physical cash declaration for this shift yet');
+    err.status = 409;
+    err.code = 'DECLARATION_REQUIRED';
     throw err;
   }
 
-  const breakdown = await computeExpectedCash(shiftId);
-  const variance = parseFloat((counted - breakdown.expectedCash).toFixed(2));
+  return prisma.$transaction(async (tx) => {
+    let zReport = await tx.zReport.findUnique({ where: { shiftId } });
+    if (!zReport) {
+      // Only reachable for a shift that entered PENDING_RECONCILIATION
+      // before this feature shipped — see backfillZReport() above.
+      zReport = await backfillZReport(tx, shiftId, { triggeredByUserId: reconcilerUserId });
+    } else if (zReport.backfilled) {
+      // submitDeclaration() backfills a ZReport itself when none exists yet
+      // (same legacy-shift case, just discovered earlier — at declaration
+      // time rather than close time), attributed to the cashier as a
+      // placeholder since authorizedByUserId can't be null. The reconciler
+      // closing the shift out is the one actually taking responsibility for
+      // a backfilled Z, so that supersedes the placeholder here.
+      zReport = await tx.zReport.update({
+        where: { shiftId },
+        data: { authorizedByUserId: reconcilerUserId },
+      });
+    }
 
-  return prisma.shift.update({
-    where: { id: shiftId },
-    data: {
-      status: 'CLOSED',
-      closedAt: new Date(),
-      closedByUserId: reconcilerUserId,
-      countedCash: counted,
-      expectedCash: breakdown.expectedCash,
-      variance,
-      closingNotes: notes || null,
-    },
-    include: shiftInclude,
+    const variance = round2(declaration.declaredTotal - zReport.expectedClosingCash);
+
+    return tx.shift.update({
+      where: { id: shiftId },
+      data: {
+        status: 'CLOSED',
+        closedAt: new Date(),
+        closedByUserId: reconcilerUserId,
+        countedCash: declaration.declaredTotal,
+        expectedCash: zReport.expectedClosingCash,
+        variance,
+        closingNotes: notes || null,
+      },
+      include: shiftInclude,
+    });
   });
 }
 
@@ -329,7 +494,11 @@ async function getShiftReport(shiftId) {
     business,
     branch,
     closedByUser,
+    zReport,
   ] = await Promise.all([
+    // Only actually used for an OPEN shift with no ZReport yet — computed
+    // eagerly either way since it's cheap and keeps this Promise.all simple;
+    // once a ZReport exists, the frozen figures below take over instead.
     computeExpectedCash(shiftId),
     prisma.sale.groupBy({
       by: ['paymentMethod'],
@@ -362,6 +531,7 @@ async function getShiftReport(shiftId) {
           select: { id: true, name: true, email: true },
         })
       : null,
+    prisma.zReport.findUnique({ where: { shiftId } }),
   ]);
 
   const endedAt = shift.closedAt ? new Date(shift.closedAt) : new Date();
@@ -376,10 +546,10 @@ async function getShiftReport(shiftId) {
   const refundsTotal = refundTotals._sum.total || 0;
 
   const variance = shift.variance;
-  const expectedForPct = shift.expectedCash ?? cashBreakdown.expectedCash;
+  const frozenExpected = zReport?.expectedClosingCash ?? shift.expectedCash ?? cashBreakdown.expectedCash;
   const variancePct =
-    shift.status === 'CLOSED' && expectedForPct
-      ? parseFloat(((variance / expectedForPct) * 100).toFixed(2))
+    shift.status === 'CLOSED' && frozenExpected
+      ? parseFloat(((variance / frozenExpected) * 100).toFixed(2))
       : null;
 
   return {
@@ -400,6 +570,11 @@ async function getShiftReport(shiftId) {
       openingNotes: shift.openingNotes,
       closingNotes: shift.closingNotes,
       closedBy: closedByUser,
+      // Present once the shift has been through the PIN-gated endShift() —
+      // the frontend uses this to know a Z has been generated (and to link
+      // to GET /:id/z-report) independent of whether it's been reconciled yet.
+      zNumber: zReport?.zNumber ?? null,
+      zGeneratedAt: zReport?.generatedAt ?? null,
     },
     sales: {
       grossSales: round2(grossSales),
@@ -413,16 +588,23 @@ async function getShiftReport(shiftId) {
       refundCount,
       cancelledCount,
     },
-    cash:
-      shift.status === 'CLOSED'
-        ? {
-            ...cashBreakdown,
-            expectedCash: shift.expectedCash ?? cashBreakdown.expectedCash,
-            countedCash: shift.countedCash,
-            variance,
-            variancePct,
-          }
-        : cashBreakdown,
+    // Once a ZReport exists (status PENDING_RECONCILIATION or CLOSED), its
+    // frozen figures are authoritative — never a live recomputation, that's
+    // the entire point of freezing them at end-shift time. Only a genuinely
+    // OPEN shift (no ZReport yet) falls back to the live cashBreakdown.
+    cash: zReport
+      ? {
+          openingFloat: zReport.openingFloat,
+          cashSales: zReport.cashSales,
+          cashRefunds: zReport.cashRefunds,
+          cashIn: zReport.cashIn,
+          cashOut: zReport.cashOut,
+          paidOut: zReport.paidOut,
+          safeDropsTotal: zReport.safeDropsTotal,
+          expectedCash: zReport.expectedClosingCash,
+          ...(shift.status === 'CLOSED' ? { countedCash: shift.countedCash, variance, variancePct } : {}),
+        }
+      : cashBreakdown,
     salesByMethod,
     refundsByMethod,
     saleCount,
@@ -511,7 +693,7 @@ async function getShiftTransactions(shiftId, { search, type, sort = 'time_desc',
     ...movements.map((m) => ({
       id: m.id,
       time: m.createdAt,
-      type: m.type, // CASH_IN | CASH_OUT | PAID_OUT
+      type: m.type, // CASH_IN | CASH_OUT | PAID_OUT | SAFE_DROP
       invoiceNumber: null,
       receiptNumber: null,
       customer: null,
@@ -565,7 +747,7 @@ async function getShiftTransactions(shiftId, { search, type, sort = 'time_desc',
       sales: countOf('SALE'),
       refunds: countOf('REFUND'),
       cancelled: countOf('CANCELLED'),
-      cashMovements: countOf('CASH_IN', 'CASH_OUT', 'PAID_OUT'),
+      cashMovements: countOf('CASH_IN', 'CASH_OUT', 'PAID_OUT', 'SAFE_DROP'),
     },
     transactions: paged,
     page: pageNum,
@@ -577,6 +759,7 @@ module.exports = {
   shiftInclude,
   getOpenShiftForUser,
   getOpenShiftForBranch,
+  getActiveTills,
   openShift,
   recordCashMovement,
   computeExpectedCash,
@@ -585,4 +768,5 @@ module.exports = {
   reopenShift,
   getShiftReport,
   getShiftTransactions,
+  backfillZReport,
 };

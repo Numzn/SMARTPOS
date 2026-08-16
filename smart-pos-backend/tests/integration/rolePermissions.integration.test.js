@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
 import testData from '../helpers/testData.js';
 import testApp from '../helpers/testApp.js';
 import settingsRouter from '../../routes/settings.js';
 import shiftsRouter from '../../routes/shifts.js';
+import tillApprovalsRouter from '../../routes/tillApprovals.js';
 import { setRolePermission } from '../../lib/permissions.js';
 
 const { createTestBranch, createTestUser, cleanupTestData } = testData;
@@ -16,9 +18,14 @@ function tokenFor(user) {
   });
 }
 
+async function hash(secret) {
+  return bcrypt.hash(secret, 4); // low cost factor — tests only
+}
+
 describe('Configurable RBAC — PUT /api/settings/roles/:role', () => {
   const settingsApp = createTestApp('/api/settings', settingsRouter);
   const shiftsApp = createTestApp('/api/shifts', shiftsRouter);
+  const approvalsApp = createTestApp('/api/till', tillApprovalsRouter);
 
   beforeAll(async () => {
     await createTestBranch();
@@ -26,12 +33,24 @@ describe('Configurable RBAC — PUT /api/settings/roles/:role', () => {
 
   afterEach(async () => {
     await cleanupTestData();
-    // Always leave CASHIER's shifts:recordMovement grant restored, even if a
-    // test fails mid-way, so it can't poison a later test file's
-    // assumptions. shifts:operate is never restored to CASHIER here — it is
-    // never granted to CASHIER by default (Supervisor+ only).
-    await setRolePermission('CASHIER', 'shifts:recordMovement', true, null);
+    // Always leave CASHIER's shifts:operate grant restored, even if a test
+    // fails mid-way, so it can't poison a later test file's assumptions.
+    await setRolePermission('CASHIER', 'shifts:operate', true, null);
   });
+
+  /** Mints a real SHIFT_END approval ticket via the actual HTTP route. */
+  async function mintShiftEndApproval({ requester, approver, shiftId, pin = '1234' }) {
+    return request(approvalsApp)
+      .post('/api/till/approvals')
+      .set('Authorization', `Bearer ${tokenFor(requester)}`)
+      .send({
+        actionType: 'SHIFT_END',
+        credential: pin,
+        method: 'PIN',
+        approverUserId: approver.id,
+        target: { shiftId },
+      });
+  }
 
   it('requires ADMIN — a MANAGER holding settings:write is still forbidden', async () => {
     const manager = await createTestUser({ role: 'MANAGER' });
@@ -75,6 +94,7 @@ describe('Configurable RBAC — PUT /api/settings/roles/:role', () => {
     expect(res.status).toBe(200);
     expect(res.body.roles).toContain('CASHIER');
     expect(res.body.permissions).toContain('shifts:reconcile');
+    expect(res.body.permissions).toContain('shifts:adjust');
     expect(Array.isArray(res.body.grants)).toBe(true);
   });
 
@@ -88,28 +108,26 @@ describe('Configurable RBAC — PUT /api/settings/roles/:role', () => {
   it('CONFIGURATION TEST: revoking then restoring a permission changes live behavior with no code change', async () => {
     const admin = await createTestUser({ role: 'ADMIN' });
     const cashier = await createTestUser({ role: 'CASHIER' });
-    // Cashier can't open a shift itself (shifts:operate is Supervisor+ only)
-    // — a Supervisor opens the till the Cashier then works against.
-    const supervisor = await createTestUser({ role: 'SUPERVISOR' });
+
+    // 1. Baseline: cashier can open their own shift and record a cash
+    // movement against it (shifts:operate granted by default).
     const openedShift = await request(shiftsApp)
       .post('/api/shifts/open')
-      .set('Authorization', `Bearer ${tokenFor(supervisor)}`)
+      .set('Authorization', `Bearer ${tokenFor(cashier)}`)
       .send({ openingFloat: 0 });
     expect(openedShift.status).toBe(201);
 
-    // 1. Baseline: cashier can record a cash movement (shifts:recordMovement
-    // granted by default) against the branch's active shift.
     const before = await request(shiftsApp)
       .post(`/api/shifts/${openedShift.body.id}/cash-in`)
       .set('Authorization', `Bearer ${tokenFor(cashier)}`)
       .send({ amount: 10, reason: 'test' });
     expect(before.status).toBe(200);
 
-    // 2. ADMIN revokes shifts:recordMovement from CASHIER via the API.
+    // 2. ADMIN revokes shifts:operate from CASHIER via the API.
     const revoke = await request(settingsApp)
       .put('/api/settings/roles/CASHIER')
       .set('Authorization', `Bearer ${tokenFor(admin)}`)
-      .send({ permission: 'shifts:recordMovement', granted: false });
+      .send({ permission: 'shifts:operate', granted: false });
     expect(revoke.status).toBe(200);
 
     // 3. The very next request from a CASHIER token is denied — no re-login,
@@ -124,7 +142,7 @@ describe('Configurable RBAC — PUT /api/settings/roles/:role', () => {
     const restore = await request(settingsApp)
       .put('/api/settings/roles/CASHIER')
       .set('Authorization', `Bearer ${tokenFor(admin)}`)
-      .send({ permission: 'shifts:recordMovement', granted: true });
+      .send({ permission: 'shifts:operate', granted: true });
     expect(restore.status).toBe(200);
 
     // 5. Behavior is restored on the next request.
@@ -138,6 +156,8 @@ describe('Configurable RBAC — PUT /api/settings/roles/:role', () => {
   it('ADMIN has no code-level bypass — revoking an ADMIN permission via the real admin API actually denies ADMIN', async () => {
     const admin = await createTestUser({ role: 'ADMIN' });
     const secondAdmin = await createTestUser({ role: 'ADMIN' }); // does the revoking, so the revoke request itself isn't blocked by anything odd about `admin`
+    const approver = await createTestUser({ role: 'SUPERVISOR', pinHash: await hash('1234') });
+    const reconciler = await createTestUser({ role: 'MANAGER' });
 
     // Exercise the same HTTP path a real ADMIN would use (routes/settings.js),
     // not the lib function directly — this is what actually proves ADMIN's
@@ -154,11 +174,21 @@ describe('Configurable RBAC — PUT /api/settings/roles/:role', () => {
         .post('/api/shifts/open')
         .set('Authorization', `Bearer ${tokenFor(admin)}`)
         .send({ openingFloat: 0 });
-      const reconciler = await createTestUser({ role: 'MANAGER' });
+
+      const approval = await mintShiftEndApproval({ requester: admin, approver, shiftId: shift.body.id });
+      expect(approval.status).toBe(201);
+      await request(shiftsApp)
+        .post(`/api/shifts/${shift.body.id}/end`)
+        .set('Authorization', `Bearer ${tokenFor(admin)}`)
+        .send({ approvalId: approval.body.approvalId });
+      await request(shiftsApp)
+        .post(`/api/shifts/${shift.body.id}/declaration`)
+        .set('Authorization', `Bearer ${tokenFor(admin)}`)
+        .send({ declaredTotal: 0 });
       await request(shiftsApp)
         .post(`/api/shifts/${shift.body.id}/close`)
         .set('Authorization', `Bearer ${tokenFor(reconciler)}`)
-        .send({ countedCash: 0 });
+        .send({});
 
       const reopen = await request(shiftsApp)
         .post(`/api/shifts/${shift.body.id}/reopen`)

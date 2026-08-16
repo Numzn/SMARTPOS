@@ -45,6 +45,12 @@ const SupervisorApprovalModal = ({ open, onClose, actionType, sessionId, target,
 
   const isReversal = actionType === 'LINE_REVERSAL';
 
+  const MODAL_TITLES = {
+    LINE_REVERSAL: 'Supervisor approval — reverse item',
+    ORDER_DISCOUNT: 'Supervisor approval — discount',
+    SHIFT_END: 'Supervisor approval — end shift',
+  };
+
   const canSubmit = approverUserId && /^\d{4,6}$/.test(pin) && (!isReversal || reasonCode);
 
   const handleSubmit = async () => {
@@ -71,7 +77,7 @@ const SupervisorApprovalModal = ({ open, onClose, actionType, sessionId, target,
     <Modal
       open={open}
       onClose={onClose}
-      title={isReversal ? 'Supervisor approval — reverse item' : 'Supervisor approval — discount'}
+      title={MODAL_TITLES[actionType] || 'Supervisor approval'}
       description={itemLabel}
       size="sm"
       footer={

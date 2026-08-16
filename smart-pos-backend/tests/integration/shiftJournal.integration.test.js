@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
+import bcrypt from 'bcryptjs';
 import testData from '../helpers/testData.js';
 import shiftLib from '../../lib/shift.js';
+import approvalLib from '../../lib/approval.js';
+import cashierDeclarationLib from '../../lib/cashierDeclaration.js';
 import saleFiscal from '../../lib/saleFiscal.js';
 
 const {
@@ -14,8 +17,30 @@ const {
   cleanupTestData,
   DEFAULT_BRANCH_CODE,
 } = testData;
-const { openShift, recordCashMovement, closeShift, getShiftReport, getShiftTransactions } = shiftLib;
+const { openShift, recordCashMovement, endShift, closeShift, getShiftReport, getShiftTransactions } = shiftLib;
+const { requestApproval } = approvalLib;
+const { submitDeclaration } = cashierDeclarationLib;
 const { completeSaleAfterFiscalSuccess } = saleFiscal;
+
+async function hash(secret) {
+  return bcrypt.hash(secret, 4); // low cost factor — tests only
+}
+
+/** Full end (PIN-gated) -> declare -> reconcile flow, returning the CLOSED shift. */
+async function endAndReconcile(shiftId, { requesterUserId, approver, reconciler, declaredTotal, notes }) {
+  const approval = await requestApproval(prisma, {
+    approverUserId: approver.id,
+    requesterUserId,
+    credential: '1234',
+    method: 'PIN',
+    actionType: 'SHIFT_END',
+    sessionId: null,
+    target: { shiftId },
+  });
+  await endShift(shiftId, { approvalId: approval.id });
+  await submitDeclaration(shiftId, { declaredByUserId: requesterUserId, declaredTotal });
+  return closeShift(shiftId, { reconcilerUserId: reconciler.id, notes });
+}
 
 async function sellableProduct({ stock = 20, unitCost = 5 } = {}) {
   const product = await createTestProduct();
@@ -85,9 +110,10 @@ describe('Shift X/Z reports and transaction journal', () => {
 
   it('Z-report carries counted cash, variance and variance percentage', async () => {
     const user = await createTestUser();
+    const approver = await createTestUser({ role: 'SUPERVISOR', pinHash: await hash('1234') });
     const reconciler = await createTestUser({ role: 'SUPERVISOR' });
     const shift = await openShift({ userId: user.id, openingFloat: 400 });
-    await closeShift(shift.id, { countedCash: 380, reconcilerUserId: reconciler.id, notes: 'drawer short' });
+    await endAndReconcile(shift.id, { requesterUserId: user.id, approver, reconciler, declaredTotal: 380, notes: 'drawer short' });
 
     const report = await getShiftReport(shift.id);
 

@@ -345,6 +345,13 @@ async function cleanupTestData() {
   // all test products are.
   await prisma.product.deleteMany({ where: { category: { name: { startsWith: 'Test Category ' } } } });
   await prisma.category.deleteMany({ where: { name: { startsWith: 'Test Category ' } } });
+  // ZReport/CashierDeclaration/ShiftAdjustment reference Shift with the
+  // default Restrict onDelete — must be gone before the shift delete below.
+  // CashierDeclaration and ShiftAdjustment both also reference ZReport
+  // directly, so they must go before ZReport too.
+  await prisma.cashierDeclaration.deleteMany({ where: { shift: { user: { email: { contains: '@smartpos.test' } } } } });
+  await prisma.shiftAdjustment.deleteMany({ where: { shift: { user: { email: { contains: '@smartpos.test' } } } } });
+  await prisma.zReport.deleteMany({ where: { shift: { user: { email: { contains: '@smartpos.test' } } } } });
   // Shift deletion cascades to shift_cash_movements; must happen before the
   // user delete below (Shift.userId is onDelete: Restrict).
   await prisma.shift.deleteMany({ where: { user: { email: { contains: '@smartpos.test' } } } });

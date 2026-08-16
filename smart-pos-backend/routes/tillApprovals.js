@@ -53,16 +53,66 @@ router.get('/approvers', authenticateToken, async (req, res) => {
  * POST /api/till/approvals
  *
  * Mints a short-lived, single-use approval ticket for one specific action
- * (LINE_REVERSAL or ORDER_DISCOUNT) on one specific till session. The
- * requesting cashier must own that session; the approver is a *different*
- * user (a supervisor/manager/admin) whose PIN or password is verified here
- * — this is the only place a raw credential is ever checked. Everything
- * downstream (till-lock reversal, checkout's discount gate) only ever sees
- * the returned `approvalId`.
+ * on one specific target. The approver is a *different* user (a supervisor/
+ * manager/admin) whose PIN or password is verified here — this is the only
+ * place a raw credential is ever checked. Everything downstream (till-lock
+ * reversal, checkout's discount gate, POST /api/shifts/:id/end) only ever
+ * sees the returned `approvalId`.
+ *
+ * LINE_REVERSAL/ORDER_DISCOUNT are bound to a CashierCartSession the
+ * requester must own. SHIFT_END is bound to a Shift instead — a shift isn't
+ * a till session, so there's no sessionId for it (the ticket is minted with
+ * sessionId: null, matching how consumeApproval checks it in lib/shift.js).
  */
 router.post('/approvals', authenticateToken, async (req, res) => {
   try {
     const { actionType, credential, method = 'PIN', approverUserId, sessionId, target } = req.body || {};
+
+    if (actionType === 'SHIFT_END') {
+      if (!target?.shiftId) {
+        return res.status(400).json({ error: 'target.shiftId is required for a SHIFT_END approval' });
+      }
+      const shift = await prisma.shift.findUnique({ where: { id: target.shiftId } });
+      if (!shift) {
+        return res.status(404).json({ error: 'Shift not found' });
+      }
+      if (shift.status !== 'OPEN') {
+        return res.status(409).json({ error: `Cannot request a shift-end approval for a shift with status ${shift.status}` });
+      }
+
+      // Logged unconditionally here — before the PIN/eligibility check below
+      // can succeed or fail — because the attempt itself is the auditable
+      // fact: a cashier asked to end this shift, whatever happens next.
+      auditService.safeLog(auditService.eventTypes.SHIFT_END_REQUESTED, {
+        ...auditService.contextFromReq(req),
+        entityType: 'SHIFT',
+        entityId: shift.id,
+        action: 'END_REQUESTED',
+        newValues: { approverUserId, authMethod: method },
+        description: `Shift ${shift.id} end requested by ${req.user.email || req.user.userId}, approval pending`,
+      });
+
+      const approval = await requestApproval(prisma, {
+        approverUserId,
+        requesterUserId: req.user.userId,
+        credential,
+        method,
+        actionType,
+        sessionId: null,
+        target,
+      });
+
+      auditService.safeLog(auditService.eventTypes.SUPERVISOR_APPROVAL_GRANTED, {
+        ...auditService.contextFromReq(req),
+        entityType: 'SUPERVISOR_APPROVAL',
+        entityId: approval.id,
+        action: 'GRANT',
+        newValues: { actionType, target, approverUserId: approval.approverUserId, authMethod: method },
+        description: `Supervisor approval granted for SHIFT_END on shift ${target.shiftId}`,
+      });
+
+      return res.status(201).json({ approvalId: approval.id, expiresAt: approval.expiresAt });
+    }
 
     if (!sessionId) {
       return res.status(400).json({ error: 'sessionId is required' });

@@ -15,11 +15,16 @@ const prisma = require('./prisma');
  *     (segregation of duties: a cashier can never see expectedCash/variance
  *     or close their own drawer; only a supervisor+ with `shifts:reconcile`
  *     can, and never on their own shift — enforced in code, not by
- *     permission, in routes/shifts.js). Opening/ending a shift
- *     (`shifts:operate`) is Supervisor+ only — a Cashier sells and records
- *     cash movements (`shifts:recordMovement`) against whichever shift a
- *     Supervisor/Manager/Admin opened for the branch, but never opens or
- *     ends one themselves.
+ *     permission, in routes/shifts.js). `shifts:operate` covers opening a
+ *     shift, recording cash movements, and *requesting* a shift end — every
+ *     till-facing role holds it. Actually ending a shift additionally
+ *     requires a consumed SHIFT_END approval ticket (a Supervisor+ PIN),
+ *     enforced at the route regardless of who holds shifts:operate — even a
+ *     Supervisor ending their own shift needs a second person, since
+ *     self-approval is unconditionally blocked in lib/approval.js.
+ *     `shifts:recordMovement` remains as a narrower fallback: acting on the
+ *     branch's active shift without owning it (e.g. a role that can help out
+ *     at a till without opening its own).
  *   - zra:*     — a lightweight connectivity check (`zra:status`) is not the
  *     same as the ZRA Sync page / operational visibility (`zra:read`), which
  *     is not the same as triggering syncs (`zra:sync`) or provisioning a
@@ -44,7 +49,7 @@ const DEFAULT_PERMISSIONS = {
     'settings:read', 'settings:write',
     'audit:read',
     'shifts:operate', 'shifts:viewExpected', 'shifts:countCash', 'shifts:viewVariance',
-    'shifts:reconcile', 'shifts:viewAll', 'shifts:reopen',
+    'shifts:reconcile', 'shifts:viewAll', 'shifts:reopen', 'shifts:adjust',
     'zra:status', 'zra:read', 'zra:sync', 'zra:submit', 'zra:admin',
     'roles:manage',
   ],
@@ -61,7 +66,7 @@ const DEFAULT_PERMISSIONS = {
     'reports:read', 'reports:write',
     'audit:read',
     'shifts:operate', 'shifts:viewExpected', 'shifts:countCash', 'shifts:viewVariance',
-    'shifts:reconcile', 'shifts:viewAll', 'shifts:reopen',
+    'shifts:reconcile', 'shifts:viewAll', 'shifts:reopen', 'shifts:adjust',
     'zra:status', 'zra:read', 'zra:sync', 'zra:submit',
   ],
   // Same operational baseline as CASHIER, plus reconciliation authority.
@@ -80,11 +85,11 @@ const DEFAULT_PERMISSIONS = {
     'sales:read', 'sales:write',
     'receipts:read',
     'customers:read', 'customers:write',
-    // NOT shifts:operate — a Cashier cannot open or end a shift, only a
-    // Supervisor/Manager/Admin can. shifts:recordMovement is the till-level
-    // capability a Cashier keeps: cash-in/out/paid-out, and viewing the
-    // branch's currently active shift (non-financial fields only).
-    'shifts:recordMovement',
+    // Open own shift, record cash movements, and request a shift end (which
+    // still requires a Supervisor+ PIN to actually complete — see
+    // routes/shifts.js:POST /:id/end). Not shifts:viewExpected/viewVariance/
+    // reconcile — a Cashier never sees drawer financials or reconciles.
+    'shifts:operate',
     // Read-only fiscal device status. A cashier has to be able to tell
     // whether ZRA submission is working — it decides whether they keep
     // trading. This is deliberately the *only* ZRA permission Cashier

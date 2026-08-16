@@ -17,7 +17,7 @@ const duration = (minutes) => {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 };
 
-const MOVEMENT_LABELS = { CASH_IN: 'Cash In', CASH_OUT: 'Cash Out', PAID_OUT: 'Paid Out' };
+const MOVEMENT_LABELS = { CASH_IN: 'Cash In', CASH_OUT: 'Cash Out', PAID_OUT: 'Paid Out', SAFE_DROP: 'Safe Drop' };
 
 const Row = ({ label, value, strong, tone, indent }) => (
   <div className={`flex justify-between px-4 py-1.5 text-sm ${strong ? 'font-semibold' : ''}`}>
@@ -204,6 +204,7 @@ const ShiftReportPanel = ({ report, onViewTransactions }) => {
             <Row label="Cash In" value={money(cash.cashIn)} />
             <Row label="Cash Out" value={`-${money(cash.cashOut)}`} />
             <Row label="Paid Out" value={`-${money(cash.paidOut)}`} />
+            {cash.safeDropsTotal != null && <Row label="Safe Drops" value={`-${money(cash.safeDropsTotal)}`} />}
             <Row label="Cash Refunds" value={`-${money(cash.cashRefunds)}`} />
           </Block>
 

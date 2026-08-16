@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { Clock, Menu, LogOut, ChevronDown } from 'lucide-react';
+import { Clock, Menu, LogOut, ChevronDown, Wallet } from 'lucide-react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { useAuth } from '../../../contexts/AuthContext';
 
-const CashierHeader = ({ currentTime }) => {
+const CashierHeader = ({ currentTime, shift, shiftLoading, ending, shiftError, onEndShift }) => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const { openSidebar } = useOutletContext() || {};
@@ -52,6 +52,24 @@ const CashierHeader = ({ currentTime }) => {
         <span className="text-gray-400 hidden md:inline">|</span>
         <span className="text-xs text-gray-500 hidden md:inline">{formatDate(currentTime)}</span>
       </div>
+
+      {!shiftLoading && shift && shift.status === 'OPEN' && (
+        <div className="flex items-center gap-2 shrink-0 px-2 py-1 border border-surface-border rounded bg-gray-50">
+          <Wallet className="w-3.5 h-3.5 text-gray-500" strokeWidth={1.75} />
+          <span className="text-xs text-gray-700 hidden sm:inline truncate max-w-[100px]">
+            {shift.shiftNumber || shift.id}
+          </span>
+          {shiftError && <span className="text-[11px] text-red-600">{shiftError}</span>}
+          <button
+            type="button"
+            onClick={onEndShift}
+            disabled={ending}
+            className="px-2 py-0.5 bg-amber-600/90 hover:bg-amber-600 text-white text-xs font-medium rounded disabled:opacity-50"
+          >
+            {ending ? 'Ending…' : 'End Shift'}
+          </button>
+        </div>
+      )}
 
       <div className="relative shrink-0">
         <button

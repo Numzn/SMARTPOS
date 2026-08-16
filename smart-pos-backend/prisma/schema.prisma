@@ -37,9 +37,14 @@ model User {
   stockMovements   StockMovement[]
   shifts           Shift[]
   shiftCashMovements ShiftCashMovement[]
+  safeDropsWitnessed ShiftCashMovement[] @relation("SafeDropWitness")
   discountApprovals Sale[] @relation("SaleDiscountApprovals")
   cartSessions      CashierCartSession[]
   approvalsGiven    SupervisorApproval[]
+  zReportsWorked    ZReport[] @relation("ZReportCashier")
+  zReportsAuthorized ZReport[] @relation("ZReportAuthorizer")
+  cashierDeclarations CashierDeclaration[]
+  shiftAdjustments  ShiftAdjustment[]
   branchId         String?
   branch           Branch?   @relation(fields: [branchId], references: [code])
 
@@ -467,6 +472,9 @@ model SupervisorApproval {
   targetProductId  String?
   targetQuantity   Int?
   targetDiscountAmount Float?
+  // Bound target for SHIFT_END — parallel to targetProductId/targetQuantity/
+  // targetDiscountAmount above, just for a different action type.
+  targetShiftId    String?
   authMethod       SupervisorAuthMethod
   expiresAt        DateTime
   consumedAt       DateTime?
@@ -480,6 +488,7 @@ model SupervisorApproval {
 enum SupervisorActionType {
   LINE_REVERSAL
   ORDER_DISCOUNT
+  SHIFT_END
 }
 
 enum SupervisorAuthMethod {
@@ -917,14 +926,17 @@ model Shift {
   cashMovements  ShiftCashMovement[]
   sales          Sale[]
   refunds        Refund[]
+  zReport        ZReport?
+  declaration    CashierDeclaration?
+  adjustments    ShiftAdjustment[]
 
   @@index([branchId, status])
   @@index([userId, status])
   @@map("shifts")
 }
 
-// Cash in / cash out / paid out entries recorded against an open shift —
-// the audit trail behind a Z-report's expected-cash figure.
+// Cash in / cash out / paid out / safe-drop entries recorded against an open
+// shift — the audit trail behind a Z-report's expected-cash figure.
 model ShiftCashMovement {
   id        String            @id @default(cuid())
   shiftId   String
@@ -933,12 +945,119 @@ model ShiftCashMovement {
   reason    String?
   userId    String            // who recorded the movement (may differ from shift owner)
   createdAt DateTime          @default(now())
+  // Safe-drop-specific, both optional — null for ordinary CASH_IN/CASH_OUT/
+  // PAID_OUT movements. safeId identifies which safe/destination for a
+  // multi-safe deployment (a single-safe business just leaves this null);
+  // witnessUserId records a second person present for the drop, if the
+  // business's policy calls for one — this is NOT an approval ticket, a
+  // safe drop is cashier-initiated like any other cash movement, not
+  // manager-authorized like a shift end.
+  safeId        String?
+  witnessUserId String?
 
   shift     Shift @relation(fields: [shiftId], references: [id], onDelete: Cascade)
   user      User  @relation(fields: [userId], references: [id])
+  witness   User? @relation("SafeDropWitness", fields: [witnessUserId], references: [id])
 
   @@index([shiftId])
   @@map("shift_cash_movements")
+}
+
+// The immutable, authoritative snapshot of a completed shift — generated
+// exactly once, atomically, when a Supervisor+ PIN authorizes the shift end
+// (see lib/zReport.js, lib/shift.js:endShift). Mirrors ReceiptSnapshot's
+// "compute once, freeze, never mutate" pattern: there is deliberately no
+// update route for this model anywhere in the API. Physical cash counting
+// happens later and separately (CashierDeclaration below) — the whole point
+// of this table existing is that expectedClosingCash is fixed before anyone
+// counts anything, so a declaration can never influence what it's compared
+// against.
+model ZReport {
+  id                    String   @id @default(cuid())
+  shiftId               String   @unique
+  zNumber               String   @unique // via nextSequentialNumber, same pattern as shiftNumber -> "Z-000184"
+  branchId              String
+  cashierUserId         String   // who worked the shift
+  authorizedByUserId    String   // the Supervisor+/Manager+ whose PIN authorized the close
+                                  // (or, for a backfilled report, whoever triggered the backfill)
+  supervisorApprovalId  String?  @unique // the consumed SHIFT_END ticket — proof of authorization.
+                                          // Null only for a backfilled report (a shift that reached
+                                          // PENDING_RECONCILIATION before this feature existed, and
+                                          // never went through the PIN-gated endShift() flow).
+  backfilled             Boolean  @default(false)
+  generatedAt           DateTime @default(now())
+  shiftOpenedAt          DateTime
+  shiftEndedAt           DateTime
+
+  // Frozen totals — computed once here from computeExpectedCash/getShiftReport,
+  // never recomputed after this row exists.
+  openingFloat          Float
+  grossSales            Float
+  discounts             Float
+  netSales              Float
+  tax                   Float
+  refunds               Float
+  cancelledCount        Int
+  transactionCount      Int
+  salesByMethod         Json     // [{paymentMethod, total, count}, ...]
+  cashSales             Float
+  cashRefunds           Float
+  cashIn                Float
+  cashOut                Float
+  paidOut                Float
+  safeDrops              Json    // [{id, amount, createdAt, safeId, witnessUserId}, ...]
+  safeDropsTotal          Float
+  expectedClosingCash     Float   // THE frozen number reconciliation compares against
+
+  shift        Shift @relation(fields: [shiftId], references: [id])
+  cashier      User  @relation("ZReportCashier", fields: [cashierUserId], references: [id])
+  authorizedBy User  @relation("ZReportAuthorizer", fields: [authorizedByUserId], references: [id])
+  declaration  CashierDeclaration?
+  adjustments  ShiftAdjustment[]
+
+  @@map("z_reports")
+}
+
+// The cashier's physical cash count, submitted independently of the till/POS
+// session — never enterable at the till itself (see routes/shifts.js:POST
+// /:id/declaration, gated to the shift's own cashier). Deliberately
+// immutable once created: a wrong declaration is corrected via a
+// ShiftAdjustment, never by editing this row.
+model CashierDeclaration {
+  id                String   @id @default(cuid())
+  zReportId         String   @unique
+  shiftId           String   @unique
+  declaredByUserId  String
+  declaredAt        DateTime @default(now())
+  declaredTotal     Float
+  denominations     Json?    // optional [{value, count}, ...] — nullable so a
+                              // deployment isn't forced into denomination-level
+                              // entry, but the shape exists without a future migration
+
+  zReport    ZReport @relation(fields: [zReportId], references: [id])
+  shift      Shift   @relation(fields: [shiftId], references: [id])
+  declaredBy User    @relation(fields: [declaredByUserId], references: [id])
+
+  @@map("cashier_declarations")
+}
+
+// The only way a recorded variance's story ever changes — the original
+// ZReport.expectedClosingCash and CashierDeclaration.declaredTotal are never
+// edited; this is a separate, additive, audited fact linked to both.
+model ShiftAdjustment {
+  id               String   @id @default(cuid())
+  shiftId          String
+  zReportId        String
+  reason           String
+  resolutionNote   String
+  adjustedByUserId String
+  createdAt        DateTime @default(now())
+
+  shift      Shift   @relation(fields: [shiftId], references: [id])
+  zReport    ZReport @relation(fields: [zReportId], references: [id])
+  adjustedBy User    @relation(fields: [adjustedByUserId], references: [id])
+
+  @@map("shift_adjustments")
 }
 
 model VsdcDevice {
@@ -974,6 +1093,12 @@ model BusinessProfile {
   // DB default here is the strict/safe policy: existing installations that
   // never touch this become strict, not permissive.
   discountPolicy  Json     @default("{\"cashierCanApply\":false,\"cashierCanRequest\":false,\"supervisorCanApply\":false,\"managerCanApply\":true,\"approvalRequired\":true,\"discountLimits\":{}}")
+  // Configurable safe-drop threshold — same "stored on the singleton, not
+  // hardcoded" precedent as discountPolicy above. Null/unset = the till never
+  // warns; a value means the till suggests a safe drop once the live expected
+  // drawer balance reaches it. Never forces a drop, never assumes every drop
+  // must equal the threshold exactly.
+  safeDropThreshold Float?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -1181,6 +1306,10 @@ enum CashMovementType {
   CASH_IN
   CASH_OUT
   PAID_OUT
+  // Distinct from CASH_OUT: subtracts from expected cash the same way, but is
+  // its own reporting line on the Z report (Expected Closing Cash = ... -
+  // Safe Drops, tracked separately from ordinary payouts per business policy).
+  SAFE_DROP
 }
 
 enum StockMovementType {

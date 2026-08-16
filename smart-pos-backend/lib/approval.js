@@ -15,12 +15,14 @@ const { getDiscountPolicy, canApplyDiscount } = require('./discountPolicy');
 const APPROVAL_TTL_MS = 3 * 60 * 1000; // 3 minutes — long enough to type a PIN, short enough not to become a standing credential.
 
 /**
- * Per-actionType approver eligibility. LINE_REVERSAL keeps the original
- * rank-floor check (till-lock is unrelated to discount policy). ORDER_DISCOUNT
- * eligibility mirrors discount *apply* authority — approving someone else's
- * discount request requires the same authority as applying one directly, so
- * e.g. a SUPERVISOR whose discountPolicy.supervisorCanApply is false cannot
- * approve a discount either, even though they can still approve reversals.
+ * Per-actionType approver eligibility. LINE_REVERSAL and SHIFT_END keep the
+ * original rank-floor check (till-lock/shift-close are unrelated to discount
+ * policy — sealing a till just needs a Supervisor+ present, same tier as a
+ * reversal). ORDER_DISCOUNT eligibility mirrors discount *apply* authority —
+ * approving someone else's discount request requires the same authority as
+ * applying one directly, so e.g. a SUPERVISOR whose
+ * discountPolicy.supervisorCanApply is false cannot approve a discount
+ * either, even though they can still approve reversals/shift-ends.
  */
 async function isEligibleApprover(db, approver, actionType) {
   if (actionType === 'ORDER_DISCOUNT') {
@@ -49,7 +51,7 @@ async function requestApproval(db, { approverUserId, requesterUserId, credential
     err.status = 400;
     throw err;
   }
-  if (!['LINE_REVERSAL', 'ORDER_DISCOUNT'].includes(actionType)) {
+  if (!['LINE_REVERSAL', 'ORDER_DISCOUNT', 'SHIFT_END'].includes(actionType)) {
     const err = new Error(`Unsupported approval action type: ${actionType}`);
     err.status = 400;
     throw err;
@@ -66,7 +68,9 @@ async function requestApproval(db, { approverUserId, requesterUserId, credential
     const err = new Error(
       actionType === 'ORDER_DISCOUNT'
         ? 'Approver is not authorized to apply discounts under the current policy'
-        : 'Approver must be an active supervisor, manager, or admin'
+        : actionType === 'SHIFT_END'
+          ? 'Approver must be an active supervisor, manager, or admin to authorize a shift end'
+          : 'Approver must be an active supervisor, manager, or admin'
     );
     err.status = 403;
     throw err;
@@ -94,6 +98,7 @@ async function requestApproval(db, { approverUserId, requesterUserId, credential
       targetProductId: target.productId ?? null,
       targetQuantity: target.quantity ?? null,
       targetDiscountAmount: target.discountAmount ?? null,
+      targetShiftId: target.shiftId ?? null,
       authMethod: method,
       expiresAt: new Date(Date.now() + APPROVAL_TTL_MS),
     },
@@ -109,6 +114,9 @@ function targetsMatch(approval, target = {}) {
     const a = approval.targetDiscountAmount ?? 0;
     const b = target.discountAmount ?? 0;
     return Math.abs(a - b) < 0.01;
+  }
+  if (approval.actionType === 'SHIFT_END') {
+    return approval.targetShiftId === (target.shiftId ?? null);
   }
   return false;
 }

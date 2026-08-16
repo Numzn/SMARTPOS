@@ -58,12 +58,11 @@ export const usePermissions = () => {
     managePurchasing: hasPermission('purchasing:write'),
     viewPurchasing: hasPermission('purchasing:read'),
 
-    // Cash register / shifts — granular segregation of duties.
-    // shifts:operate (Supervisor/Manager/Admin) is opening/ending a shift —
-    // a Cashier never gets this. shifts:recordMovement (Cashier) is
-    // cash-in/out/paid-out on the branch's currently active shift, whoever
-    // opened it. Reconciling (expected cash, counting, variance, closing)
-    // is a further-separate tier a Cashier never sees either way.
+    // Cash register / shifts — granular segregation of duties. Ending a
+    // shift is PIN-gated (Supervisor+ approval), not permission-gated, so
+    // both CASHIER and SUPERVISOR+ hold shifts:operate — the till control
+    // just requests a ticket. Reconciling (expected cash, counting,
+    // variance, closing) is a further-separate tier a Cashier never sees.
     operateShift: hasPermission('shifts:operate'),
     recordCashMovement: hasPermission('shifts:recordMovement'),
     viewExpectedCash: hasPermission('shifts:viewExpected'),
@@ -72,6 +71,9 @@ export const usePermissions = () => {
     reconcileShift: hasPermission('shifts:reconcile'),
     viewAllShifts: hasPermission('shifts:viewAll'),
     reopenShift: hasPermission('shifts:reopen'),
+    // A step up from reconcileShift — not every reconciler should be able
+    // to write off a variance (ADMIN/MANAGER only by default).
+    adjustShift: hasPermission('shifts:adjust'),
 
     // Settings
     viewSettings: hasPermission('settings:read'),

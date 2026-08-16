@@ -18,6 +18,11 @@ const MOVEMENT_LABELS = {
     blurb: 'Cash paid from the drawer for an expense — e.g. a delivery or supplies.',
     verb: 'Record Paid Out',
   },
+  SAFE_DROP: {
+    title: 'Safe Drop',
+    blurb: 'Cash moved to the safe — its own reporting line, separate from an ordinary payout.',
+    verb: 'Record Safe Drop',
+  },
 };
 
 const CashMovementModal = ({ show, type, onClose, loading, onSubmit }) => {
