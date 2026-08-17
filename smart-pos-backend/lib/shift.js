@@ -24,6 +24,19 @@ async function getOpenShiftForUser(userId, branchId = DEFAULT_BRANCH) {
 }
 
 /**
+ * OPEN or INITIALIZING — "does this user currently have an active shift at
+ * all," used by ensureShiftForLogin to decide resume-vs-create. Deliberately
+ * separate from getOpenShiftForUser (OPEN-only), which other callers rely on
+ * meaning "ready to operate," not merely "exists."
+ */
+async function getActiveShiftForUser(userId, branchId = DEFAULT_BRANCH) {
+  return prisma.shift.findFirst({
+    where: { userId, branchId, status: { in: ['OPEN', 'INITIALIZING'] } },
+    include: shiftInclude,
+  });
+}
+
+/**
  * The branch's currently active shift, regardless of who opened it — what a
  * Cashier (shifts:recordMovement, not shifts:operate) resolves "current
  * shift" to, since they never open one themselves. Most-recently-opened
@@ -38,14 +51,17 @@ async function getOpenShiftForBranch(branchId = DEFAULT_BRANCH) {
 }
 
 /**
- * Every currently OPEN shift, across all branches — the back-office "Active
- * Tills" view. Deliberately unfiltered by branch (unlike getOpenShiftForBranch)
+ * Every currently OPEN or INITIALIZING shift, across all branches — the
+ * back-office "Active Tills" view. INITIALIZING rows are included so a
+ * cashier stuck on the opening-cash prompt is visible for cancellation (see
+ * cancelInitializingShift) rather than invisibly consuming their one active
+ * shift slot. Deliberately unfiltered by branch (unlike getOpenShiftForBranch)
  * since a manager overseeing the whole store needs to see every register at
  * once, not just their own branch's.
  */
 async function getActiveTills() {
   return prisma.shift.findMany({
-    where: { status: 'OPEN' },
+    where: { status: { in: ['OPEN', 'INITIALIZING'] } },
     include: shiftInclude,
     orderBy: { openedAt: 'asc' },
   });
@@ -90,6 +106,143 @@ async function openShift({ userId, branchId = DEFAULT_BRANCH, openingFloat = 0, 
       include: shiftInclude,
     });
   });
+}
+
+/**
+ * Get-or-create the shift a cashier lands on when they open the till screen
+ * with none active — resumes an existing OPEN/INITIALIZING shift, or starts
+ * a new one in INITIALIZING (opening cash not yet confirmed; see
+ * confirmOpeningCash). This is the one place a shift ever gets created
+ * without an explicit manual "open" action.
+ *
+ * Race-safety is enforced by Postgres, not application locking: the partial
+ * unique index `shifts_active_user_branch_key` (see the comment on the Shift
+ * model in schema.prisma) guarantees at most one OPEN-or-INITIALIZING row
+ * per (userId, branchId), so two near-simultaneous calls (double-click, two
+ * tabs, a retried request) can never both succeed at creating one. The loser
+ * gets a unique-constraint violation and re-reads instead of erroring — same
+ * shape as the P2002 fallback in lib/fiscalInvoiceNumber.js's
+ * allocateFiscalInvcNo(), except here there are two *different* unique
+ * constraints that can produce that P2002 (the partial index above, or the
+ * pre-existing plain uniqueness on shiftNumber — nextSequentialNumber's own
+ * scan-and-increment has no in-transaction retry, so two concurrent calls
+ * for two *different* users can independently land on the same next
+ * number). Rather than parse which constraint fired, just re-check: if an
+ * active shift now exists, someone else's create won the race — return it.
+ * If not, the collision was on shiftNumber — retry with a freshly allocated
+ * one (bounded, so a persistent unrelated failure doesn't loop forever).
+ */
+async function ensureShiftForLogin(userId, branchId = DEFAULT_BRANCH, attempt = 1) {
+  if (!userId) {
+    const err = new Error('userId is required');
+    err.status = 400;
+    throw err;
+  }
+
+  const existing = await getActiveShiftForUser(userId, branchId);
+  if (existing) return existing;
+
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const shiftNumber = await nextSequentialNumber(tx, {
+        model: 'shift',
+        field: 'shiftNumber',
+        prefix: 'SHIFT',
+      });
+
+      return tx.shift.create({
+        data: {
+          shiftNumber,
+          userId,
+          branchId,
+          status: 'INITIALIZING',
+        },
+        include: shiftInclude,
+      });
+    });
+  } catch (error) {
+    if (error.code === 'P2002') {
+      // Use the plain `prisma` client, never the aborted `tx` — a failed
+      // transaction refuses further queries on the same connection.
+      const winner = await getActiveShiftForUser(userId, branchId);
+      if (winner) return winner;
+      if (attempt < 3) return ensureShiftForLogin(userId, branchId, attempt + 1);
+    }
+    throw error;
+  }
+}
+
+/**
+ * The cashier confirms the physical cash they counted into the drawer,
+ * completing INITIALIZING -> OPEN. openedAt is set here, not at
+ * ensureShiftForLogin's creation time, so shift duration and the frozen
+ * ZReport's shiftOpenedAt reflect when the till actually started operating —
+ * not however long the cashier took to get around to confirming.
+ */
+async function confirmOpeningCash(shiftId, { userId, openingFloat, notes }) {
+  const float = Number(openingFloat);
+  if (!Number.isFinite(float) || float < 0) {
+    const err = new Error('openingFloat must be a non-negative number');
+    err.status = 400;
+    throw err;
+  }
+
+  const shift = await prisma.shift.findUnique({ where: { id: shiftId } });
+  if (!shift) {
+    const err = new Error('Shift not found');
+    err.status = 404;
+    throw err;
+  }
+  if (shift.status !== 'INITIALIZING') {
+    const err = new Error(`Cannot confirm opening cash for a shift with status ${shift.status}`);
+    err.status = 409;
+    throw err;
+  }
+  if (shift.userId !== userId) {
+    const err = new Error('Only the shift\'s own cashier can confirm its opening cash');
+    err.status = 403;
+    throw err;
+  }
+
+  return prisma.shift.update({
+    where: { id: shiftId },
+    data: {
+      status: 'OPEN',
+      openingFloat: float,
+      openingNotes: notes || null,
+      openedAt: new Date(),
+    },
+    include: shiftInclude,
+  });
+}
+
+/**
+ * The escape hatch for a shift stuck in INITIALIZING — a cashier who started
+ * the opening-cash prompt and never confirmed it (crash, browser closed,
+ * transferred branches). Without this, the partial unique index that
+ * guarantees race-safety would also permanently lock that user out of ever
+ * getting another shift at this branch. Hard-deletes rather than
+ * soft-cancelling: nothing meaningful can be attached to an INITIALIZING
+ * shift (recordCashMovement already rejects non-OPEN, sale attribution only
+ * ever matches status:'OPEN'), so there is nothing to cascade or preserve.
+ * The resulting gap in the shiftNumber sequence is fine — same as any
+ * rolled-back transaction.
+ */
+async function cancelInitializingShift(shiftId) {
+  const shift = await prisma.shift.findUnique({ where: { id: shiftId } });
+  if (!shift) {
+    const err = new Error('Shift not found');
+    err.status = 404;
+    throw err;
+  }
+  if (shift.status !== 'INITIALIZING') {
+    const err = new Error(`Cannot cancel a shift with status ${shift.status}`);
+    err.status = 409;
+    throw err;
+  }
+
+  await prisma.shift.delete({ where: { id: shiftId } });
+  return shift;
 }
 
 async function recordCashMovement(shiftId, { type, amount, reason, userId, safeId, witnessUserId }) {
@@ -758,9 +911,13 @@ async function getShiftTransactions(shiftId, { search, type, sort = 'time_desc',
 module.exports = {
   shiftInclude,
   getOpenShiftForUser,
+  getActiveShiftForUser,
   getOpenShiftForBranch,
   getActiveTills,
   openShift,
+  ensureShiftForLogin,
+  confirmOpeningCash,
+  cancelInitializingShift,
   recordCashMovement,
   computeExpectedCash,
   endShift,

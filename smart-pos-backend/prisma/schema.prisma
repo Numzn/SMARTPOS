@@ -899,6 +899,17 @@ model Branch {
 // Cash register / till session — the "trust boundary" for a cashier's cash
 // drawer over a shift: opening float, cash movements, and a final count
 // reconciled against what sales/refunds during the shift say should be there.
+//
+// IMPORTANT — race-safety for auto-created shifts (ensureShiftForLogin in
+// lib/shift.js) depends on a partial unique index that is NOT representable
+// here in schema.prisma (Prisma has no filtered/WHERE unique constraint
+// syntax): migration 20260817065200_shift_active_user_branch_unique_index
+// creates `UNIQUE INDEX shifts_active_user_branch_key ON shifts (userId,
+// branchId) WHERE status IN ('OPEN','INITIALIZING')`. Because it has no
+// representation here, it is invisible to `prisma db push` and to any future
+// migration-history baseline reset — if you ever reset migration history,
+// this index must be re-added by hand. A missing index means a cashier can
+// end up with two simultaneous active shifts.
 model Shift {
   id             String      @id @default(cuid())
   shiftNumber    String      @unique // human-readable reference on X/Z reports
@@ -1297,6 +1308,9 @@ enum ZraRegistrationStatus {
 }
 
 enum ShiftStatus {
+  INITIALIZING            // shift row exists (shiftNumber allocated) but the
+                          // cashier hasn't confirmed their opening cash yet —
+                          // see ensureShiftForLogin/confirmOpeningCash in lib/shift.js
   OPEN
   PENDING_RECONCILIATION
   CLOSED

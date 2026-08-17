@@ -26,11 +26,23 @@ export const shiftApi = {
   /** X-report on an OPEN shift, Z-report on a CLOSED one. */
   fetchShiftReport: (id) => apiFetch(`/shifts/${id}/report`),
 
-  openShift: ({ openingFloat, notes }) =>
-    apiFetch('/shifts/open', {
+  /**
+   * Get-or-create the caller's active shift — what the till screen calls on
+   * load instead of a manual "Open Shift" button. Returns an INITIALIZING
+   * shift (opening cash not yet confirmed, see confirmOpeningCash below) or
+   * an existing OPEN/INITIALIZING one, resumed rather than duplicated.
+   */
+  ensureShift: () => apiFetch('/shifts/ensure', { method: 'POST' }),
+
+  /** Completes INITIALIZING -> OPEN with the cashier's counted opening cash. */
+  confirmOpeningCash: (id, { openingFloat, notes }) =>
+    apiFetch(`/shifts/${id}/confirm-opening`, {
       method: 'POST',
       body: JSON.stringify({ openingFloat, notes }),
     }),
+
+  /** Back-office escape hatch for a shift stuck awaiting opening-cash confirmation. */
+  cancelInitialization: (id) => apiFetch(`/shifts/${id}/cancel-initialization`, { method: 'POST' }),
 
   recordCashMovement: (id, type, { amount, reason }) => {
     const path = { CASH_IN: 'cash-in', CASH_OUT: 'cash-out', PAID_OUT: 'paid-out' }[type];

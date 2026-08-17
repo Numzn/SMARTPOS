@@ -10,26 +10,28 @@ import { TextField } from '../ui/Field';
  * that would defeat the point of an independent count. Immutable once
  * submitted; a correction afterward is a ShiftAdjustment, not a re-submit.
  */
-const SubmitDeclarationModal = ({ show, shiftLabel, onClose, loading, onSubmit }) => {
+const SubmitDeclarationModal = ({ show, shiftLabel, onClose, loading, onSubmit, error: submitError }) => {
   const [declaredTotal, setDeclaredTotal] = useState('');
-  const [error, setError] = useState('');
+  const [validationError, setValidationError] = useState('');
 
   useEffect(() => {
     if (show) {
       setDeclaredTotal('');
-      setError('');
+      setValidationError('');
     }
   }, [show]);
 
   const handleSubmit = () => {
     const value = Number(declaredTotal);
     if (!Number.isFinite(value) || value < 0 || declaredTotal === '') {
-      setError('Enter the counted cash total (zero or more)');
+      setValidationError('Enter the counted cash total (zero or more)');
       return;
     }
-    setError('');
+    setValidationError('');
     onSubmit({ declaredTotal: value });
   };
+
+  const error = validationError || submitError;
 
   return (
     <Modal

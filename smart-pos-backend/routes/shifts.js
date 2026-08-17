@@ -7,6 +7,9 @@ const {
   getOpenShiftForBranch,
   getActiveTills,
   openShift,
+  ensureShiftForLogin,
+  confirmOpeningCash,
+  cancelInitializingShift,
   recordCashMovement,
   endShift,
   closeShift,
@@ -108,9 +111,9 @@ router.get(
 );
 
 /**
- * GET /api/shifts/active-tills — every currently OPEN shift, store-wide.
- * The back office's "Active Tills" view. Registered before GET /:id so this
- * fixed path can never be shadowed by the :id wildcard.
+ * GET /api/shifts/active-tills — every currently OPEN or INITIALIZING shift,
+ * store-wide. The back office's "Active Tills" view. Registered before
+ * GET /:id so this fixed path can never be shadowed by the :id wildcard.
  */
 router.get('/active-tills', authenticateToken, requirePermission('shifts:viewAll'), async (req, res) => {
   try {
@@ -239,6 +242,83 @@ router.post('/open', authenticateToken, requirePermission('shifts:operate'), asy
   } catch (error) {
     console.error('Error opening shift:', error);
     res.status(error.status || 500).json({ error: error.message || 'Failed to open shift' });
+  }
+});
+
+/**
+ * POST /api/shifts/ensure — get-or-create the caller's active shift. This is
+ * what a cashier's till screen calls on load instead of a manual "Open
+ * Shift" button: resumes an existing OPEN/INITIALIZING shift, or starts a
+ * new INITIALIZING one awaiting an opening-cash confirmation (see
+ * POST /:id/confirm-opening). Race-safe via a DB-level partial unique index,
+ * not application locking — see ensureShiftForLogin's own doc comment.
+ */
+router.post('/ensure', authenticateToken, requirePermission('shifts:operate'), async (req, res) => {
+  try {
+    const branchId = req.body?.branchId || DEFAULT_BRANCH;
+    const shift = await ensureShiftForLogin(req.user.userId, branchId);
+    res.status(200).json(shift);
+  } catch (error) {
+    console.error('Error ensuring shift:', error);
+    res.status(error.status || 500).json({ error: error.message || 'Failed to start shift' });
+  }
+});
+
+/**
+ * POST /api/shifts/:id/confirm-opening — completes INITIALIZING -> OPEN with
+ * the cashier's physically-counted opening cash. Ownership-enforced inside
+ * confirmOpeningCash (only the shift's own cashier). Logged as SHIFT_OPEN —
+ * this is the moment the shift actually becomes usable, same event the old
+ * one-step POST /open flow always logged.
+ */
+router.post('/:id/confirm-opening', authenticateToken, requirePermission('shifts:operate'), async (req, res) => {
+  try {
+    const shift = await confirmOpeningCash(req.params.id, {
+      userId: req.user.userId,
+      openingFloat: req.body.openingFloat,
+      notes: req.body.notes,
+    });
+
+    auditService.safeLog(auditService.eventTypes.SHIFT_OPEN, {
+      ...auditService.contextFromReq(req),
+      entityType: 'SHIFT',
+      entityId: shift.id,
+      action: 'OPEN',
+      newValues: { openingFloat: shift.openingFloat, branchId: shift.branchId },
+      description: `Opening cash confirmed by ${req.user.email || req.user.userId} for shift ${shift.shiftNumber}`,
+    });
+
+    res.status(200).json(shift);
+  } catch (error) {
+    console.error('Error confirming opening cash:', error);
+    res.status(error.status || 500).json({ error: error.message || 'Failed to confirm opening cash' });
+  }
+});
+
+/**
+ * POST /api/shifts/:id/cancel-initialization — the escape hatch for a shift
+ * stuck awaiting opening-cash confirmation (crash, abandoned browser,
+ * transferred branches). shifts:reopen-gated, same back-office-override tier
+ * as reopenShift — a cashier can never cancel their own stuck shift, only
+ * request a new opening-cash prompt by returning to the till, which
+ * ensureShiftForLogin will correctly resume rather than duplicate.
+ */
+router.post('/:id/cancel-initialization', authenticateToken, requirePermission('shifts:reopen'), async (req, res) => {
+  try {
+    const shift = await cancelInitializingShift(req.params.id);
+
+    auditService.safeLog(auditService.eventTypes.SHIFT_INITIALIZATION_CANCELLED, {
+      ...auditService.contextFromReq(req),
+      entityType: 'SHIFT',
+      entityId: shift.id,
+      action: 'CANCEL_INITIALIZATION',
+      description: `Stuck shift ${shift.shiftNumber} (INITIALIZING) cancelled by ${req.user.email || req.user.userId}`,
+    });
+
+    res.status(200).json({ cancelled: true, shiftId: shift.id });
+  } catch (error) {
+    console.error('Error cancelling initializing shift:', error);
+    res.status(error.status || 500).json({ error: error.message || 'Failed to cancel shift' });
   }
 });
 

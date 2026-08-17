@@ -250,22 +250,24 @@ describe('Cash register / shift lifecycle', () => {
   });
 
   it('closeShift requires PENDING_RECONCILIATION status and a submitted declaration', async () => {
-    const user = await createTestUser();
+    // A separate user per row — each scenario is independent, and (as of the
+    // shifts_active_user_branch_key partial index) a user can't hold two
+    // simultaneous OPEN/INITIALIZING shifts anyway.
     const reconciler = await createTestUser({ role: 'SUPERVISOR' });
-    const openShiftRow = await createTestShift({ userId: user.id, openingFloat: 0 });
+    const openShiftRow = await createTestShift({ userId: (await createTestUser()).id, openingFloat: 0 });
 
     // Still OPEN — hasn't been through endShift yet.
     await expect(
       closeShift(openShiftRow.id, { reconcilerUserId: reconciler.id })
     ).rejects.toMatchObject({ status: 409 });
 
-    const closedShiftRow = await createTestShift({ userId: user.id, openingFloat: 0, status: 'CLOSED' });
+    const closedShiftRow = await createTestShift({ userId: (await createTestUser()).id, openingFloat: 0, status: 'CLOSED' });
     await expect(
       closeShift(closedShiftRow.id, { reconcilerUserId: reconciler.id })
     ).rejects.toMatchObject({ status: 409 });
 
     const approver = await createTestUser({ role: 'SUPERVISOR', pinHash: await hash('1234') });
-    const pendingShift = await createTestShift({ userId: user.id, openingFloat: 0 });
+    const pendingShift = await createTestShift({ userId: (await createTestUser()).id, openingFloat: 0 });
     await endShiftWithApproval(pendingShift.id, approver);
     // Ended, but no declaration submitted yet.
     await expect(

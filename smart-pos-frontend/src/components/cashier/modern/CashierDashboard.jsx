@@ -7,7 +7,10 @@ import StatusBar from './StatusBar';
 import CheckoutModal from '../../CheckoutModal';
 import SupervisorApprovalModal from './SupervisorApprovalModal';
 import CashMovementModal from '../../shifts/CashMovementModal';
+import SubmitDeclarationModal from '../../shifts/SubmitDeclarationModal';
+import OpeningCashPrompt from '../../shifts/OpeningCashPrompt';
 import { useEndShiftFlow } from '../../../hooks/useEndShiftFlow';
+import { useShiftInitialization } from '../../../hooks/useShiftInitialization';
 import { usePermissions } from '../../../hooks/usePermissions';
 import { shiftApi } from '../../../services/shiftService';
 import {
@@ -28,13 +31,24 @@ import { calculateCartTotals } from '../../../utils/cartTotals';
 
 const CashierDashboard = () => {
   const { canAccess } = usePermissions();
-  const endShiftFlow = useEndShiftFlow({ enabled: canAccess.operateShift });
+  // Auto-creates/resumes the caller's shift on load (INITIALIZING or OPEN) —
+  // the canonical implementation of how a shift starts, replacing a manual
+  // "Open Shift" button. useEndShiftFlow (unchanged, still the canonical
+  // implementation of how a shift ends) needs refreshKey wired to this
+  // hook's status: it fetches the current shift once on its own mount, so
+  // without this it stays stuck showing "no open shift" for a few seconds
+  // after shiftInit flips INITIALIZING -> OPEN, until something unrelated
+  // happens to re-render.
+  const shiftInit = useShiftInitialization({ enabled: canAccess.operateShift });
+  const endShiftFlow = useEndShiftFlow({ enabled: canAccess.operateShift, refreshKey: shiftInit.shift?.status });
   // Shift & Cash tools — Cash In/Out, Paid Out, Safe Drop on the currently
   // open shift. Separate from endShiftFlow's own saving state since these
   // are independent actions with their own modal.
   const [movementType, setMovementType] = useState(null);
   const [movementSaving, setMovementSaving] = useState(false);
   const [movementError, setMovementError] = useState('');
+  const [declarationSaving, setDeclarationSaving] = useState(false);
+  const [declarationError, setDeclarationError] = useState('');
   const [activeTab, setActiveTab] = useState('quickshop');
   const [currentTime, setCurrentTime] = useState(new Date());
   const [showCheckout, setShowCheckout] = useState(false);
@@ -381,6 +395,23 @@ const CashierDashboard = () => {
     }
   };
 
+  // Right after ending a shift — the one moment a plain Cashier (lacking
+  // shifts:viewAll/shifts:reconcile) can address their own just-ended shift
+  // at all, since GET /shifts/current only ever returns an OPEN shift and
+  // there's no list permission to find it again later.
+  const handleSubmitDeclaration = async ({ declaredTotal }) => {
+    setDeclarationSaving(true);
+    setDeclarationError('');
+    try {
+      await shiftApi.submitDeclaration(endShiftFlow.lastEndedShiftId, { declaredTotal });
+      endShiftFlow.dismissEndedNotice();
+    } catch (err) {
+      setDeclarationError(err?.data?.error || err.message || 'Failed to submit declaration');
+    } finally {
+      setDeclarationSaving(false);
+    }
+  };
+
   const clearCart = () => {
     if (tillSessionId) {
       abandonTillSession(tillSessionId).catch(() => {}); // best-effort; local state clears regardless
@@ -486,7 +517,7 @@ const CashierDashboard = () => {
               <div className="text-sm text-gray-500">Loading shift…</div>
             ) : !endShiftFlow.shift ? (
               <div className="text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-lg p-4">
-                You don&apos;t have an open shift. Open one from Cash Register to record cash movements or end it.
+                No open shift right now — reload this page and it will start one automatically.
               </div>
             ) : (
               <>
@@ -547,27 +578,43 @@ const CashierDashboard = () => {
     }
   };
 
+  // Blocks normal till operation until opening cash is confirmed — the
+  // opening-cash prompt replaces the tabs/product-grid/status-bar entirely,
+  // there's nothing to operate yet.
+  const isInitializing = canAccess.operateShift && shiftInit.shift?.status === 'INITIALIZING';
+
   return (
     <div className="h-full flex flex-col bg-surface">
       <CashierHeader currentTime={currentTime} />
 
-      <CashierTabs activeTab={activeTab} onTabChange={setActiveTab} />
+      {isInitializing ? (
+        <OpeningCashPrompt
+          shiftNumber={shiftInit.shift?.shiftNumber}
+          confirming={shiftInit.confirming}
+          error={shiftInit.error}
+          onConfirm={shiftInit.confirmOpening}
+        />
+      ) : (
+        <>
+          <CashierTabs activeTab={activeTab} onTabChange={setActiveTab} />
 
-      {stockNotice && (
-        <div className="mx-4 mt-3 px-3 py-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded">
-          {stockNotice}
-        </div>
+          {stockNotice && (
+            <div className="mx-4 mt-3 px-3 py-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded">
+              {stockNotice}
+            </div>
+          )}
+
+          <main className="flex-1 p-4 overflow-auto">{renderTabContent()}</main>
+
+          <StatusBar
+            zraStatus={zraStatus}
+            printerStatus={printerStatus}
+            networkStatus={networkStatus}
+            cartSummary={{ itemCount: cartTotals.itemCount, total: cartTotals.total }}
+            onCheckout={handleCheckout}
+          />
+        </>
       )}
-
-      <main className="flex-1 p-4 overflow-auto">{renderTabContent()}</main>
-
-      <StatusBar
-        zraStatus={zraStatus}
-        printerStatus={printerStatus}
-        networkStatus={networkStatus}
-        cartSummary={{ itemCount: cartTotals.itemCount, total: cartTotals.total }}
-        onCheckout={handleCheckout}
-      />
 
       {showCheckout && (
         <CheckoutModal
@@ -614,6 +661,15 @@ const CashierDashboard = () => {
         onClose={() => setMovementType(null)}
         loading={movementSaving}
         onSubmit={handleCashMovement}
+      />
+
+      <SubmitDeclarationModal
+        show={!!endShiftFlow.lastEndedShiftId}
+        shiftLabel={endShiftFlow.lastZNumber}
+        onClose={endShiftFlow.dismissEndedNotice}
+        loading={declarationSaving}
+        error={declarationError}
+        onSubmit={handleSubmitDeclaration}
       />
     </div>
   );

@@ -1,63 +1,42 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import OpenShiftModal from '../components/shifts/OpenShiftModal';
-import CashMovementModal from '../components/shifts/CashMovementModal';
 import ReconcileModal from '../components/shifts/ReconcileModal';
-import SubmitDeclarationModal from '../components/shifts/SubmitDeclarationModal';
 import AddAdjustmentModal from '../components/shifts/AddAdjustmentModal';
 import VarianceBadge from '../components/shifts/VarianceBadge';
 import ShiftReportPanel from '../components/shifts/ShiftReportPanel';
 import ShiftsTable from '../components/shifts/ShiftsTable';
 import ShiftTransactionJournal from '../components/shifts/ShiftTransactionJournal';
-import SupervisorApprovalModal from '../components/cashier/modern/SupervisorApprovalModal';
 import { shiftApi } from '../services/shiftService';
 import { usePermissions } from '../hooks/usePermissions';
-import { useEndShiftFlow } from '../hooks/useEndShiftFlow';
 
-const money = (n) => `K${Number(n || 0).toFixed(2)}`;
-
+/**
+ * Back-office monitoring and reconciliation — Active Tills, Pending
+ * Reconciliation, Shift History. Deliberately NOT where anyone operates
+ * their own till: a shift starts automatically and is ended exclusively
+ * from /cashier's Shift & Cash tools (see useShiftInitialization,
+ * useEndShiftFlow) — this page only ever acts on shifts store-wide, never
+ * "mine."
+ */
 const CashRegisterPage = () => {
   const { canAccess } = usePermissions();
-  const canOperate = canAccess.operateShift; // open/end own till, cash movements
-  const canRecordOnly = !canOperate && canAccess.recordCashMovement; // Cashier variant: cash movements on the branch's active till, never open/end
-  const canRecordMovements = canOperate || canRecordOnly;
   const canReconcile = canAccess.reconcileShift; // count + close ANY eligible shift, never own
   const canViewAll = canAccess.viewAllShifts; // full store-wide shift list
-  const canReopen = canAccess.reopenShift;
+  const canReopen = canAccess.reopenShift; // also gates cancelling a stuck INITIALIZING shift
   const canAdjust = canAccess.adjustShift;
-
-  // The single shared End Shift workflow — same hook CashierDashboard's
-  // Shift & Cash tools section uses, so there is exactly one implementation
-  // of "how a shift gets ended," not a second copy on this page.
-  const endShiftFlow = useEndShiftFlow({ enabled: canOperate });
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
-  const [currentReport, setCurrentReport] = useState(null);
   const [pendingQueue, setPendingQueue] = useState([]);
   const [activeTills, setActiveTills] = useState([]);
   const [shifts, setShifts] = useState([]);
 
-  const [showOpenModal, setShowOpenModal] = useState(false);
-  const [movementType, setMovementType] = useState(null);
   const [reconcileTarget, setReconcileTarget] = useState(null); // { shift, zReport }
   const [historyReport, setHistoryReport] = useState(null);
   const [adjustTarget, setAdjustTarget] = useState(null); // { shift, variance }
   const [closedReport, setClosedReport] = useState(null);
   // Shift whose transaction journal is open, if any.
   const [journalShiftId, setJournalShiftId] = useState(null);
-
-  const currentShift = endShiftFlow.shift;
-
-  const loadCurrentReport = useCallback(async () => {
-    if (!canRecordMovements) return;
-    if (endShiftFlow.shift) {
-      setCurrentReport(await shiftApi.fetchShiftReport(endShiftFlow.shift.id));
-    } else {
-      setCurrentReport(null);
-    }
-  }, [canRecordMovements, endShiftFlow.shift]);
 
   const loadPendingQueue = useCallback(async () => {
     if (!canReconcile) return;
@@ -78,55 +57,29 @@ const CashRegisterPage = () => {
     setLoading(true);
     setError(null);
     try {
-      await Promise.all([loadCurrentReport(), loadPendingQueue(), loadActiveTills(), loadHistory()]);
+      await Promise.all([loadPendingQueue(), loadActiveTills(), loadHistory()]);
     } catch (err) {
       setError(err?.data?.error || err.message || 'Failed to load cash register');
     } finally {
       setLoading(false);
     }
-  }, [loadCurrentReport, loadPendingQueue, loadActiveTills, loadHistory]);
+  }, [loadPendingQueue, loadActiveTills, loadHistory]);
 
   useEffect(() => {
     loadAll();
   }, [loadAll]);
 
-  // Once endShiftFlow ends the shift, currentShift/currentReport need a
-  // refresh too (they're this page's own view of the same underlying data).
-  useEffect(() => {
-    if (endShiftFlow.lastEndedShiftId) {
-      loadCurrentReport();
-      loadPendingQueue();
-    }
-  }, [endShiftFlow.lastEndedShiftId, loadCurrentReport, loadPendingQueue]);
-
   const runAction = async (fn, failureMessage) => {
     setSaving(true);
     try {
       await fn();
-      await Promise.all([loadCurrentReport(), loadPendingQueue(), loadActiveTills(), loadHistory()]);
+      await Promise.all([loadPendingQueue(), loadActiveTills(), loadHistory()]);
     } catch (err) {
       alert(`${failureMessage}: ${err?.data?.error || err.message}`);
     } finally {
       setSaving(false);
     }
   };
-
-  const handleOpenShift = ({ openingFloat, notes }) =>
-    runAction(async () => {
-      await shiftApi.openShift({ openingFloat, notes });
-      setShowOpenModal(false);
-      await endShiftFlow.refresh();
-    }, 'Error opening shift');
-
-  const handleCashMovement = ({ amount, reason }) =>
-    runAction(async () => {
-      if (movementType === 'SAFE_DROP') {
-        await shiftApi.recordSafeDrop(currentShift.id, { amount, reason });
-      } else {
-        await shiftApi.recordCashMovement(currentShift.id, movementType, { amount, reason });
-      }
-      setMovementType(null);
-    }, 'Error recording cash movement');
 
   const openReconcileModal = async (shift) => {
     try {
@@ -144,12 +97,6 @@ const CashRegisterPage = () => {
       setReconcileTarget(null);
       setClosedReport(await shiftApi.fetchShiftReport(shiftId));
     }, 'Error reconciling shift');
-
-  const handleSubmitDeclaration = ({ declaredTotal }) =>
-    runAction(async () => {
-      await shiftApi.submitDeclaration(endShiftFlow.lastEndedShiftId, { declaredTotal });
-      endShiftFlow.dismissEndedNotice();
-    }, 'Error submitting declaration');
 
   const handleAddAdjustment = ({ reason, resolutionNote }) =>
     runAction(async () => {
@@ -173,6 +120,23 @@ const CashRegisterPage = () => {
     }, 'Error reopening shift');
   };
 
+  // The escape hatch for a cashier stuck on the opening-cash prompt
+  // (crash, abandoned browser, transferred branches) — without this,
+  // the DB-level uniqueness that makes auto-shift-creation race-safe would
+  // also permanently lock that user out of ever getting another shift.
+  const handleCancelInitialization = async (shift) => {
+    if (
+      !window.confirm(
+        `Cancel the stuck shift ${shift.shiftNumber} for ${shift.user?.name || 'this cashier'}? They'll get a fresh opening-cash prompt next time they open the till.`
+      )
+    ) {
+      return;
+    }
+    await runAction(async () => {
+      await shiftApi.cancelInitialization(shift.id);
+    }, 'Error cancelling shift');
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -188,13 +152,7 @@ const CashRegisterPage = () => {
     <div className="space-y-6 p-4 sm:p-6">
       <div>
         <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Cash Register</h1>
-        <p className="text-gray-600">
-          {canReconcile
-            ? 'Operate your own till, and balance operators awaiting reconciliation'
-            : canOperate
-              ? 'Open and use your till, record cash movements, end your shift'
-              : 'Record cash movements on the till currently in use'}
-        </p>
+        <p className="text-gray-600">Monitor active tills and reconcile shifts awaiting review</p>
       </div>
 
       {error && (
@@ -221,122 +179,6 @@ const CashRegisterPage = () => {
         </section>
       )}
 
-      {/* Just ended a shift on this page — Z is frozen, no financial figures
-          shown, only the confirmation and an immediate path to declare. This
-          is the one moment this operator can address their own ended shift:
-          GET /shifts/current only returns OPEN shifts, and a plain
-          shifts:operate holder has no permission to list PENDING_RECONCILIATION
-          shifts to find it again later. */}
-      {endShiftFlow.lastEndedShiftId && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-amber-900">
-            Shift sealed — {endShiftFlow.lastZNumber || 'Z-report'} generated. Count the drawer and submit your
-            declaration when ready.
-          </p>
-          <button
-            onClick={endShiftFlow.dismissEndedNotice}
-            className="px-3 py-1.5 border border-amber-300 rounded-md text-sm font-medium text-amber-800 hover:bg-amber-100 shrink-0"
-          >
-            Submit later / dismiss
-          </button>
-        </div>
-      )}
-
-      {canRecordMovements && (
-        <section className="space-y-4">
-          {!currentShift ? (
-            <div className="bg-white rounded-lg shadow p-8 text-center">
-              {canOperate ? (
-                <>
-                  <p className="text-gray-600 mb-4">
-                    You don&apos;t have an open shift. Open the till to start recording sales
-                    against a cash drawer.
-                  </p>
-                  <button
-                    onClick={() => setShowOpenModal(true)}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-                  >
-                    Open Shift
-                  </button>
-                </>
-              ) : (
-                <p className="text-gray-600">
-                  No till is open for this branch yet. Ask a supervisor or manager to open one
-                  before you can record cash movements.
-                </p>
-              )}
-            </div>
-          ) : (
-            <>
-              <div className="bg-white rounded-lg shadow p-4 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <span className="px-2 py-0.5 rounded text-xs bg-green-100 text-green-700 mr-2">
-                    OPEN
-                  </span>
-                  {canAccess.viewExpectedCash ? (
-                    <span className="text-sm text-gray-600">
-                      Expected in drawer:{' '}
-                      <span className="font-semibold text-gray-900">
-                        {money(currentReport?.cash?.expectedCash)}
-                      </span>
-                    </span>
-                  ) : (
-                    <span className="text-sm text-gray-500">
-                      {canOperate ? 'Till in use' : `Till in use${currentShift.user?.name ? ` — opened by ${currentShift.user.name}` : ''}`}
-                    </span>
-                  )}
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={() => setMovementType('CASH_IN')}
-                    className="px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
-                  >
-                    Cash In
-                  </button>
-                  <button
-                    onClick={() => setMovementType('CASH_OUT')}
-                    className="px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
-                  >
-                    Cash Out
-                  </button>
-                  <button
-                    onClick={() => setMovementType('PAID_OUT')}
-                    className="px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
-                  >
-                    Paid Out
-                  </button>
-                  <button
-                    onClick={() => setMovementType('SAFE_DROP')}
-                    className="px-3 py-2 border border-indigo-300 rounded-md text-sm font-medium text-indigo-700 hover:bg-indigo-50"
-                  >
-                    Safe Drop
-                  </button>
-                  {/* Ending a shift is PIN-gated, not permission-gated — any
-                      shifts:operate holder can request it, a Supervisor+
-                      (never the same person) authorizes it. */}
-                  {canOperate && (
-                    <button
-                      onClick={endShiftFlow.requestEndShift}
-                      disabled={endShiftFlow.ending}
-                      className="px-3 py-2 bg-amber-600 text-white rounded-md text-sm font-medium hover:bg-amber-700 disabled:opacity-50"
-                    >
-                      {endShiftFlow.ending ? 'Ending…' : 'End Shift'}
-                    </button>
-                  )}
-                </div>
-              </div>
-              {endShiftFlow.error && (
-                <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-3 text-sm">
-                  {endShiftFlow.error}
-                </div>
-              )}
-
-              <ShiftReportPanel report={currentReport} onViewTransactions={(s) => setJournalShiftId(s.id)} />
-            </>
-          )}
-        </section>
-      )}
-
       {canViewAll && (
         <section className="space-y-3">
           <h2 className="text-lg font-semibold text-gray-900">Active Tills</h2>
@@ -346,19 +188,42 @@ const CashRegisterPage = () => {
             </div>
           ) : (
             <div className="bg-white rounded-lg shadow divide-y divide-gray-100">
-              {activeTills.map((s) => (
-                <div key={s.id} className="p-4 flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-medium text-gray-900">
-                      {s.shiftNumber} · {s.user?.name || 'Unknown cashier'}
+              {activeTills.map((s) => {
+                const isInitializing = s.status === 'INITIALIZING';
+                return (
+                  <div key={s.id} className="p-4 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-medium text-gray-900">
+                        {s.shiftNumber} · {s.user?.name || 'Unknown cashier'}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {s.branchName || s.branchId} ·{' '}
+                        {isInitializing
+                          ? 'Awaiting opening-cash confirmation'
+                          : `Opened ${s.openedAt ? new Date(s.openedAt).toLocaleString() : '—'}`}
+                      </div>
                     </div>
-                    <div className="text-xs text-gray-500">
-                      {s.branchName || s.branchId} · Opened {s.openedAt ? new Date(s.openedAt).toLocaleString() : '—'}
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`px-2 py-0.5 rounded text-xs ${
+                          isInitializing ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'
+                        }`}
+                      >
+                        {isInitializing ? 'INITIALIZING' : 'OPEN'}
+                      </span>
+                      {isInitializing && canReopen && (
+                        <button
+                          onClick={() => handleCancelInitialization(s)}
+                          disabled={saving}
+                          className="px-2 py-1 border border-red-300 rounded text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                      )}
                     </div>
                   </div>
-                  <span className="px-2 py-0.5 rounded text-xs bg-green-100 text-green-700">OPEN</span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </section>
@@ -434,43 +299,11 @@ const CashRegisterPage = () => {
         </section>
       )}
 
-      {!canRecordMovements && !canReconcile && !canViewAll && (
+      {!canReconcile && !canViewAll && (
         <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
           You don&apos;t have permission to use the cash register.
         </div>
       )}
-
-      <OpenShiftModal
-        show={showOpenModal}
-        onClose={() => setShowOpenModal(false)}
-        loading={saving}
-        onSubmit={handleOpenShift}
-      />
-
-      <CashMovementModal
-        show={!!movementType}
-        type={movementType}
-        onClose={() => setMovementType(null)}
-        loading={saving}
-        onSubmit={handleCashMovement}
-      />
-
-      <SupervisorApprovalModal
-        open={endShiftFlow.modalOpen}
-        onClose={endShiftFlow.closeModal}
-        actionType="SHIFT_END"
-        target={currentShift ? { shiftId: currentShift.id } : undefined}
-        itemLabel={currentShift ? `Shift ${currentShift.shiftNumber || currentShift.id}` : undefined}
-        onApproved={endShiftFlow.handleApproved}
-      />
-
-      <SubmitDeclarationModal
-        show={!!endShiftFlow.lastEndedShiftId}
-        shiftLabel={endShiftFlow.lastZNumber}
-        onClose={endShiftFlow.dismissEndedNotice}
-        loading={saving}
-        onSubmit={handleSubmitDeclaration}
-      />
 
       <ReconcileModal
         show={!!reconcileTarget}

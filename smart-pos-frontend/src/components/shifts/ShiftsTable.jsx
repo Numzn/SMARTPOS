@@ -9,7 +9,9 @@ const formatDateTime = (value) => {
 };
 
 const statusColors = {
+  INITIALIZING: 'bg-amber-100 text-amber-700',
   OPEN: 'bg-green-100 text-green-700',
+  PENDING_RECONCILIATION: 'bg-blue-100 text-blue-700',
   CLOSED: 'bg-gray-100 text-gray-700',
 };
 
