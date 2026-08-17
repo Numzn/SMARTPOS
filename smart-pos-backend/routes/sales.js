@@ -12,10 +12,15 @@ const { debitNoteSale, debitNoteInclude } = require('../lib/saleDebitNote');
 const { authenticateToken, requirePermission } = require('../middleware/auth');
 const auditService = require('../services/auditService');
 
-// Get all sales (requires sales:read permission)
+// Get sales (requires sales:read permission). A Cashier only ever sees their
+// own sales here — sales:read is also what lets them view their own till
+// receipts, so without this a Cashier's "Sales" tab shows the whole store's
+// transactions. Supervisor+ (who already have reconciliation oversight) see
+// everything.
 router.get('/', authenticateToken, requirePermission('sales:read'), async (req, res) => {
   try {
     const sales = await prisma.sale.findMany({
+      where: req.user.role === 'CASHIER' ? { userId: req.user.userId } : undefined,
       include: saleInclude,
       orderBy: { createdAt: 'desc' },
     });

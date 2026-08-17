@@ -38,9 +38,9 @@ function visibleItems(role, permissions) {
 }
 
 describe('MainLayout NAV_ITEMS — sidebar matches the business role model', () => {
-  it('CASHIER: exactly Cashier, Sales, Cash Register, Customers — no Dashboard', () => {
-    const names = visibleItems('CASHIER', ['sales:read', 'sales:write', 'receipts:read', 'customers:read', 'customers:write', 'shifts:recordMovement', 'zra:status']);
-    expect(names).toEqual(['Cashier', 'Sales', 'Cash Register', 'Customers']);
+  it('CASHIER: exactly Cashier, Sales, Customers — no Dashboard, no Cash Register (back-office-only page)', () => {
+    const names = visibleItems('CASHIER', ['sales:read', 'sales:write', 'receipts:read', 'customers:read', 'customers:write', 'shifts:operate', 'zra:status']);
+    expect(names).toEqual(['Cashier', 'Sales', 'Customers']);
   });
 
   it('SUPERVISOR: same four items plus Dashboard — reconciliation lives inside Cash Register, not a new nav item', () => {
