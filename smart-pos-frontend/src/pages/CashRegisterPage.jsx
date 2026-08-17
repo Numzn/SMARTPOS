@@ -25,9 +25,9 @@ const CashRegisterPage = () => {
   const canReopen = canAccess.reopenShift;
   const canAdjust = canAccess.adjustShift;
 
-  // The single shared End Shift workflow — same hook SidebarShiftControl and
-  // CashierDashboard use, so there is exactly one implementation of "how a
-  // shift gets ended," not a third copy on this page.
+  // The single shared End Shift workflow — same hook CashierDashboard's
+  // Shift & Cash tools section uses, so there is exactly one implementation
+  // of "how a shift gets ended," not a second copy on this page.
   const endShiftFlow = useEndShiftFlow({ enabled: canOperate });
 
   const [loading, setLoading] = useState(true);

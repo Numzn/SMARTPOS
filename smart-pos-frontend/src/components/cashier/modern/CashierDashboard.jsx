@@ -6,8 +6,10 @@ import CartSection from './CartSection';
 import StatusBar from './StatusBar';
 import CheckoutModal from '../../CheckoutModal';
 import SupervisorApprovalModal from './SupervisorApprovalModal';
+import CashMovementModal from '../../shifts/CashMovementModal';
 import { useEndShiftFlow } from '../../../hooks/useEndShiftFlow';
 import { usePermissions } from '../../../hooks/usePermissions';
+import { shiftApi } from '../../../services/shiftService';
 import {
   fetchProducts,
   fetchCategories,
@@ -27,6 +29,12 @@ import { calculateCartTotals } from '../../../utils/cartTotals';
 const CashierDashboard = () => {
   const { canAccess } = usePermissions();
   const endShiftFlow = useEndShiftFlow({ enabled: canAccess.operateShift });
+  // Shift & Cash tools — Cash In/Out, Paid Out, Safe Drop on the currently
+  // open shift. Separate from endShiftFlow's own saving state since these
+  // are independent actions with their own modal.
+  const [movementType, setMovementType] = useState(null);
+  const [movementSaving, setMovementSaving] = useState(false);
+  const [movementError, setMovementError] = useState('');
   const [activeTab, setActiveTab] = useState('quickshop');
   const [currentTime, setCurrentTime] = useState(new Date());
   const [showCheckout, setShowCheckout] = useState(false);
@@ -352,6 +360,27 @@ const CashierDashboard = () => {
     }
   };
 
+  // Shift & Cash tools tab — Cash In/Out, Paid Out, Safe Drop against the
+  // currently open shift. Safe Drop is its own movement type (SAFE_DROP),
+  // not a relabeled Cash Out, so it routes through recordSafeDrop.
+  const handleCashMovement = async ({ amount, reason }) => {
+    if (!endShiftFlow.shift) return;
+    setMovementSaving(true);
+    setMovementError('');
+    try {
+      if (movementType === 'SAFE_DROP') {
+        await shiftApi.recordSafeDrop(endShiftFlow.shift.id, { amount, reason });
+      } else {
+        await shiftApi.recordCashMovement(endShiftFlow.shift.id, movementType, { amount, reason });
+      }
+      setMovementType(null);
+    } catch (err) {
+      setMovementError(err?.data?.error || err.message || 'Failed to record cash movement');
+    } finally {
+      setMovementSaving(false);
+    }
+  };
+
   const clearCart = () => {
     if (tillSessionId) {
       abandonTillSession(tillSessionId).catch(() => {}); // best-effort; local state clears regardless
@@ -444,10 +473,72 @@ const CashierDashboard = () => {
       case 'tools':
         return (
           <div className="bg-white rounded-xl border shadow-sm p-6">
-            <div className="text-center py-12">
-              <h3 className="text-lg font-medium text-gray-900 mb-2">Tools & Utilities</h3>
-              <p className="text-gray-500">Additional tools and settings coming soon...</p>
-            </div>
+            <h3 className="text-lg font-medium text-gray-900 mb-1">Shift & Cash</h3>
+            <p className="text-sm text-gray-500 mb-5">
+              Cash movements and ending your shift — this is the canonical place for these actions.
+            </p>
+
+            {!canAccess.operateShift ? (
+              <div className="text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-lg p-4">
+                You don&apos;t have permission to operate a shift.
+              </div>
+            ) : endShiftFlow.loading ? (
+              <div className="text-sm text-gray-500">Loading shift…</div>
+            ) : !endShiftFlow.shift ? (
+              <div className="text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-lg p-4">
+                You don&apos;t have an open shift. Open one from Cash Register to record cash movements or end it.
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center gap-2 mb-4">
+                  <span className="px-2 py-0.5 rounded text-xs bg-green-100 text-green-700">OPEN</span>
+                  <span className="text-sm text-gray-600">
+                    {endShiftFlow.shift.shiftNumber || endShiftFlow.shift.id}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => setMovementType('CASH_IN')}
+                    className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  >
+                    Cash In
+                  </button>
+                  <button
+                    onClick={() => setMovementType('CASH_OUT')}
+                    className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  >
+                    Cash Out
+                  </button>
+                  <button
+                    onClick={() => setMovementType('PAID_OUT')}
+                    className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  >
+                    Paid Out
+                  </button>
+                  <button
+                    onClick={() => setMovementType('SAFE_DROP')}
+                    className="px-4 py-2 border border-indigo-300 rounded-md text-sm font-medium text-indigo-700 hover:bg-indigo-50"
+                  >
+                    Safe Drop
+                  </button>
+                  {/* Ending a shift is PIN-gated (useEndShiftFlow ->
+                      SupervisorApprovalModal), not permission-gated — this
+                      is the canonical, only place to initiate it. */}
+                  <button
+                    onClick={endShiftFlow.requestEndShift}
+                    disabled={endShiftFlow.ending}
+                    className="px-4 py-2 bg-amber-600 text-white rounded-md text-sm font-medium hover:bg-amber-700 disabled:opacity-50"
+                  >
+                    {endShiftFlow.ending ? 'Ending…' : 'End Shift'}
+                  </button>
+                </div>
+                {(movementError || endShiftFlow.error) && (
+                  <div className="mt-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded p-3">
+                    {movementError || endShiftFlow.error}
+                  </div>
+                )}
+              </>
+            )}
           </div>
         );
 
@@ -458,14 +549,7 @@ const CashierDashboard = () => {
 
   return (
     <div className="h-full flex flex-col bg-surface">
-      <CashierHeader
-        currentTime={currentTime}
-        shift={endShiftFlow.shift}
-        shiftLoading={endShiftFlow.loading}
-        ending={endShiftFlow.ending}
-        shiftError={endShiftFlow.error}
-        onEndShift={endShiftFlow.requestEndShift}
-      />
+      <CashierHeader currentTime={currentTime} />
 
       <CashierTabs activeTab={activeTab} onTabChange={setActiveTab} />
 
@@ -522,6 +606,14 @@ const CashierDashboard = () => {
         target={endShiftFlow.shift ? { shiftId: endShiftFlow.shift.id } : undefined}
         itemLabel={endShiftFlow.shift ? `Shift ${endShiftFlow.shift.shiftNumber || endShiftFlow.shift.id}` : undefined}
         onApproved={endShiftFlow.handleApproved}
+      />
+
+      <CashMovementModal
+        show={!!movementType}
+        type={movementType}
+        onClose={() => setMovementType(null)}
+        loading={movementSaving}
+        onSubmit={handleCashMovement}
       />
     </div>
   );

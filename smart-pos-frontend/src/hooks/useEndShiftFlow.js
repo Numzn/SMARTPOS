@@ -2,14 +2,13 @@ import { useCallback, useEffect, useState } from 'react';
 import { shiftApi } from '../services/shiftService';
 
 /**
- * The single implementation of "how a shift gets ended" — used by both
- * SidebarShiftControl (always-reachable, any screen) and CashierDashboard's
- * header (the cashier's actual POS screen). Each caller gets its own
- * independent fetch of the current shift (they live in separate parts of
- * the component tree, not a shared ancestor), but the workflow itself —
+ * The single implementation of "how a shift gets ended" — used by
+ * CashierDashboard's Shift & Cash tools section (the canonical place to end
+ * a shift) and CashRegisterPage's own End Shift action. Each caller gets its
+ * own independent fetch of the current shift, but the workflow itself —
  * opening the approval modal, calling endShift with the resulting
  * approvalId, surfacing errors — exists exactly once here, not copied
- * between the two UI locations.
+ * between UI locations.
  *
  * Deliberately exposes only a Z-number confirmation on success, never
  * financial figures — the cashier who just ended their shift never sees
