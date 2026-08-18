@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useOutletContext } from 'react-router-dom';
-import CashierHeader from './CashierHeader';
-import CashierTabs from './CashierTabs';
+import CashierTopBar from './CashierTopBar';
 import ProductGrid from './ProductGrid';
 import CartSection from './CartSection';
 import StatusBar from './StatusBar';
@@ -28,6 +27,7 @@ import {
 import { fetchPrinterStatus } from '../../../api/printersApi';
 import { mapPrinterStatusLabel } from '../../../lib/printReceipt';
 import { calculateCartTotals } from '../../../utils/cartTotals';
+import { useOnlineStatus } from '../../../hooks/useOnlineStatus';
 
 const CashierDashboard = () => {
   const { canAccess } = usePermissions();
@@ -54,7 +54,6 @@ const CashierDashboard = () => {
   const [declarationSaving, setDeclarationSaving] = useState(false);
   const [declarationError, setDeclarationError] = useState('');
   const [activeTab, setActiveTab] = useState('quickshop');
-  const [currentTime, setCurrentTime] = useState(new Date());
   const [showCheckout, setShowCheckout] = useState(false);
   const [usingMockData, setUsingMockData] = useState(false);
 
@@ -77,8 +76,10 @@ const CashierDashboard = () => {
   // SupervisorApprovalModal; { productId, toQuantity, name }.
   const [pendingReversal, setPendingReversal] = useState(null);
 
-  const [printerStatus, setPrinterStatus] = useState('unknown');
-  const [networkStatus] = useState('connected');
+  // { state, name } — name is the configured printer's own label (real data
+  // from PrinterProfile), shown in the top bar's status tooltip when known.
+  const [printerStatus, setPrinterStatus] = useState({ state: 'unknown', name: null });
+  const online = useOnlineStatus();
   const [stockNotice, setStockNotice] = useState('');
 
   // Dedupes concurrent ensureTillSession() calls — two rapid add-to-cart
@@ -97,11 +98,6 @@ const CashierDashboard = () => {
     () => calculateCartTotals(cart, { discountType, discountValue }),
     [cart, discountType, discountValue]
   );
-
-  useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
 
   useEffect(() => {
     fetchInitialData();
@@ -128,10 +124,10 @@ const CashierDashboard = () => {
       try {
         const status = await fetchPrinterStatus();
         if (!cancelled) {
-          setPrinterStatus(mapPrinterStatusLabel(status));
+          setPrinterStatus({ state: mapPrinterStatusLabel(status), name: status?.printer?.name || null });
         }
       } catch {
-        if (!cancelled) setPrinterStatus('unknown');
+        if (!cancelled) setPrinterStatus({ state: 'unknown', name: null });
       }
     };
 
@@ -567,7 +563,14 @@ const CashierDashboard = () => {
 
   return (
     <div className="h-full flex flex-col bg-surface">
-      <CashierHeader currentTime={currentTime} />
+      <CashierTopBar
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        showTabs={!isInitializing}
+        printerStatus={printerStatus}
+        zraStatus={zraStatus}
+        online={online}
+      />
 
       {isInitializing ? (
         <OpeningCashPrompt
@@ -578,8 +581,6 @@ const CashierDashboard = () => {
         />
       ) : (
         <>
-          <CashierTabs activeTab={activeTab} onTabChange={setActiveTab} />
-
           {stockNotice && (
             <div className="mx-4 mt-3 px-3 py-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded">
               {stockNotice}
@@ -593,9 +594,6 @@ const CashierDashboard = () => {
           </main>
 
           <StatusBar
-            zraStatus={zraStatus}
-            printerStatus={printerStatus}
-            networkStatus={networkStatus}
             cartSummary={{ itemCount: cartTotals.itemCount, total: cartTotals.total }}
             onCheckout={handleCheckout}
           />
