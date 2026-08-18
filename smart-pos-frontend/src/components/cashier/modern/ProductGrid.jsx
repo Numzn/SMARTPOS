@@ -44,7 +44,7 @@ const ProductGrid = ({
 
   if (isLoading) {
     return (
-      <div className="bg-white rounded-xl border shadow-sm p-6">
+      <div>
         <div className="flex items-center justify-between mb-6">
           <div className="h-6 bg-gray-200 rounded w-32 animate-pulse"></div>
           <div className="h-6 bg-gray-200 rounded w-24 animate-pulse"></div>
@@ -62,9 +62,13 @@ const ProductGrid = ({
     );
   }
 
+  // No card chrome (border/shadow/header bar) — this fills the pane between
+  // the tabs and the status bar as one continuous surface, the same way a
+  // kiosk product browser does, rather than sitting inside a boxed panel
+  // nested one layer deeper than it needs to be.
   return (
-    <div className="panel">
-      <div className="panel-header flex items-center justify-between">
+    <div>
+      <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <Package className="w-4 h-4 text-gray-500" />
           <h3 className="text-sm font-semibold text-gray-900">
@@ -78,7 +82,6 @@ const ProductGrid = ({
           </span>
         )}
       </div>
-      <div className="panel-body">
 
       {/* Search and Filters */}
       <div className="flex flex-col sm:flex-row gap-4 mb-6">
@@ -212,7 +215,6 @@ const ProductGrid = ({
           </p>
         </div>
       )}
-      </div>
     </div>
   );
 };
