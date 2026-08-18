@@ -435,8 +435,8 @@ const CashierDashboard = () => {
         // time — a cashier shouldn't have to scroll away from their cart
         // just to browse more products.
         return (
-          <div className="flex flex-col gap-6 lg:flex-row lg:h-full lg:min-h-0">
-            <div className="lg:flex-1 lg:min-h-0 lg:overflow-y-auto scroll-thin">
+          <div className="flex flex-col gap-6 lg:flex-row lg:gap-3 lg:h-full lg:min-h-0">
+            <div className="lg:flex-1 lg:min-h-0 lg:overflow-y-auto scroll-thin lg:px-3 lg:py-2">
               <ProductGrid
                 products={products}
                 categories={categories}
@@ -445,7 +445,7 @@ const CashierDashboard = () => {
                 usingMockData={usingMockData}
               />
             </div>
-            <div className="lg:w-[380px] lg:shrink-0 lg:h-full lg:min-h-0">
+            <div className="lg:w-[380px] lg:shrink-0 lg:h-full lg:min-h-0 lg:py-2 lg:pr-3">
               <CartSection
                 cart={cart}
                 onUpdateQuantity={updateCartQuantity}
@@ -587,7 +587,7 @@ const CashierDashboard = () => {
           )}
 
           <main
-            className={`flex-1 p-4 overflow-auto ${activeTab === 'quickshop' ? 'lg:overflow-hidden' : ''}`}
+            className={`flex-1 p-4 overflow-auto ${activeTab === 'quickshop' ? 'lg:overflow-hidden lg:p-0' : ''}`}
           >
             {renderTabContent()}
           </main>
