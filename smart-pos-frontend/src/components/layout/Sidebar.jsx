@@ -101,7 +101,7 @@ const Sidebar = ({ dashboardItem, sections, activePath, onNavigate, onClose, zra
         </button>
       </div>
 
-      <nav className="flex-1 p-2 space-y-3 overflow-y-auto">
+      <nav className="flex-1 p-2 space-y-3 overflow-y-auto sidebar-scroll">
         {dashboardItem && (
           <SidebarNavItem
             icon={dashboardItem.icon}

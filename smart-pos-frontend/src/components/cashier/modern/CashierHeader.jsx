@@ -1,13 +1,14 @@
-import React, { useState } from 'react';
-import { Clock, Menu, LogOut, ChevronDown } from 'lucide-react';
-import { useNavigate, useOutletContext } from 'react-router-dom';
-import { useAuth } from '../../../contexts/AuthContext';
+import React from 'react';
+import { Clock, Menu } from 'lucide-react';
+import { useOutletContext } from 'react-router-dom';
 
+// Profile/sign-out lives in the sidebar footer's SidebarUserMenu now (see
+// Sidebar.jsx) — it renders on /cashier too, so this header doesn't need
+// its own copy. It used to carry a duplicate name/role/logout dropdown,
+// styled for the (removed) light-themed header rather than the sidebar's
+// dark footer.
 const CashierHeader = ({ currentTime }) => {
-  const { user, logout } = useAuth();
-  const navigate = useNavigate();
   const { openSidebar } = useOutletContext() || {};
-  const [profileOpen, setProfileOpen] = useState(false);
 
   const formatTime = (date) =>
     date.toLocaleTimeString('en-GB', {
@@ -24,11 +25,6 @@ const CashierHeader = ({ currentTime }) => {
       month: 'short',
       day: 'numeric',
     });
-
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
-  };
 
   return (
     <header className="h-12 flex-shrink-0 bg-surface-raised border-b border-surface-border px-4 flex items-center justify-between gap-4">
@@ -51,45 +47,6 @@ const CashierHeader = ({ currentTime }) => {
         <span>{formatTime(currentTime)}</span>
         <span className="text-gray-400 hidden md:inline">|</span>
         <span className="text-xs text-gray-500 hidden md:inline">{formatDate(currentTime)}</span>
-      </div>
-
-      <div className="relative shrink-0">
-        <button
-          type="button"
-          onClick={() => setProfileOpen(!profileOpen)}
-          className="flex items-center gap-2 px-2 py-1 border border-surface-border rounded bg-gray-50 hover:bg-gray-100"
-        >
-          <span className="text-xs font-medium text-gray-800 max-w-[120px] truncate hidden sm:inline">
-            {user?.name}
-          </span>
-          <span className="text-[10px] text-gray-500 uppercase">{user?.role}</span>
-          <ChevronDown className="w-3 h-3 text-gray-500" />
-        </button>
-
-        {profileOpen && (
-          <>
-            <button
-              type="button"
-              className="fixed inset-0 z-40"
-              aria-label="Close profile menu"
-              onClick={() => setProfileOpen(false)}
-            />
-            <div className="absolute right-0 mt-1 w-52 panel z-50 py-1">
-              <div className="px-3 py-2 border-b border-surface-border">
-                <p className="text-sm font-medium text-gray-900">{user?.name}</p>
-                <p className="text-xs text-gray-500 truncate">{user?.email}</p>
-              </div>
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                Sign out
-              </button>
-            </div>
-          </>
-        )}
       </div>
     </header>
   );
