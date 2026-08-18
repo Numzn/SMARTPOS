@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useOutletContext } from 'react-router-dom';
 import CashierHeader from './CashierHeader';
 import CashierTabs from './CashierTabs';
 import ProductGrid from './ProductGrid';
@@ -16,7 +17,6 @@ import { shiftApi } from '../../../services/shiftService';
 import {
   fetchProducts,
   fetchCategories,
-  fetchVsdcStatus,
   mockProducts,
   mockCategories,
   openTillSession,
@@ -31,6 +31,10 @@ import { calculateCartTotals } from '../../../utils/cartTotals';
 
 const CashierDashboard = () => {
   const { canAccess } = usePermissions();
+  // MainLayout polls this once for the whole session (see useZraStatus.js)
+  // and hands it down via Outlet context — this used to be a local poller
+  // here, which reset to 'checking' every time /cashier unmounted/remounted.
+  const { zraStatus = 'checking' } = useOutletContext() || {};
   // Auto-creates/resumes the caller's shift on load (INITIALIZING or OPEN) —
   // the canonical implementation of how a shift starts, replacing a manual
   // "Open Shift" button. useEndShiftFlow (unchanged, still the canonical
@@ -73,7 +77,6 @@ const CashierDashboard = () => {
   // SupervisorApprovalModal; { productId, toQuantity, name }.
   const [pendingReversal, setPendingReversal] = useState(null);
 
-  const [zraStatus, setZraStatus] = useState('checking');
   const [printerStatus, setPrinterStatus] = useState('unknown');
   const [networkStatus] = useState('connected');
   const [stockNotice, setStockNotice] = useState('');
@@ -115,33 +118,6 @@ const CashierDashboard = () => {
       });
     return () => {
       cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadVsdc = async () => {
-      try {
-        const status = await fetchVsdcStatus();
-        if (!cancelled) {
-          setZraStatus(status.initialized ? 'connected' : 'not initialized');
-        }
-      } catch (err) {
-        if (cancelled) return;
-        // Distinguish "we aren't allowed to look" from "the fiscal service is
-        // down". Reporting a 401/403 as offline told cashiers ZRA had failed
-        // when it was healthy — the kind of message that stops someone
-        // trading for no reason.
-        setZraStatus(err?.status === 403 || err?.status === 401 ? 'status unavailable' : 'offline');
-      }
-    };
-
-    loadVsdc();
-    const interval = setInterval(loadVsdc, 30000);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
     };
   }, []);
 

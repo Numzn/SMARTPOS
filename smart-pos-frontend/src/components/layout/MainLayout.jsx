@@ -1,55 +1,11 @@
 import React, { Suspense, useEffect, useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Menu, X, Search, Bell, LogOut, ChevronDown } from 'lucide-react';
+import { Menu, Search, Bell } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePermissions } from '../../hooks/usePermissions';
-import { NAV_ITEMS } from './navItems';
-
-// A stable top-level component, not one defined inside MainLayout's render
-// body — a component declared per-render gets a new identity every time, so
-// React would unmount and remount the entire sidebar DOM subtree on every
-// MainLayout re-render (every route change, every header-search keystroke)
-// instead of diffing it like a normal element.
-const Sidebar = ({ navigation, activePath, onNavigate, onClose }) => (
-  <div className="flex flex-col h-full bg-surface-sidebar text-gray-300">
-    <div className="h-12 flex items-center justify-between px-4 border-b border-white/10">
-      <div>
-        <div className="text-sm font-semibold text-white tracking-tight">Smart POS</div>
-        <div className="text-[10px] text-gray-500 uppercase tracking-widest">Terminal</div>
-      </div>
-      <button
-        type="button"
-        onClick={onClose}
-        className="lg:hidden p-1 text-gray-400 hover:text-white"
-        aria-label="Close menu"
-      >
-        <X className="w-4 h-4" />
-      </button>
-    </div>
-
-    <nav className="flex-1 p-2 space-y-0.5 overflow-y-auto">
-      {navigation.map((item) => {
-        const Icon = item.icon;
-        const isActive = activePath === item.href;
-        return (
-          <button
-            key={item.name}
-            type="button"
-            onClick={() => onNavigate(item.href)}
-            className={isActive ? 'nav-item-active' : 'nav-item'}
-          >
-            <Icon className="w-4 h-4 shrink-0 opacity-80" strokeWidth={1.75} />
-            <span>{item.name}</span>
-          </button>
-        );
-      })}
-    </nav>
-
-    <div className="p-3 border-t border-white/10 text-[11px] text-gray-500">
-      ZRA VSDC · v2.0
-    </div>
-  </div>
-);
+import { useZraStatus } from '../../hooks/useZraStatus';
+import { DASHBOARD_ITEM, NAV_SECTIONS } from './navItems';
+import Sidebar from './Sidebar';
 
 // Scoped to just the routed page content — the previous boundary wrapped the
 // whole MainLayout at the router level, so a lazy chunk that hadn't loaded
@@ -67,10 +23,18 @@ const MainLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false);
   const [headerSearch, setHeaderSearch] = useState('');
+  // Polled once here (not per-route) so the sidebar footer has live status
+  // everywhere, not just on /cashier — see useZraStatus.js.
+  const zraStatus = useZraStatus({ enabled: permissions.canAccess.viewZRAStatus });
 
-  const navigation = NAV_ITEMS.filter((item) => item.show(permissions.canAccess, user));
+  const dashboardVisible = DASHBOARD_ITEM.show(permissions.canAccess, user);
+  const visibleSections = NAV_SECTIONS
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => item.show(permissions.canAccess, user)),
+    }))
+    .filter((section) => section.items.length > 0);
   const isCashierRoute = location.pathname === '/cashier';
 
   useEffect(() => {
@@ -99,15 +63,19 @@ const MainLayout = () => {
   return (
     <div className="h-screen flex overflow-hidden bg-surface">
       <aside
-        className={`fixed inset-y-0 left-0 z-50 w-56 transform transition-transform lg:translate-x-0 lg:static lg:inset-auto ${
+        className={`fixed inset-y-0 left-0 z-50 transform transition-transform lg:translate-x-0 lg:static lg:inset-auto ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
         <Sidebar
-          navigation={navigation}
+          dashboardItem={dashboardVisible ? DASHBOARD_ITEM : null}
+          sections={visibleSections}
           activePath={location.pathname}
           onNavigate={handleSidebarNavigate}
           onClose={() => setSidebarOpen(false)}
+          zraStatus={zraStatus}
+          user={user}
+          onLogout={handleLogout}
         />
       </aside>
 
@@ -140,37 +108,6 @@ const MainLayout = () => {
             <button type="button" className="btn-ghost p-1.5 relative" aria-label="Notifications">
               <Bell className="w-4 h-4" />
             </button>
-
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setProfileOpen(!profileOpen)}
-                className="flex items-center gap-2 px-2 py-1 border border-surface-border rounded bg-gray-50 hover:bg-gray-100"
-              >
-                <span className="text-xs font-medium text-gray-800 max-w-[120px] truncate">
-                  {user?.name}
-                </span>
-                <span className="text-[10px] text-gray-500 uppercase">{user?.role}</span>
-                <ChevronDown className="w-3 h-3 text-gray-500" />
-              </button>
-
-              {profileOpen && (
-                <div className="absolute right-0 mt-1 w-52 panel z-50 py-1">
-                  <div className="px-3 py-2 border-b border-surface-border">
-                    <p className="text-sm font-medium text-gray-900">{user?.name}</p>
-                    <p className="text-xs text-gray-500 truncate">{user?.email}</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleLogout}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                  >
-                    <LogOut className="w-3.5 h-3.5" />
-                    Sign out
-                  </button>
-                </div>
-              )}
-            </div>
           </div>
         </header>
         )}
@@ -186,6 +123,7 @@ const MainLayout = () => {
                 openSidebar: () => setSidebarOpen(true),
                 headerSearch,
                 setHeaderSearch,
+                zraStatus,
               }}
             />
           </Suspense>

@@ -49,11 +49,15 @@
   }
 
   .nav-item {
-    @apply w-full flex items-center gap-3 px-3 py-2 text-sm rounded text-gray-300 hover:bg-surface-sidebar-hover hover:text-white transition-colors;
+    @apply w-full flex items-center gap-3 px-3 py-2 text-sm rounded text-sidebar-text-muted hover:bg-sidebar-hover hover:text-sidebar-text transition-colors;
   }
 
   .nav-item-active {
-    @apply nav-item bg-surface-sidebar-hover text-white border-l-2 border-surface-accent pl-[10px];
+    @apply nav-item bg-sidebar-active text-sidebar-text border-l-2 border-surface-accent pl-[10px];
+  }
+
+  .nav-section-label {
+    @apply text-[10px] font-semibold uppercase tracking-widest text-sidebar-text-section;
   }
 
   .stat-value {
