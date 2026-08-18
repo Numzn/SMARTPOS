@@ -7,6 +7,7 @@ const CartSection = ({
   onUpdateQuantity,
   onRemoveItem,
   onClearCart,
+  onCheckout,
   discountType = 'percentage',
   discountValue = '',
   onDiscountTypeChange,
@@ -41,12 +42,23 @@ const CartSection = ({
             Cart · {totals.itemCount}
           </h3>
         </div>
-        {usingMockData && (
-          <span className="status-pill border-amber-200 bg-amber-50 text-amber-800">
-            <AlertCircle className="w-3 h-3" />
-            Demo data
-          </span>
-        )}
+        <div className="flex items-center gap-3">
+          {usingMockData && (
+            <span className="status-pill border-amber-200 bg-amber-50 text-amber-800">
+              <AlertCircle className="w-3 h-3" />
+              Demo data
+            </span>
+          )}
+          {cart.length > 0 && (
+            <button
+              type="button"
+              onClick={onClearCart}
+              className="text-xs text-gray-500 hover:text-red-600 transition-colors"
+            >
+              Clear
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Only this region scrolls — header above and totals/checkout below
@@ -174,8 +186,13 @@ const CartSection = ({
           </div>
 
           <div className="p-4 pt-3">
-            <button type="button" onClick={onClearCart} className="btn-secondary w-full py-2.5">
-              Clear Cart
+            <button
+              type="button"
+              onClick={onCheckout}
+              className="btn-primary w-full py-3 flex items-center justify-center gap-2 text-sm"
+            >
+              <ShoppingCart className="w-4 h-4" />
+              Checkout · {formatZmw(totals.total)}
             </button>
           </div>
         </div>

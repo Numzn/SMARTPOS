@@ -6,10 +6,10 @@ const STATUS_STYLES = {
   checking: { dot: 'bg-sidebar-text-section animate-pulse', label: 'Checking…' },
 };
 
-// Reuses the app's existing .status-dot/.status-pill primitives (see
-// StatusBar.jsx on the Cashier screen) but supplies dark-appropriate colors
-// at the call site — StatusBar's light-mode combo would be near-invisible
-// on the sidebar's graphite background.
+// Reuses the app's existing .status-dot/.status-pill primitives (also used
+// on the Cashier screen's top bar) but supplies dark-appropriate colors at
+// the call site — a light-mode combo would be near-invisible on the
+// sidebar's graphite background.
 const SidebarStatus = ({ status, collapsed }) => {
   const style = STATUS_STYLES[status] || STATUS_STYLES.checking;
 

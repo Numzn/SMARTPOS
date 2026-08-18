@@ -3,7 +3,6 @@ import { useOutletContext } from 'react-router-dom';
 import CashierTopBar from './CashierTopBar';
 import ProductGrid from './ProductGrid';
 import CartSection from './CartSection';
-import StatusBar from './StatusBar';
 import CheckoutModal from '../../CheckoutModal';
 import SupervisorApprovalModal from './SupervisorApprovalModal';
 import CashMovementModal from '../../shifts/CashMovementModal';
@@ -447,6 +446,7 @@ const CashierDashboard = () => {
                 onUpdateQuantity={updateCartQuantity}
                 onRemoveItem={removeFromCart}
                 onClearCart={clearCart}
+                onCheckout={handleCheckout}
                 discountType={discountType}
                 discountValue={discountValue}
                 onDiscountTypeChange={setDiscountType}
@@ -592,11 +592,6 @@ const CashierDashboard = () => {
           >
             {renderTabContent()}
           </main>
-
-          <StatusBar
-            cartSummary={{ itemCount: cartTotals.itemCount, total: cartTotals.total }}
-            onCheckout={handleCheckout}
-          />
         </>
       )}
 

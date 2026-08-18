@@ -1,17 +1,31 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Search, Package, AlertCircle } from 'lucide-react';
 import { getCashierStockStatus, isProductLowStock, isProductRegisteredForSale } from '../../../utils/productUtils';
 
-const ProductGrid = ({ 
-  products = [], 
-  categories = [], 
-  onAddToCart, 
+const ProductGrid = ({
+  products = [],
+  categories = [],
+  onAddToCart,
   isLoading = false,
-  usingMockData = false 
+  usingMockData = false
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [sortBy, setSortBy] = useState('name');
+  // Toggles a border/shadow on the sticky search bar once the grid has
+  // actually scrolled underneath it — a flat sentinel just above the bar
+  // (observed via IntersectionObserver) leaves view exactly when the bar
+  // "sticks", so this needs no scroll-position math of its own.
+  const [stuck, setStuck] = useState(false);
+  const sentinelRef = useRef(null);
+
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return undefined;
+    const observer = new IntersectionObserver(([entry]) => setStuck(!entry.isIntersecting), { threshold: 0 });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const filteredProducts = products.filter(product => {
     const matchesSearch = product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -63,30 +77,28 @@ const ProductGrid = ({
   }
 
   // No card chrome (border/shadow/header bar) — this fills the pane between
-  // the tabs and the status bar as one continuous surface, the same way a
-  // kiosk product browser does, rather than sitting inside a boxed panel
-  // nested one layer deeper than it needs to be.
+  // the top bar and the cart as one continuous surface, the same way a
+  // kiosk product browser does. The search/filter row is the one thing that
+  // stays pinned (position: sticky) while the grid below it scrolls.
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <Package className="w-4 h-4 text-gray-500" />
-          <h3 className="text-sm font-semibold text-gray-900">
-            Products · {sortedProducts.length}
-          </h3>
-        </div>
+      <div ref={sentinelRef} />
+      <div
+        className={`sticky top-0 z-10 bg-white lg:-mx-3 lg:px-3 py-2 flex flex-wrap items-center gap-2 transition-shadow ${
+          stuck ? 'border-b border-surface-border shadow-sm' : 'border-b border-transparent'
+        }`}
+      >
+        <span className="text-xs text-gray-500 shrink-0">
+          Products · {sortedProducts.length}
+        </span>
         {usingMockData && (
-          <span className="status-pill border-amber-200 bg-amber-50 text-amber-800">
+          <span className="status-pill border-amber-200 bg-amber-50 text-amber-800 shrink-0">
             <AlertCircle className="w-3 h-3" />
             Demo data
           </span>
         )}
-      </div>
 
-      {/* Search and Filters */}
-      <div className="flex flex-col sm:flex-row gap-4 mb-6">
-        {/* Search */}
-        <div className="flex-1 relative">
+        <div className="flex-1 min-w-[160px] relative">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
             type="text"
@@ -97,11 +109,10 @@ const ProductGrid = ({
           />
         </div>
 
-        {/* Category Filter */}
         <select
           value={selectedCategory}
           onChange={(e) => setSelectedCategory(e.target.value)}
-          className="input-sys"
+          className="input-sys w-auto shrink-0"
         >
           <option value="all">All Categories</option>
           {categories.map(category => (
@@ -111,11 +122,10 @@ const ProductGrid = ({
           ))}
         </select>
 
-        {/* Sort */}
         <select
           value={sortBy}
           onChange={(e) => setSortBy(e.target.value)}
-          className="input-sys"
+          className="input-sys w-auto shrink-0"
         >
           <option value="name">Sort by Name</option>
           <option value="price">Sort by Price</option>
@@ -125,12 +135,12 @@ const ProductGrid = ({
 
       {/* Products Grid */}
       {sortedProducts.length > 0 ? (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pt-4">
           {sortedProducts.map((product) => {
             const stockStatus = getCashierStockStatus(product);
             const registered = isProductRegisteredForSale(product);
             const canAdd = product.stock > 0 && registered;
-            
+
             return (
               <div
                 key={product.id}
@@ -164,7 +174,7 @@ const ProductGrid = ({
                   <h4 className="font-medium text-gray-900 text-sm line-clamp-2">
                     {product.name}
                   </h4>
-                  
+
                   <div className="flex items-center justify-between">
                     <span className="text-lg font-semibold text-gray-900">
                       {formatCurrency(product.price)}
@@ -220,4 +230,3 @@ const ProductGrid = ({
 };
 
 export default ProductGrid;
-
