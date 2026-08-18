@@ -29,161 +29,155 @@ const CartSection = ({
   };
 
   return (
-    <div className="bg-white rounded-xl border shadow-sm p-6">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center space-x-2">
-          <div className="p-2 bg-green-50 rounded-lg">
-            <ShoppingCart className="w-5 h-5 text-green-600" />
-          </div>
-          <div>
-            <h3 className="text-lg font-semibold text-gray-900">Shopping Cart</h3>
-            <p className="text-sm text-gray-500">
-              {totals.itemCount} item{totals.itemCount !== 1 ? 's' : ''} in cart
-            </p>
-          </div>
+    // h-full only takes effect once the parent pane actually has a definite
+    // height (the lg:h-full wrapper in CashierDashboard's quickshop layout)
+    // — on mobile, where that wrapper has no set height, this degrades to
+    // auto and the cart just stacks normally below the product grid.
+    <div className="panel h-full flex flex-col">
+      <div className="panel-header flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-2">
+          <ShoppingCart className="w-4 h-4 text-gray-500" />
+          <h3 className="text-sm font-semibold text-gray-900">
+            Cart · {totals.itemCount}
+          </h3>
         </div>
-
         {usingMockData && (
-          <div className="flex items-center space-x-2 px-3 py-1 bg-yellow-50 border border-yellow-200 rounded-full">
-            <AlertCircle className="w-4 h-4 text-yellow-600" />
-            <span className="text-xs font-medium text-yellow-700">Demo</span>
+          <span className="status-pill border-amber-200 bg-amber-50 text-amber-800">
+            <AlertCircle className="w-3 h-3" />
+            Demo data
+          </span>
+        )}
+      </div>
+
+      {/* Only this region scrolls — header above and totals/checkout below
+          stay pinned in view regardless of how many lines are in the cart. */}
+      <div className="panel-body flex-1 min-h-0 overflow-y-auto scroll-thin">
+        {cart.length > 0 ? (
+          <div className="space-y-2">
+            {cart.map((item) => (
+              <div key={item.id} className="border border-surface-border rounded p-3 bg-white">
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <h4 className="font-medium text-gray-900 text-sm truncate min-w-0">{item.name}</h4>
+                  <button
+                    type="button"
+                    onClick={() => onRemoveItem(item.id)}
+                    className="p-1 -m-1 text-gray-400 hover:text-red-500 transition-colors shrink-0"
+                    aria-label={`Remove ${item.name}`}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between text-xs text-gray-500 mb-3">
+                  <span>SKU: {item.sku}</span>
+                  <span>{formatZmw(item.price)} each</span>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleQuantityChange(item.id, item.quantity - 1)}
+                      className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
+                      aria-label={`Decrease ${item.name} quantity`}
+                    >
+                      <Minus className="w-3.5 h-3.5" />
+                    </button>
+
+                    <span className="w-8 text-center text-sm font-medium text-gray-900">
+                      {item.quantity}
+                    </span>
+
+                    <button
+                      type="button"
+                      onClick={() => handleQuantityChange(item.id, item.quantity + 1)}
+                      disabled={getAvailableStock ? item.quantity >= getAvailableStock(item.id) : false}
+                      className="p-1 text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                      aria-label={`Increase ${item.name} quantity`}
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  <div className="font-semibold text-gray-900 text-sm">
+                    {formatZmw(item.price * item.quantity)}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-12">
+            <ShoppingCart className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-gray-900 mb-2">Your cart is empty</h3>
+            <p className="text-gray-500">Add some products to get started</p>
           </div>
         )}
       </div>
 
-      {cart.length > 0 ? (
-        <div className="space-y-4 mb-6">
-          {cart.map((item) => (
-            <div key={item.id} className="flex items-center space-x-4 p-4 bg-gray-50 rounded-lg">
-              <div className="flex-1">
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="font-medium text-gray-900">{item.name}</h4>
-                  <button
-                    type="button"
-                    onClick={() => onRemoveItem(item.id)}
-                    className="p-1 text-gray-400 hover:text-red-500 transition-colors"
-                    aria-label={`Remove ${item.name}`}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-
-                <div className="flex items-center justify-between text-sm text-gray-500">
-                  <span>SKU: {item.sku}</span>
-                  <span>{formatZmw(item.price)} each</span>
-                </div>
-              </div>
-
-              <div className="flex items-center space-x-2">
-                <button
-                  type="button"
-                  onClick={() => handleQuantityChange(item.id, item.quantity - 1)}
-                  className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
-                  aria-label={`Decrease ${item.name} quantity`}
-                >
-                  <Minus className="w-4 h-4" />
-                </button>
-
-                <span className="w-12 text-center font-medium text-gray-900">
-                  {item.quantity}
-                </span>
-
-                <button
-                  type="button"
-                  onClick={() => handleQuantityChange(item.id, item.quantity + 1)}
-                  disabled={getAvailableStock ? item.quantity >= getAvailableStock(item.id) : false}
-                  className="p-1 text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                  aria-label={`Increase ${item.name} quantity`}
-                >
-                  <Plus className="w-4 h-4" />
-                </button>
-              </div>
-
-              <div className="text-right">
-                <div className="font-semibold text-gray-900">
-                  {formatZmw(item.price * item.quantity)}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="text-center py-12">
-          <ShoppingCart className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 mb-2">Your cart is empty</h3>
-          <p className="text-gray-500">Add some products to get started</p>
-        </div>
-      )}
-
-      {cart.length > 0 && discountAllowed && (
-        <div className="border-t border-gray-200 pt-4 mb-6">
-          <div className="flex items-center space-x-2 mb-3">
-            <Percent className="w-4 h-4 text-gray-500" />
-            <span className="text-sm font-medium text-gray-700">Discount</span>
-          </div>
-
-          <div className="flex space-x-2">
-            <select
-              value={discountType}
-              onChange={(e) => onDiscountTypeChange?.(e.target.value)}
-              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              aria-label="Discount type"
-            >
-              <option value="percentage">%</option>
-              <option value="fixed">Fixed Amount</option>
-            </select>
-
-            <input
-              type="number"
-              placeholder={discountType === 'percentage' ? '0' : '0.00'}
-              value={discountValue}
-              onChange={(e) => onDiscountValueChange?.(e.target.value)}
-              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              min="0"
-              step={discountType === 'percentage' ? '1' : '0.01'}
-              aria-label="Discount value"
-            />
-          </div>
-        </div>
-      )}
-
       {cart.length > 0 && (
-        <div className="border-t border-gray-200 pt-4 space-y-3">
-          <div className="flex justify-between text-sm">
-            <span className="text-gray-600">Subtotal</span>
-            <span className="font-medium">{formatZmw(totals.subtotal)}</span>
-          </div>
+        <div className="border-t border-surface-border shrink-0">
+          {discountAllowed && (
+            <div className="px-4 pt-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Percent className="w-3.5 h-3.5 text-gray-500" />
+                <span className="text-sm font-medium text-gray-700">Discount</span>
+              </div>
 
-          {totals.discount > 0 && (
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-600">Discount</span>
-              <span className="font-medium text-green-600">-{formatZmw(totals.discount)}</span>
+              <div className="flex gap-2">
+                <select
+                  value={discountType}
+                  onChange={(e) => onDiscountTypeChange?.(e.target.value)}
+                  className="input-sys w-28"
+                  aria-label="Discount type"
+                >
+                  <option value="percentage">%</option>
+                  <option value="fixed">Fixed Amount</option>
+                </select>
+
+                <input
+                  type="number"
+                  placeholder={discountType === 'percentage' ? '0' : '0.00'}
+                  value={discountValue}
+                  onChange={(e) => onDiscountValueChange?.(e.target.value)}
+                  className="input-sys flex-1"
+                  min="0"
+                  step={discountType === 'percentage' ? '1' : '0.01'}
+                  aria-label="Discount value"
+                />
+              </div>
             </div>
           )}
 
-          <div className="flex justify-between text-sm">
-            <span className="text-gray-600">VAT (16%)</span>
-            <span className="font-medium">{formatZmw(totals.vat)}</span>
-          </div>
+          <div className="px-4 pt-4 space-y-2">
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-600">Subtotal</span>
+              <span className="font-medium text-gray-900">{formatZmw(totals.subtotal)}</span>
+            </div>
 
-          <div className="border-t border-gray-200 pt-3">
-            <div className="flex justify-between text-lg font-semibold">
-              <span className="text-gray-900">Total</span>
-              <span className="text-gray-900">{formatZmw(totals.total)}</span>
+            {totals.discount > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">Discount</span>
+                <span className="font-medium text-emerald-600">-{formatZmw(totals.discount)}</span>
+              </div>
+            )}
+
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-600">VAT (16%)</span>
+              <span className="font-medium text-gray-900">{formatZmw(totals.vat)}</span>
+            </div>
+
+            <div className="border-t border-surface-border pt-2 flex justify-between">
+              <span className="font-semibold text-gray-900">Total</span>
+              <span className="font-semibold text-gray-900">{formatZmw(totals.total)}</span>
             </div>
           </div>
-        </div>
-      )}
 
-      {cart.length > 0 && (
-        <div className="mt-6">
-          <button
-            type="button"
-            onClick={onClearCart}
-            className="w-full py-3 px-4 border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition-colors"
-          >
-            Clear Cart
-          </button>
+          <div className="p-4 pt-3">
+            <button type="button" onClick={onClearCart} className="btn-secondary w-full py-2.5">
+              Clear Cart
+            </button>
+          </div>
         </div>
       )}
     </div>

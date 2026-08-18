@@ -428,9 +428,15 @@ const CashierDashboard = () => {
   const renderTabContent = () => {
     switch (activeTab) {
       case 'quickshop':
+        // Below lg, this is a plain stacked column and <main> scrolls the
+        // whole tab normally (mobile has no room for a fixed side panel).
+        // At lg+, it becomes a fixed-height row: only the product grid
+        // scrolls internally, the cart pane stays fully in view the whole
+        // time — a cashier shouldn't have to scroll away from their cart
+        // just to browse more products.
         return (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2">
+          <div className="flex flex-col gap-6 lg:flex-row lg:h-full lg:min-h-0">
+            <div className="lg:flex-1 lg:min-h-0 lg:overflow-y-auto scroll-thin">
               <ProductGrid
                 products={products}
                 categories={categories}
@@ -439,7 +445,7 @@ const CashierDashboard = () => {
                 usingMockData={usingMockData}
               />
             </div>
-            <div>
+            <div className="lg:w-[380px] lg:shrink-0 lg:h-full lg:min-h-0">
               <CartSection
                 cart={cart}
                 onUpdateQuantity={updateCartQuantity}
@@ -580,7 +586,11 @@ const CashierDashboard = () => {
             </div>
           )}
 
-          <main className="flex-1 p-4 overflow-auto">{renderTabContent()}</main>
+          <main
+            className={`flex-1 p-4 overflow-auto ${activeTab === 'quickshop' ? 'lg:overflow-hidden' : ''}`}
+          >
+            {renderTabContent()}
+          </main>
 
           <StatusBar
             zraStatus={zraStatus}
