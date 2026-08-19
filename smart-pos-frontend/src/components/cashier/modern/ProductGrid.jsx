@@ -12,6 +12,12 @@ const ProductGrid = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [sortBy, setSortBy] = useState('name');
+  // Most of the catalog on a real till is out-of-stock/unregistered noise
+  // between the handful of products a cashier can actually sell right now
+  // — defaulting to available-only keeps price-checking fast. Still just a
+  // filter, not a delete: toggling it off shows the full catalog exactly
+  // as before, for the rarer case of checking an unavailable item's price.
+  const [availableOnly, setAvailableOnly] = useState(true);
   // Toggles a border/shadow on the header once the grid below it has
   // actually scrolled. The header lives outside the scrolling box
   // entirely (a plain always-visible row, not position:sticky) — an
@@ -32,7 +38,8 @@ const ProductGrid = ({
                          product.sku?.toLowerCase().includes(searchTerm.toLowerCase());
     const productCategory = typeof product.category === 'object' ? product.category.name : product.category;
     const matchesCategory = selectedCategory === 'all' || productCategory === selectedCategory;
-    return matchesSearch && matchesCategory;
+    const matchesAvailability = !availableOnly || (product.stock > 0 && isProductRegisteredForSale(product));
+    return matchesSearch && matchesCategory && matchesAvailability;
   });
 
   const sortedProducts = [...filteredProducts].sort((a, b) => {
@@ -130,6 +137,16 @@ const ProductGrid = ({
           <option value="price">Sort by Price</option>
           <option value="stock">Sort by Stock</option>
         </select>
+
+        <label className="flex items-center gap-1.5 text-xs text-gray-600 shrink-0 select-none cursor-pointer">
+          <input
+            type="checkbox"
+            checked={availableOnly}
+            onChange={(e) => setAvailableOnly(e.target.checked)}
+            className="rounded border-surface-border text-surface-accent focus:ring-surface-accent focus:ring-offset-0"
+          />
+          Available only
+        </label>
       </div>
 
       <div ref={scrollRef} onScroll={handleScroll} className="flex-1 min-h-0 overflow-y-auto scroll-thin">
@@ -220,7 +237,11 @@ const ProductGrid = ({
             <Package className="w-12 h-12 text-gray-400 mx-auto mb-4" />
             <h3 className="text-lg font-medium text-gray-900 mb-2">No products found</h3>
             <p className="text-gray-500">
-              {searchTerm ? 'Try adjusting your search terms' : 'No products available'}
+              {searchTerm
+                ? 'Try adjusting your search terms'
+                : availableOnly
+                  ? 'Nothing in stock and registered right now — turn off "Available only" to see the full catalog'
+                  : 'No products available'}
             </p>
           </div>
         )}
