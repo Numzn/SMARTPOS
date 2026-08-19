@@ -87,15 +87,25 @@ const ProductGrid = ({
   // Stock are just this predicate and its complement, not new logic.
   const isSellable = (product) => product.stock > 0 && isProductRegisteredForSale(product);
 
-  const filteredProducts = products.filter(product => {
+  const matchesSearchAndCategory = (product) => {
     const matchesSearch = product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          product.sku?.toLowerCase().includes(searchTerm.toLowerCase());
     const productCategory = typeof product.category === 'object' ? product.category.name : product.category;
     const matchesCategory = selectedCategory === 'all' || productCategory === selectedCategory;
-    const matchesAvailability =
-      availabilityView === 'all' ? true : availabilityView === 'inStock' ? isSellable(product) : !isSellable(product);
-    return matchesSearch && matchesCategory && matchesAvailability;
-  });
+    return matchesSearch && matchesCategory;
+  };
+
+  // Same search/category match, before the availability view narrows it
+  // further — the gap between the two counts is what "N more products
+  // aren't shown" below reports, so a short In Stock list reads as
+  // intentional rather than looking like the page is missing content.
+  const searchCategoryMatches = products.filter(matchesSearchAndCategory);
+
+  const filteredProducts = searchCategoryMatches.filter((product) =>
+    availabilityView === 'all' ? true : availabilityView === 'inStock' ? isSellable(product) : !isSellable(product)
+  );
+
+  const hiddenByAvailability = availabilityView === 'all' ? 0 : searchCategoryMatches.length - filteredProducts.length;
 
   const sortedProducts = [...filteredProducts].sort((a, b) => {
     switch (sortBy) {
@@ -147,7 +157,7 @@ const ProductGrid = ({
   return (
     <div className="h-full flex flex-col">
       <div
-        className={`shrink-0 bg-white pb-3 flex flex-wrap items-center gap-2 transition-shadow ${
+        className={`shrink-0 bg-white pb-3 pr-2 flex flex-wrap items-center gap-2 transition-shadow ${
           scrolled ? 'border-b border-surface-border shadow-sm' : 'border-b border-transparent'
         }`}
       >
@@ -235,11 +245,13 @@ const ProductGrid = ({
         </CompactMenu>
 
         <span className="text-xs text-gray-500 shrink-0 ml-auto">
-          {sortedProducts.length} product{sortedProducts.length !== 1 ? 's' : ''}
+          {hiddenByAvailability > 0
+            ? `${sortedProducts.length} of ${searchCategoryMatches.length}`
+            : `${sortedProducts.length} product${sortedProducts.length !== 1 ? 's' : ''}`}
         </span>
       </div>
 
-      <div ref={scrollRef} onScroll={handleScroll} className="flex-1 min-h-0 overflow-y-auto scroll-thin">
+      <div ref={scrollRef} onScroll={handleScroll} className="flex-1 min-h-0 overflow-y-auto scroll-thin pr-2">
         {sortedProducts.length > 0 ? (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pt-4">
             {sortedProducts.map((product) => {
@@ -322,7 +334,25 @@ const ProductGrid = ({
               );
             })}
           </div>
-        ) : (
+        ) : null}
+
+        {sortedProducts.length > 0 && hiddenByAvailability > 0 && (
+          <div className="flex items-center justify-center gap-2 pt-6 pb-2 text-xs text-gray-400">
+            <span>
+              {hiddenByAvailability} more product{hiddenByAvailability !== 1 ? 's' : ''}{' '}
+              {availabilityView === 'inStock' ? 'out of stock or unregistered' : 'in stock'}
+            </span>
+            <button
+              type="button"
+              onClick={() => setAvailabilityView('all')}
+              className="text-surface-accent hover:underline font-medium"
+            >
+              View all products
+            </button>
+          </div>
+        )}
+
+        {sortedProducts.length === 0 && (
           <div className="text-center py-12">
             <Package className="w-12 h-12 text-gray-400 mx-auto mb-4" />
             <h3 className="text-lg font-medium text-gray-900 mb-2">No products available</h3>
