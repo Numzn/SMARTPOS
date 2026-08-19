@@ -431,7 +431,7 @@ const CashierDashboard = () => {
         // just to browse more products.
         return (
           <div className="flex flex-col gap-6 lg:flex-row lg:gap-3 lg:h-full lg:min-h-0">
-            <div className="lg:flex-1 lg:min-h-0 lg:overflow-y-auto scroll-thin lg:px-3 lg:py-2">
+            <div className="lg:flex-1 lg:min-h-0 lg:flex lg:flex-col lg:py-2 lg:pl-3">
               <ProductGrid
                 products={products}
                 categories={categories}
