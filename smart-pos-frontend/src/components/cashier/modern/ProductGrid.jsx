@@ -1,6 +1,54 @@
-import React, { useRef, useState } from 'react';
-import { Search, Package, AlertCircle } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Search, Package, AlertCircle, ChevronDown, Check, Filter } from 'lucide-react';
 import { getCashierStockStatus, isProductLowStock, isProductRegisteredForSale } from '../../../utils/productUtils';
+
+const AVAILABILITY_VIEWS = [
+  { id: 'inStock', label: 'In Stock' },
+  { id: 'all', label: 'All Products' },
+  { id: 'outOfStock', label: 'Out of Stock' },
+];
+
+// A compact trigger + positioned option list, closing on outside click —
+// the shared shape behind both the availability view and category filter
+// controls, so a cashier gets one consistent dropdown pattern rather than
+// a native <select> for one and something else for another.
+const CompactMenu = ({ trigger, children, align = 'left' }) => {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const handleClickOutside = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [open]);
+
+  return (
+    <div className="relative shrink-0" ref={containerRef}>
+      {trigger(() => setOpen((v) => !v), open)}
+      {open && (
+        <div
+          className={`absolute top-full mt-1 ${align === 'right' ? 'right-0' : 'left-0'} z-20 min-w-[170px] panel py-1`}
+        >
+          {children(() => setOpen(false))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const MenuOption = ({ selected, onClick, children }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left text-gray-700 hover:bg-gray-50"
+  >
+    <Check className={`w-3.5 h-3.5 shrink-0 ${selected ? 'text-surface-accent' : 'text-transparent'}`} />
+    {children}
+  </button>
+);
 
 const ProductGrid = ({
   products = [],
@@ -12,12 +60,13 @@ const ProductGrid = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [sortBy, setSortBy] = useState('name');
-  // Most of the catalog on a real till is out-of-stock/unregistered noise
-  // between the handful of products a cashier can actually sell right now
-  // — defaulting to available-only keeps price-checking fast. Still just a
-  // filter, not a delete: toggling it off shows the full catalog exactly
-  // as before, for the rarer case of checking an unavailable item's price.
-  const [availableOnly, setAvailableOnly] = useState(true);
+  // A view of the catalog, not a filter the cashier has to manage — In
+  // Stock is the default because the cashier's job is "find something,
+  // add it to the sale," and most of a real catalog is out-of-stock or
+  // unregistered noise between the handful of sellable products. All
+  // Products / Out of Stock are deliberate, occasional switches, not
+  // states requiring a permanent toggle to reach.
+  const [availabilityView, setAvailabilityView] = useState('inStock');
   // Toggles a border/shadow on the header once the grid below it has
   // actually scrolled. The header lives outside the scrolling box
   // entirely (a plain always-visible row, not position:sticky) — an
@@ -33,12 +82,18 @@ const ProductGrid = ({
     setScrolled((scrollRef.current?.scrollTop || 0) > 0);
   };
 
+  // The same "can this be sold right now" condition every product card
+  // already checks for its own badge/button state — In Stock / Out of
+  // Stock are just this predicate and its complement, not new logic.
+  const isSellable = (product) => product.stock > 0 && isProductRegisteredForSale(product);
+
   const filteredProducts = products.filter(product => {
     const matchesSearch = product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          product.sku?.toLowerCase().includes(searchTerm.toLowerCase());
     const productCategory = typeof product.category === 'object' ? product.category.name : product.category;
     const matchesCategory = selectedCategory === 'all' || productCategory === selectedCategory;
-    const matchesAvailability = !availableOnly || (product.stock > 0 && isProductRegisteredForSale(product));
+    const matchesAvailability =
+      availabilityView === 'all' ? true : availabilityView === 'inStock' ? isSellable(product) : !isSellable(product);
     return matchesSearch && matchesCategory && matchesAvailability;
   });
 
@@ -83,6 +138,8 @@ const ProductGrid = ({
     );
   }
 
+  const availabilityLabel = AVAILABILITY_VIEWS.find((v) => v.id === availabilityView)?.label;
+
   // No card chrome (border/shadow/header bar) — this fills the pane between
   // the top bar and the cart as one continuous surface, the same way a
   // kiosk product browser does. Only the grid below the search/filter row
@@ -94,9 +151,6 @@ const ProductGrid = ({
           scrolled ? 'border-b border-surface-border shadow-sm' : 'border-b border-transparent'
         }`}
       >
-        <span className="text-xs text-gray-500 shrink-0">
-          Products · {sortedProducts.length}
-        </span>
         {usingMockData && (
           <span className="status-pill border-amber-200 bg-amber-50 text-amber-800 shrink-0">
             <AlertCircle className="w-3 h-3" />
@@ -115,18 +169,29 @@ const ProductGrid = ({
           />
         </div>
 
-        <select
-          value={selectedCategory}
-          onChange={(e) => setSelectedCategory(e.target.value)}
-          className="input-sys w-auto shrink-0"
+        <CompactMenu
+          trigger={(toggle) => (
+            <button type="button" onClick={toggle} className="input-sys w-auto flex items-center gap-1.5">
+              {availabilityLabel}
+              <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
+            </button>
+          )}
         >
-          <option value="all">All Categories</option>
-          {categories.map(category => (
-            <option key={category.id} value={category.name}>
-              {category.name}
-            </option>
-          ))}
-        </select>
+          {(close) =>
+            AVAILABILITY_VIEWS.map((view) => (
+              <MenuOption
+                key={view.id}
+                selected={availabilityView === view.id}
+                onClick={() => {
+                  setAvailabilityView(view.id);
+                  close();
+                }}
+              >
+                {view.label}
+              </MenuOption>
+            ))
+          }
+        </CompactMenu>
 
         <select
           value={sortBy}
@@ -138,15 +203,40 @@ const ProductGrid = ({
           <option value="stock">Sort by Stock</option>
         </select>
 
-        <label className="flex items-center gap-1.5 text-xs text-gray-600 shrink-0 select-none cursor-pointer">
-          <input
-            type="checkbox"
-            checked={availableOnly}
-            onChange={(e) => setAvailableOnly(e.target.checked)}
-            className="rounded border-surface-border text-surface-accent focus:ring-surface-accent focus:ring-offset-0"
-          />
-          Available only
-        </label>
+        <CompactMenu
+          align="right"
+          trigger={(toggle) => (
+            <button type="button" onClick={toggle} className="input-sys w-auto flex items-center gap-1.5">
+              <Filter className="w-3.5 h-3.5 text-gray-400" />
+              Filter
+              {selectedCategory !== 'all' && <span className="w-1.5 h-1.5 rounded-full bg-surface-accent" />}
+            </button>
+          )}
+        >
+          {(close) => (
+            <>
+              <MenuOption selected={selectedCategory === 'all'} onClick={() => { setSelectedCategory('all'); close(); }}>
+                All Categories
+              </MenuOption>
+              {categories.map((category) => (
+                <MenuOption
+                  key={category.id}
+                  selected={selectedCategory === category.name}
+                  onClick={() => {
+                    setSelectedCategory(category.name);
+                    close();
+                  }}
+                >
+                  {category.name}
+                </MenuOption>
+              ))}
+            </>
+          )}
+        </CompactMenu>
+
+        <span className="text-xs text-gray-500 shrink-0 ml-auto">
+          {sortedProducts.length} product{sortedProducts.length !== 1 ? 's' : ''}
+        </span>
       </div>
 
       <div ref={scrollRef} onScroll={handleScroll} className="flex-1 min-h-0 overflow-y-auto scroll-thin">
@@ -235,14 +325,19 @@ const ProductGrid = ({
         ) : (
           <div className="text-center py-12">
             <Package className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No products found</h3>
-            <p className="text-gray-500">
-              {searchTerm
-                ? 'Try adjusting your search terms'
-                : availableOnly
-                  ? 'Nothing in stock and registered right now — turn off "Available only" to see the full catalog'
-                  : 'No products available'}
+            <h3 className="text-lg font-medium text-gray-900 mb-2">No products available</h3>
+            <p className="text-gray-500 mb-4">
+              Try changing the availability view or clearing your search.
             </p>
+            {availabilityView !== 'all' && (
+              <button
+                type="button"
+                onClick={() => setAvailabilityView('all')}
+                className="btn-secondary"
+              >
+                View all products
+              </button>
+            )}
           </div>
         )}
       </div>
