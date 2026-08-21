@@ -32,8 +32,8 @@ const RolesPage = lazy(() => import('./pages/RolesPage'));
 
 // The default landing route and the catch-all fallback both need to depend
 // on who's logged in — a CASHIER has no Dashboard workspace at all (see
-// MainLayout's NAV_ITEMS), so both must resolve to /cashier for them and
-// /dashboard for everyone else, never a hard-coded /dashboard.
+// navItems.js's DASHBOARD_ITEM), so both must resolve to /cashier for them
+// and /dashboard for everyone else, never a hard-coded /dashboard.
 function HomeRedirect() {
   const { user } = useAuth();
   return <Navigate to={getHomeRoute(user?.role)} replace />;
