@@ -1,6 +1,6 @@
 # Smart POS — Deployment Guide
 
-**Project status:** [STATUS.md](./STATUS.md)
+**Project status:** [docs/CODEBASE_GUIDE.md](./docs/CODEBASE_GUIDE.md)
 
 Deploy the full stack (PostgreSQL + backend + frontend + mock VSDC) to **GitHub** and the **Numzlab server**.
 

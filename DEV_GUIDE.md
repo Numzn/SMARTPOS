@@ -1,6 +1,6 @@
 # 🚀 Smart POS Development Helper
 
-**Project status:** [STATUS.md](./STATUS.md)
+**Project status:** [docs/CODEBASE_GUIDE.md](./docs/CODEBASE_GUIDE.md)
 
 This helper script and VS Code tasks make it easy to switch between frontend and backend development without confusion about which commands to run where.
 

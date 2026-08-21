@@ -16,7 +16,7 @@
 > - Endpoint coverage generally — several official paths have constants defined but are never
 >   called, so `VSDC_MODE=official` does not reach them.
 >
-> Authoritative project status remains [STATUS.md](../../STATUS.md).
+> Authoritative project status remains [docs/CODEBASE_GUIDE.md](../../docs/CODEBASE_GUIDE.md) (architecture) and [zra-self-checklist.md](./zra-self-checklist.md) (ZRA certification status).
 
 ## Implementation Progress Tracker
 

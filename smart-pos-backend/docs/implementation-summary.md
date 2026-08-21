@@ -1,6 +1,6 @@
 # Smart POS — Implementation Module Map
 
-**Authoritative status:** [STATUS.md](../../STATUS.md) (three-lens scorecard, gaps, roadmap).
+**Authoritative status:** [docs/CODEBASE_GUIDE.md](../../docs/CODEBASE_GUIDE.md) (architecture, state machines, gaps).
 
 This document maps canonical code locations. It does not claim VSDC certification completeness.
 
@@ -61,6 +61,6 @@ Expected: **24/24 PASS** against mock VSDC.
 
 ## Related docs
 
-- [ARCHITECTURE.md](./ARCHITECTURE.md) — sequence diagrams and layering
+- [docs/CODEBASE_GUIDE.md](../../docs/CODEBASE_GUIDE.md) — sequence diagrams and layering (supersedes the retired `ARCHITECTURE.md`)
 - [zra-self-checklist.md](./zra-self-checklist.md) — ZRA certification self-assessment, evidence-cited (supersedes `zra-compliance-checklist.md`)
 - [DATABASE.md](./DATABASE.md) — Postgres and migrations
