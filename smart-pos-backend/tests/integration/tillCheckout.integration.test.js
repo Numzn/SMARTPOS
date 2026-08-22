@@ -48,6 +48,28 @@ describe('createPendingSale — till-session validation', () => {
     expect(refreshedSession.status).toBe('CONSUMED');
   });
 
+  it('prices the sale from the live Product row, never from the submitted/committed price', async () => {
+    const user = await createTestUser();
+    const product = await createTestProduct({ price: 20 });
+    // Committed at the till-lock layer while the catalog price was still 20 —
+    // matches what checkout will submit, so the tamper check passes cleanly.
+    const session = await committedSession(user.id, [{ productId: product.id, quantity: 5, unitPrice: 20 }]);
+
+    // Catalog price changes after the scan but before checkout — a stale
+    // local cache (or a tampered payload) would still submit 20 here.
+    await prisma.product.update({ where: { id: product.id }, data: { price: 35 } });
+
+    const sale = await createPendingSale({
+      userId: user.id,
+      branchId: DEFAULT_BRANCH_CODE,
+      tillSessionId: session.id,
+      items: [{ productId: product.id, quantity: 5, price: 20 }],
+    });
+
+    expect(sale.saleItems[0].price).toBe(35);
+    expect(sale.subtotal).toBe(175); // 5 * 35, not 5 * 20
+  });
+
   it('rejects a checkout submitting fewer items than the committed session (the core fraud scenario)', async () => {
     const user = await createTestUser();
     const productA = await createTestProduct({ price: 20 });

@@ -45,8 +45,15 @@ async function openSession(userId, branchId = DEFAULT_BRANCH) {
 /**
  * Add a product, or increase an existing active line's quantity. Always
  * free — this can only ever increase what's charged, never a fraud vector.
+ *
+ * clientScanId (optional) is the till's own locally-generated scan/click
+ * identity (see smart-pos-frontend's durable scan journal). When present,
+ * replaying the same clientScanId for this session — e.g. the till retrying
+ * after it never saw the first response — is a no-op that returns the
+ * original result, instead of incrementing quantity a second time. Without
+ * it (older/other callers), behavior is unchanged: always applied.
  */
-async function scanItem(sessionId, userId, { productId, quantity, unitPrice }) {
+async function scanItem(sessionId, userId, { productId, quantity, unitPrice, clientScanId }) {
   const qty = parseInt(quantity, 10);
   if (!Number.isFinite(qty) || qty <= 0) {
     const err = new Error('quantity must be a positive integer');
@@ -62,29 +69,48 @@ async function scanItem(sessionId, userId, { productId, quantity, unitPrice }) {
       throw err;
     }
 
+    if (clientScanId) {
+      const priorEvent = await tx.cashierScanEvent.findUnique({
+        where: { sessionId_clientScanId: { sessionId, clientScanId } },
+      });
+      if (priorEvent) {
+        // Already applied — return current line state, do not re-increment.
+        return tx.cashierCartLine.findUnique({
+          where: { sessionId_productId: { sessionId, productId } },
+        });
+      }
+    }
+
     const existing = await tx.cashierCartLine.findUnique({
       where: { sessionId_productId: { sessionId, productId } },
     });
 
+    let line;
     if (existing && existing.status === 'ACTIVE') {
-      return tx.cashierCartLine.update({
+      line = await tx.cashierCartLine.update({
         where: { id: existing.id },
         data: { quantity: existing.quantity + qty },
       });
-    }
-
-    if (existing) {
+    } else if (existing) {
       // A previously-reversed line being re-scanned is a fresh commitment,
       // not an increase on the old (now-dead) one.
-      return tx.cashierCartLine.update({
+      line = await tx.cashierCartLine.update({
         where: { id: existing.id },
         data: { quantity: qty, unitPrice, status: 'ACTIVE' },
       });
+    } else {
+      line = await tx.cashierCartLine.create({
+        data: { sessionId, productId, quantity: qty, unitPrice, status: 'ACTIVE' },
+      });
     }
 
-    return tx.cashierCartLine.create({
-      data: { sessionId, productId, quantity: qty, unitPrice, status: 'ACTIVE' },
-    });
+    if (clientScanId) {
+      await tx.cashierScanEvent.create({
+        data: { sessionId, clientScanId, productId, quantity: qty, unitPrice },
+      });
+    }
+
+    return line;
   });
 }
 

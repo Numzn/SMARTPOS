@@ -269,6 +269,7 @@ async function cleanupTestData() {
   // POS Control Phase 1 (till-lock) — references both product and user with
   // the default Restrict onDelete, must go before their deletes below.
   await prisma.cashierCartLine.deleteMany({ where: { product: { sku: { startsWith: 'TEST-SKU-' } } } });
+  await prisma.cashierScanEvent.deleteMany({ where: { session: { user: { email: { contains: '@smartpos.test' } } } } });
   await prisma.cashierCartSession.deleteMany({ where: { user: { email: { contains: '@smartpos.test' } } } });
   await prisma.supervisorApproval.deleteMany({ where: { approver: { email: { contains: '@smartpos.test' } } } });
 

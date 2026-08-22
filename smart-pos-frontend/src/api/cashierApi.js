@@ -52,10 +52,10 @@ export async function openTillSession(branchId) {
   });
 }
 
-export async function scanItem(sessionId, { productId, quantity, unitPrice }) {
+export async function scanItem(sessionId, { productId, quantity, unitPrice, clientScanId }) {
   return apiFetch(`/till/sessions/${sessionId}/scan`, {
     method: 'POST',
-    body: JSON.stringify({ productId, quantity, unitPrice }),
+    body: JSON.stringify({ productId, quantity, unitPrice, clientScanId }),
   });
 }
 
@@ -68,6 +68,12 @@ export async function reverseLine(sessionId, productId, { toQuantity, approvalId
 
 export async function abandonTillSession(sessionId) {
   return apiFetch(`/till/sessions/${sessionId}`, { method: 'DELETE' });
+}
+
+/** Server-committed lines for an existing session — used to recover a
+ * durably-journaled-but-not-yet-confirmed cart after a browser crash/reload. */
+export async function fetchTillSession(sessionId) {
+  return apiFetch(`/till/sessions/${sessionId}`);
 }
 
 /** Mints a short-lived, action-bound supervisor approval ticket. */

@@ -37,6 +37,7 @@ router.post('/sessions/:id/scan', authenticateToken, requirePermission('sales:wr
       productId: req.body?.productId,
       quantity: req.body?.quantity,
       unitPrice: req.body?.unitPrice,
+      clientScanId: req.body?.clientScanId,
     });
     res.status(201).json({ line });
   } catch (error) {

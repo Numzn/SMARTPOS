@@ -253,13 +253,24 @@ async function createPendingSale(body) {
       }
 
       const quantity = parseInt(item.quantity, 10);
-      const unitPrice = parseFloat(item.price);
+      // Price is authoritative from the catalog, never trusted from the
+      // client payload — item.price/the till-lock line's stored price only
+      // ever reflects what a scan happened to be sent with, which a stale
+      // local cache (or a tampered client) could have gotten wrong. The
+      // only sanctioned way a customer pays less than list price is the
+      // discount subtraction below, not a modified unit price.
+      const unitPrice = product.price;
       const itemTotal = quantity * unitPrice;
       const { discount: lineDiscount } = resolveLineDiscount(item, product, itemTotal);
 
       totalLineDiscount += lineDiscount;
       lineResolutions.push({ item, product, quantity, unitPrice, itemTotal, lineDiscount });
     }
+
+    // Authoritative subtotal — the sum of each line's live-catalog-priced
+    // itemTotal, never parsed.subtotal (which parseSalePayload computed from
+    // the client-submitted price before any Product row was even read).
+    const subtotal = lineResolutions.reduce((sum, r) => sum + r.itemTotal, 0);
 
     const orderLevelDiscount = parseFloat(parsed.discountAmount) || 0;
     const combinedDiscount = totalLineDiscount + orderLevelDiscount;
@@ -299,8 +310,8 @@ async function createPendingSale(body) {
     const newSale = await tx.sale.create({
       data: {
         userId: parsed.userId,
-        total: parseFloat(parsed.subtotal) + parseFloat(parsed.taxAmount) - combinedDiscount,
-        subtotal: parseFloat(parsed.subtotal),
+        total: subtotal + parseFloat(parsed.taxAmount) - combinedDiscount,
+        subtotal,
         tax: parseFloat(parsed.taxAmount),
         discount: combinedDiscount,
         discountApprovedByUserId: approvedByUserId,

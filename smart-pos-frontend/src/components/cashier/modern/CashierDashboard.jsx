@@ -11,6 +11,7 @@ import OpeningCashPrompt from '../../shifts/OpeningCashPrompt';
 import { useEndShiftFlow } from '../../../hooks/useEndShiftFlow';
 import { useShiftInitialization } from '../../../hooks/useShiftInitialization';
 import { usePermissions } from '../../../hooks/usePermissions';
+import { useAuth } from '../../../contexts/AuthContext';
 import { shiftApi } from '../../../services/shiftService';
 import {
   fetchProducts,
@@ -21,12 +22,19 @@ import {
   scanItem,
   reverseLine,
   abandonTillSession,
+  fetchTillSession,
   fetchDiscountPolicy,
 } from '../../../api/cashierApi';
 import { fetchPrinterStatus } from '../../../api/printersApi';
 import { mapPrinterStatusLabel } from '../../../lib/printReceipt';
 import { calculateCartTotals } from '../../../utils/cartTotals';
 import { useOnlineStatus } from '../../../hooks/useOnlineStatus';
+import { useScanPipeline } from '../../../hooks/useScanPipeline';
+import { useBarcodeScanner } from '../../../hooks/useBarcodeScanner';
+import { buildBarcodeIndex, normalizeBarcode } from '../../../lib/barcodeIndex';
+
+const tillSessionStorageKey = (userId) => `smartpos:tillSession:${userId}`;
+const localTxnStorageKey = (userId) => `smartpos:localTxn:${userId}`;
 
 const CashierDashboard = () => {
   const { canAccess } = usePermissions();
@@ -56,10 +64,15 @@ const CashierDashboard = () => {
   const [showCheckout, setShowCheckout] = useState(false);
   const [usingMockData, setUsingMockData] = useState(false);
 
+  const { user } = useAuth();
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
-  const [cart, setCart] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  // The scan journal's own grouping key (see useScanPipeline) — a purely
+  // local id, generated on the first scan of a fresh cart, independent of
+  // whether the server-side till-lock session exists yet. Persisted so a
+  // crash/reload can recover an in-progress cart before it ever synced.
+  const [localTxnId, setLocalTxnId] = useState(null);
 
   const [discountType, setDiscountType] = useState('percentage');
   const [discountValue, setDiscountValue] = useState('');
@@ -92,11 +105,6 @@ const CashierDashboard = () => {
   const refreshInFlight = useRef(false);
   const showCheckoutRef = useRef(false);
   showCheckoutRef.current = showCheckout;
-
-  const cartTotals = useMemo(
-    () => calculateCartTotals(cart, { discountType, discountValue }),
-    [cart, discountType, discountValue]
-  );
 
   useEffect(() => {
     fetchInitialData();
@@ -242,7 +250,108 @@ const CashierDashboard = () => {
     return sessionOpenPromiseRef.current;
   };
 
-  const addToCart = async (product) => {
+  // Background half of the hot path (see docs/artifacts on the scan
+  // pipeline redesign): never awaited by the cart-update path itself — the
+  // pipeline calls this after the cashier has already seen the item appear.
+  // clientScanId is what makes a retried call (e.g. this tab reconnecting
+  // after a drop) a no-op server-side instead of a double-increment.
+  const syncScan = async (entry) => {
+    const sessionId = await ensureTillSession();
+    await scanItem(sessionId, {
+      productId: entry.productId,
+      quantity: 1,
+      unitPrice: entry.unitPrice,
+      clientScanId: entry.scanId,
+    });
+  };
+
+  const pipeline = useScanPipeline({
+    products,
+    usingMockData,
+    syncScan,
+    onLocalTxnIdChange: setLocalTxnId,
+  });
+  const { cart, unresolved } = pipeline;
+
+  const cartTotals = useMemo(
+    () => calculateCartTotals(cart, { discountType, discountValue }),
+    [cart, discountType, discountValue]
+  );
+
+  const barcodeIndex = useMemo(() => buildBarcodeIndex(products), [products]);
+
+  // Recovery — runs once per (user, mount). A crash/reload before this tab's
+  // in-flight scans ever synced must not lose them: reload the durable
+  // journal and, if the persisted till-lock session is still valid, resume
+  // background sync against it. Safe even if some entries had actually
+  // already reached the server before the crash — clientScanId idempotency
+  // (lib/tillLock.js) makes replaying them a no-op, not a double count.
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+
+    (async () => {
+      const storedSessionId = localStorage.getItem(tillSessionStorageKey(user.id));
+      const storedLocalTxnId = localStorage.getItem(localTxnStorageKey(user.id));
+      if (!storedSessionId && !storedLocalTxnId) return;
+
+      if (storedSessionId) {
+        try {
+          const { session } = await fetchTillSession(storedSessionId);
+          if (!cancelled && session?.status === 'OPEN') {
+            setTillSessionId(storedSessionId);
+          } else if (!cancelled) {
+            localStorage.removeItem(tillSessionStorageKey(user.id));
+          }
+        } catch {
+          if (!cancelled) localStorage.removeItem(tillSessionStorageKey(user.id));
+        }
+      }
+
+      if (storedLocalTxnId && !cancelled) {
+        await pipeline.recoverTransaction(storedLocalTxnId);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
+  // Persist the two halves of "what was in progress" so the recovery effect
+  // above has something to find after a crash/reload.
+  useEffect(() => {
+    if (!user?.id) return;
+    const key = tillSessionStorageKey(user.id);
+    if (tillSessionId) localStorage.setItem(key, tillSessionId);
+    else localStorage.removeItem(key);
+  }, [tillSessionId, user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const key = localTxnStorageKey(user.id);
+    if (localTxnId) localStorage.setItem(key, localTxnId);
+    else localStorage.removeItem(key);
+  }, [localTxnId, user?.id]);
+
+  // Never silently lose a scan that couldn't be resolved or was rejected on
+  // sync — surfaced the same way any other till notice already is. Dedup by
+  // scanId so a single failure doesn't re-announce itself on every re-render.
+  const notifiedFailuresRef = useRef(new Set());
+  useEffect(() => {
+    for (const entry of unresolved) {
+      if (notifiedFailuresRef.current.has(entry.scanId)) continue;
+      notifiedFailuresRef.current.add(entry.scanId);
+      if (entry.status === 'LOOKUP_FAILED') {
+        showStockNotice(`Barcode not recognized: ${entry.barcode || entry.rawToken}`);
+      } else if (entry.status === 'SYNC_REJECTED') {
+        showStockNotice(entry.syncError || 'Could not add an item — please check the cart.');
+      }
+    }
+  }, [unresolved]);
+
+  const addToCart = (product) => {
     if (product.stock <= 0) {
       showStockNotice(`${product.name} is out of stock.`);
       return;
@@ -255,26 +364,42 @@ const CashierDashboard = () => {
       return;
     }
 
-    if (!usingMockData) {
-      try {
-        const sessionId = await ensureTillSession();
-        await scanItem(sessionId, { productId: product.id, quantity: 1, unitPrice: product.price });
-      } catch (err) {
-        showStockNotice(err?.data?.error || err.message || `Could not add ${product.name}.`);
+    pipeline.ingestProduct(product);
+  };
+
+  // Scanner driver — HID keyboard-wedge. Disabled while the till isn't
+  // actually operable (opening-cash prompt) or while checkout already owns
+  // the transaction, matching the existing product-refresh pause for the
+  // same reason: nothing should add more lines once payment is underway.
+  const handleBarcodeScanned = useCallback(
+    (raw) => {
+      const barcode = normalizeBarcode(raw);
+      const product = barcodeIndex.get(barcode);
+      if (!product) {
+        // Still durably journaled (LOOKUP_FAILED) and surfaced above — never
+        // silently dropped just because it didn't match the catalog.
+        pipeline.ingestBarcode(raw);
         return;
       }
-    }
-
-    setCart((prevCart) => {
-      const existing = prevCart.find((item) => item.id === product.id);
-      if (existing) {
-        return prevCart.map((item) =>
-          item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
-        );
+      if (product.stock <= 0) {
+        showStockNotice(`${product.name} is out of stock.`);
+        return;
       }
-      return [...prevCart, { ...product, quantity: 1 }];
-    });
-  };
+      const existingItem = cart.find((item) => item.id === product.id);
+      const nextQuantity = (existingItem?.quantity ?? 0) + 1;
+      if (nextQuantity > product.stock) {
+        showStockNotice(`Only ${product.stock} of ${product.name} available.`);
+        return;
+      }
+      pipeline.ingestProduct(product);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [barcodeIndex, cart, pipeline]
+  );
+
+  useBarcodeScanner(handleBarcodeScanned, {
+    enabled: !(canAccess.operateShift && shiftInit.shift?.status === 'INITIALIZING') && !showCheckout,
+  });
 
   /**
    * Increasing quantity is always free (scanItem, no approval). Decreasing
@@ -303,27 +428,20 @@ const CashierDashboard = () => {
     const delta = cappedQuantity - item.quantity;
     if (delta <= 0) return;
 
-    if (usingMockData) {
-      setCart((prevCart) =>
-        prevCart.map((entry) => (entry.id === itemId ? { ...entry, quantity: cappedQuantity } : entry))
-      );
-      return;
+    // A stepper increase is exactly as legitimate as N individual scans —
+    // the transaction engine doesn't distinguish how an addition arrived.
+    // ingestProduct is serialized, so calling it delta times in a row is
+    // safe and preserves ordering the same way a rapid scan burst would.
+    for (let i = 0; i < delta; i += 1) {
+      pipeline.ingestProduct(item);
     }
-
-    scanItem(tillSessionId, { productId: itemId, quantity: delta, unitPrice: item.price })
-      .then(() => {
-        setCart((prevCart) =>
-          prevCart.map((entry) => (entry.id === itemId ? { ...entry, quantity: cappedQuantity } : entry))
-        );
-      })
-      .catch((err) => showStockNotice(err?.data?.error || err.message || 'Could not update quantity.'));
   };
 
   const removeFromCart = (itemId) => {
     const item = cart.find((entry) => entry.id === itemId);
     if (!item) return;
     if (usingMockData) {
-      setCart((prevCart) => prevCart.filter((entry) => entry.id !== itemId));
+      pipeline.applyReversal(itemId, 0);
       return;
     }
     setPendingReversal({ productId: itemId, toQuantity: 0, name: item.name });
@@ -333,11 +451,7 @@ const CashierDashboard = () => {
     const { productId, toQuantity } = pendingReversal;
     try {
       await reverseLine(tillSessionId, productId, { toQuantity, approvalId, reasonCode, reasonNote });
-      setCart((prevCart) =>
-        toQuantity <= 0
-          ? prevCart.filter((entry) => entry.id !== productId)
-          : prevCart.map((entry) => (entry.id === productId ? { ...entry, quantity: toQuantity } : entry))
-      );
+      pipeline.applyReversal(productId, toQuantity);
     } catch (err) {
       showStockNotice(err?.data?.error || err.message || 'Reversal failed.');
     } finally {
@@ -387,7 +501,7 @@ const CashierDashboard = () => {
     if (tillSessionId) {
       abandonTillSession(tillSessionId).catch(() => {}); // best-effort; local state clears regardless
     }
-    setCart([]);
+    pipeline.clearTransaction();
     setDiscountValue('');
     setTillSessionId(null);
   };
@@ -397,7 +511,7 @@ const CashierDashboard = () => {
   // deliberately not clearCart(), which would call abandonTillSession on an
   // already-consumed session for no reason.
   const resetCartAfterSale = () => {
-    setCart([]);
+    pipeline.clearTransaction();
     setDiscountValue('');
     setTillSessionId(null);
   };

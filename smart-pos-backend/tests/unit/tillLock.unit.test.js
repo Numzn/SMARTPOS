@@ -55,6 +55,59 @@ describe('lib/tillLock — committed cart', () => {
     expect(line.quantity).toBe(5);
   });
 
+  it('scanItem with a clientScanId is idempotent — replaying the same id does not re-increment', async () => {
+    const cashier = await createTestUser();
+    const product = await createTestProduct();
+    const session = await openSession(cashier.id);
+
+    const first = await scanItem(session.id, cashier.id, {
+      productId: product.id,
+      quantity: 1,
+      unitPrice: 10,
+      clientScanId: 'scan-A',
+    });
+    expect(first.quantity).toBe(1);
+
+    // Simulates the till retrying after it never saw the first response.
+    const replay = await scanItem(session.id, cashier.id, {
+      productId: product.id,
+      quantity: 1,
+      unitPrice: 10,
+      clientScanId: 'scan-A',
+    });
+    expect(replay.quantity).toBe(1);
+  });
+
+  it('scanItem treats distinct clientScanIds for the same product as distinct legitimate scans', async () => {
+    const cashier = await createTestUser();
+    const product = await createTestProduct();
+    const session = await openSession(cashier.id);
+
+    await scanItem(session.id, cashier.id, { productId: product.id, quantity: 1, unitPrice: 10, clientScanId: 'scan-A' });
+    await scanItem(session.id, cashier.id, { productId: product.id, quantity: 1, unitPrice: 10, clientScanId: 'scan-B' });
+    const line = await scanItem(session.id, cashier.id, {
+      productId: product.id,
+      quantity: 1,
+      unitPrice: 10,
+      clientScanId: 'scan-C',
+    });
+
+    // Same barcode/product scanned three times, three different scan
+    // identities — must fold to quantity 3, never collapse to 1.
+    expect(line.quantity).toBe(3);
+  });
+
+  it('scanItem without a clientScanId behaves exactly as before (no idempotency tracking)', async () => {
+    const cashier = await createTestUser();
+    const product = await createTestProduct();
+    const session = await openSession(cashier.id);
+
+    await scanItem(session.id, cashier.id, { productId: product.id, quantity: 1, unitPrice: 10 });
+    const line = await scanItem(session.id, cashier.id, { productId: product.id, quantity: 1, unitPrice: 10 });
+
+    expect(line.quantity).toBe(2);
+  });
+
   it('rejects scanning into a session owned by someone else', async () => {
     const owner = await createTestUser();
     const intruder = await createTestUser();
