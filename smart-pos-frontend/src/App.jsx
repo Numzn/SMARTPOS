@@ -20,7 +20,7 @@ const InventoryPage = lazy(() => import('./pages/InventoryPage'));
 const ReportsPage = lazy(() => import('./components/reports/ReportsPage'));
 const SalesPage = lazy(() => import('./components/sales/SalesPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
-const PrintersPage = lazy(() => import('./pages/PrintersPage'));
+const DevicesPage = lazy(() => import('./pages/DevicesPage'));
 const UsersPage = lazy(() => import('./pages/UsersPage'));
 const CashRegisterPage = lazy(() => import('./pages/CashRegisterPage'));
 const CustomersPage = lazy(() => import('./pages/CustomersPage'));
@@ -155,10 +155,10 @@ function App() {
                 }
               />
               <Route
-                path="printers"
+                path="devices"
                 element={
                   <ProtectedRoute requiredPermission="settings:read">
-                    <PrintersPage />
+                    <DevicesPage />
                   </ProtectedRoute>
                 }
               />

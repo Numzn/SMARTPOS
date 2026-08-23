@@ -6,7 +6,7 @@ import {
   BarChart2,
   Users,
   Settings,
-  Printer,
+  Cpu,
   Receipt,
   Contact,
   Truck,
@@ -76,7 +76,7 @@ export const NAV_SECTIONS = [
     items: [
       { name: 'Users', href: '/users', icon: Users, show: (p) => p.viewUsers },
       { name: 'Roles & Permissions', href: '/roles', icon: ShieldCheck, show: (p) => p.manageRoles },
-      { name: 'Printers', href: '/printers', icon: Printer, show: (p) => p.viewSettings || p.manageSettings },
+      { name: 'Devices', href: '/devices', icon: Cpu, show: (p) => p.viewSettings || p.manageSettings },
       { name: 'Settings', href: '/settings', icon: Settings, show: (p) => p.viewSettings || p.manageSettings },
     ],
   },
