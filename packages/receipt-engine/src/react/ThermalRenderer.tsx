@@ -19,6 +19,10 @@ function Dashed() {
 
 export function ThermalRenderer({ viewModel: vm, className = '' }: ThermalRendererProps) {
   const copy = copyLabel(vm);
+  // !== false, not === true: a snapshot frozen before this flag existed has
+  // no `enabled` key at all and must keep showing fiscal content exactly as
+  // it always did.
+  const showFiscal = vm.fiscal.enabled !== false;
   const showCashTender =
     vm.payment.method.toUpperCase() === 'CASH' &&
     vm.payment.amountPaid != null &&
@@ -125,27 +129,31 @@ export function ThermalRenderer({ viewModel: vm, className = '' }: ThermalRender
         )}
       </div>
 
-      <Divider char="=" />
+      {showFiscal && (
+        <>
+          <Divider char="=" />
 
-      <div className="receipt-fiscal-title">ZRA SMART INVOICE DETAILS</div>
-      <Divider char="=" />
+          <div className="receipt-fiscal-title">ZRA SMART INVOICE DETAILS</div>
+          <Divider char="=" />
 
-      <div className="receipt-block receipt-fiscal">
-        {vm.fiscal.sdcId && <div>SDC ID: {vm.fiscal.sdcId}</div>}
-        {vm.fiscal.fiscalReceiptNo && <div>Fiscal Receipt No: {vm.fiscal.fiscalReceiptNo}</div>}
-        {vm.fiscal.receiptSignature && <div>Receipt Signature: {vm.fiscal.receiptSignature}</div>}
-        {vm.fiscal.internalData && <div>Internal Data: {vm.fiscal.internalData}</div>}
-        {vm.fiscal.verificationCode && <div>Verification Code: {vm.fiscal.verificationCode}</div>}
-        {vm.receiptMeta.originalReceiptNo && (
-          <div>Original Receipt: {vm.receiptMeta.originalReceiptNo}</div>
-        )}
-      </div>
+          <div className="receipt-block receipt-fiscal">
+            {vm.fiscal.sdcId && <div>SDC ID: {vm.fiscal.sdcId}</div>}
+            {vm.fiscal.fiscalReceiptNo && <div>Fiscal Receipt No: {vm.fiscal.fiscalReceiptNo}</div>}
+            {vm.fiscal.receiptSignature && <div>Receipt Signature: {vm.fiscal.receiptSignature}</div>}
+            {vm.fiscal.internalData && <div>Internal Data: {vm.fiscal.internalData}</div>}
+            {vm.fiscal.verificationCode && <div>Verification Code: {vm.fiscal.verificationCode}</div>}
+            {vm.receiptMeta.originalReceiptNo && (
+              <div>Original Receipt: {vm.receiptMeta.originalReceiptNo}</div>
+            )}
+          </div>
 
-      {vm.fiscal.qrPayload && (
-        <div className="receipt-qr">
-          <QRCodeSVG value={vm.fiscal.qrPayload} size={160} level="M" includeMargin />
-          <div className="receipt-qr-caption">Scan to verify on ZRA Smart Invoice</div>
-        </div>
+          {vm.fiscal.qrPayload && (
+            <div className="receipt-qr">
+              <QRCodeSVG value={vm.fiscal.qrPayload} size={160} level="M" includeMargin />
+              <div className="receipt-qr-caption">Scan to verify on ZRA Smart Invoice</div>
+            </div>
+          )}
+        </>
       )}
 
       <Divider char="=" />
@@ -167,7 +175,7 @@ export function ThermalRenderer({ viewModel: vm, className = '' }: ThermalRender
       {vm.footer.showPoweredBy && (
         <div className="receipt-powered">
           <div>{vm.footer.poweredByLine}</div>
-          <div>{vm.footer.fiscalizedLine}</div>
+          {showFiscal && <div>{vm.footer.fiscalizedLine}</div>}
         </div>
       )}
     </div>

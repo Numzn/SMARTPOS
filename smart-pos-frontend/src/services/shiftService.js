@@ -27,12 +27,57 @@ export const shiftApi = {
   fetchShiftReport: (id) => apiFetch(`/shifts/${id}/report`),
 
   /**
-   * Get-or-create the caller's active shift — what the till screen calls on
-   * load instead of a manual "Open Shift" button. Returns an INITIALIZING
-   * shift (opening cash not yet confirmed, see confirmOpeningCash below) or
-   * an existing OPEN/INITIALIZING one, resumed rather than duplicated.
+   * Get-or-create the caller's active shift — the legacy (userId, branchId)
+   * flow. Superseded by the V1 register/till flow below for the live
+   * Cashier screen, but left fully intact — this is still callable directly
+   * and still what the old OpeningCashPrompt path depends on.
    */
   ensureShift: () => apiFetch('/shifts/ensure', { method: 'POST' }),
+
+  // ---------------------------------------------------------------------
+  // V1 register/till model
+  // ---------------------------------------------------------------------
+
+  /** Registers (with their tills) at the caller's branch — for resolving
+   * which physical station this device is using. */
+  fetchRegisters: () => apiFetch('/shifts/registers'),
+
+  /** The active shift for a till, or null if it's idle. */
+  fetchShiftForTill: async (tillId) => {
+    try {
+      return await apiFetch(`/shifts/by-till/${tillId}`);
+    } catch (error) {
+      if (error.status === 404) return null;
+      throw error;
+    }
+  },
+
+  /** Who's actually operating a shift right now (ShiftCashier), or null for
+   * a legacy shift with no participation history. */
+  fetchCurrentCashier: (shiftId) => apiFetch(`/shifts/${shiftId}/current-cashier`),
+
+  /** Users this cashier could name as the incoming operator on a handover. */
+  fetchHandoverCandidates: async () => {
+    const data = await apiFetch('/shifts/handover-candidates');
+    return data.candidates || [];
+  },
+
+  /** Opens a shift against a specific till — the V1 explicit-open flow,
+   * independent of login. declaredOpeningCash defaults server-side to the
+   * till's own configured float when omitted. */
+  openShiftForTill: ({ tillId, declaredOpeningCash, denominations, notes }) =>
+    apiFetch('/shifts/open-for-till', {
+      method: 'POST',
+      body: JSON.stringify({ tillId, declaredOpeningCash, denominations, notes }),
+    }),
+
+  /** Hands the shift to another cashier — records a HANDOVER declaration,
+   * leaves the shift OPEN. */
+  handoverShift: (shiftId, { toUserId, declaredTotal, denominations, note }) =>
+    apiFetch(`/shifts/${shiftId}/handover`, {
+      method: 'POST',
+      body: JSON.stringify({ toUserId, declaredTotal, denominations, note }),
+    }),
 
   /** Completes INITIALIZING -> OPEN with the cashier's counted opening cash. */
   confirmOpeningCash: (id, { openingFloat, notes }) =>

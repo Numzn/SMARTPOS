@@ -214,6 +214,27 @@ async function createTestShift({
   });
 }
 
+async function createTestRegister({ branchId = DEFAULT_BRANCH_CODE, code, name = 'Test Register' } = {}) {
+  return prisma.register.create({
+    data: {
+      code: code || `TEST-REG-${uniqueSuffix()}`,
+      name,
+      branchId,
+    },
+  });
+}
+
+async function createTestTill({ registerId, code, name = 'Test Till', defaultOpeningFloat = 0 } = {}) {
+  return prisma.till.create({
+    data: {
+      code: code || `TEST-TILL-${uniqueSuffix()}`,
+      name,
+      registerId,
+      defaultOpeningFloat,
+    },
+  });
+}
+
 async function createTestSale({
   userId,
   productId,
@@ -360,6 +381,13 @@ async function cleanupTestData() {
 
   await prisma.customer.deleteMany({ where: { name: { startsWith: 'TEST-Customer-' } } });
   await prisma.supplier.deleteMany({ where: { name: { startsWith: 'TEST-Supplier-' } } });
+
+  // V1 register/till model — Till.registerId is onDelete: Restrict (required
+  // relation), so Till must go before Register. Sale/Shift references to
+  // either are onDelete: SetNull (both optional), already unblocked by the
+  // shift/sale cleanup above regardless of ordering here.
+  await prisma.till.deleteMany({ where: { code: { startsWith: 'TEST-TILL-' } } });
+  await prisma.register.deleteMany({ where: { code: { startsWith: 'TEST-REG-' } } });
 }
 
 module.exports = {
@@ -373,6 +401,8 @@ module.exports = {
   createSellableProduct,
   createTestSale,
   createTestShift,
+  createTestRegister,
+  createTestTill,
   createTestCustomer,
   createTestSupplier,
   createTestPurchaseOrder,

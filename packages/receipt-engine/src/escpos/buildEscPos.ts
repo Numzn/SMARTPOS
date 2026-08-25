@@ -151,24 +151,30 @@ export function buildEscPosCommands(viewModel: ReceiptViewModel): Uint8Array {
     parts.push(line(`Change: ${formatCurrency(vm.payment.change ?? 0)}`, enc));
   }
 
-  parts.push(divider());
-  parts.push(center('ZRA SMART INVOICE', enc));
-  parts.push(divider());
-  if (vm.fiscal.fiscalReceiptNo) {
-    parts.push(line(`Fiscal Receipt: ${vm.fiscal.fiscalReceiptNo}`, enc));
-  }
-  if (vm.fiscal.sdcId) {
-    parts.push(line(`SDC ID: ${vm.fiscal.sdcId}`, enc));
-  }
-  if (vm.fiscal.receiptSignature) {
-    parts.push(line(`Signature: ${vm.fiscal.receiptSignature}`, enc));
-  }
-  if (vm.fiscal.internalData) {
-    parts.push(line(`Internal Data: ${vm.fiscal.internalData}`, enc));
-  }
-  if (vm.fiscal.qrPayload) {
-    parts.push(center('Scan to verify on ZRA Smart Invoice', enc));
-    parts.push(qrCode(vm.fiscal.qrPayload, enc));
+  // !== false, not === true: a snapshot frozen before this flag existed has
+  // no `enabled` key at all and must keep printing fiscal content exactly as
+  // it always did.
+  const showFiscal = vm.fiscal.enabled !== false;
+  if (showFiscal) {
+    parts.push(divider());
+    parts.push(center('ZRA SMART INVOICE', enc));
+    parts.push(divider());
+    if (vm.fiscal.fiscalReceiptNo) {
+      parts.push(line(`Fiscal Receipt: ${vm.fiscal.fiscalReceiptNo}`, enc));
+    }
+    if (vm.fiscal.sdcId) {
+      parts.push(line(`SDC ID: ${vm.fiscal.sdcId}`, enc));
+    }
+    if (vm.fiscal.receiptSignature) {
+      parts.push(line(`Signature: ${vm.fiscal.receiptSignature}`, enc));
+    }
+    if (vm.fiscal.internalData) {
+      parts.push(line(`Internal Data: ${vm.fiscal.internalData}`, enc));
+    }
+    if (vm.fiscal.qrPayload) {
+      parts.push(center('Scan to verify on ZRA Smart Invoice', enc));
+      parts.push(qrCode(vm.fiscal.qrPayload, enc));
+    }
   }
 
   parts.push(divider('-'));
@@ -181,7 +187,9 @@ export function buildEscPosCommands(viewModel: ReceiptViewModel): Uint8Array {
   }
   if (vm.footer.showPoweredBy) {
     parts.push(center(vm.footer.poweredByLine, enc));
-    parts.push(center(vm.footer.fiscalizedLine, enc));
+    if (showFiscal) {
+      parts.push(center(vm.footer.fiscalizedLine, enc));
+    }
   }
 
   parts.push(cmd(LF, LF, LF));

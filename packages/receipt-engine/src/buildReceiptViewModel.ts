@@ -97,6 +97,7 @@ export function buildReceiptViewModel(source: ReceiptSourceData): ReceiptViewMod
       change: source.payment.change ?? null,
     },
     fiscal: {
+      enabled: source.fiscal.enabled ?? true,
       mode: source.fiscal.mode ?? 'ONLINE',
       submissionStatus: source.fiscal.submissionStatus,
       submissionTime: mapSubmissionTime(source.fiscal.submissionTime),

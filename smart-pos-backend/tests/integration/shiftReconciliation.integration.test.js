@@ -397,7 +397,7 @@ describe('Cash register segregation of duties — route level', () => {
 
     // The original Z/declaration figures are untouched by the adjustment.
     const zReport = await prisma.zReport.findUnique({ where: { shiftId: shift.id } });
-    const declaration = await prisma.cashierDeclaration.findUnique({ where: { shiftId: shift.id } });
+    const declaration = await prisma.cashierDeclaration.findFirst({ where: { shiftId: shift.id, type: 'CLOSING' } });
     expect(zReport.expectedClosingCash).toBe(200);
     expect(declaration.declaredTotal).toBe(150);
   });

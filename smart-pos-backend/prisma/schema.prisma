@@ -30,78 +30,79 @@ model User {
   updatedAt   DateTime  @updatedAt
 
   // Relations
-  sales            Sale[]
-  refunds          Refund[]
-  debitNotes       DebitNote[]
-  stockAdjustments StockAdjustment[]
-  stockMovements   StockMovement[]
-  shifts           Shift[]
-  shiftCashMovements ShiftCashMovement[]
-  safeDropsWitnessed ShiftCashMovement[] @relation("SafeDropWitness")
-  discountApprovals Sale[] @relation("SaleDiscountApprovals")
-  cartSessions      CashierCartSession[]
-  approvalsGiven    SupervisorApproval[]
-  zReportsWorked    ZReport[] @relation("ZReportCashier")
-  zReportsAuthorized ZReport[] @relation("ZReportAuthorizer")
+  sales               Sale[]
+  refunds             Refund[]
+  debitNotes          DebitNote[]
+  stockAdjustments    StockAdjustment[]
+  stockMovements      StockMovement[]
+  shifts              Shift[]
+  shiftCashMovements  ShiftCashMovement[]
+  safeDropsWitnessed  ShiftCashMovement[]  @relation("SafeDropWitness")
+  discountApprovals   Sale[]               @relation("SaleDiscountApprovals")
+  cartSessions        CashierCartSession[]
+  approvalsGiven      SupervisorApproval[]
+  zReportsWorked      ZReport[]            @relation("ZReportCashier")
+  zReportsAuthorized  ZReport[]            @relation("ZReportAuthorizer")
   cashierDeclarations CashierDeclaration[]
-  shiftAdjustments  ShiftAdjustment[]
-  branchId         String?
-  branch           Branch?   @relation(fields: [branchId], references: [code])
+  shiftAdjustments    ShiftAdjustment[]
+  shiftCashierTurns   ShiftCashier[]
+  branchId            String?
+  branch              Branch?              @relation(fields: [branchId], references: [code])
 
   // VSDC branch-user sync (Section 5.5, POST /branches/saveBrancheUser)
-  zraSyncedAt      DateTime?
-  zraSyncError     String?
-  zraSyncResponse  Json?
+  zraSyncedAt     DateTime?
+  zraSyncError    String?
+  zraSyncResponse Json?
 
   @@map("users")
 }
 
 model Category {
-  id          String    @id @default(cuid())
+  id          String   @id @default(cuid())
   name        String
   description String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
   // Relations
-  products    Product[]
-  
+  products Product[]
+
   @@map("categories")
 }
 
 model Product {
-  id                    String   @id @default(cuid())
-  name                  String
-  description           String?
-  price                 Float
-  cost                  Float?
-  sku                   String?  @unique
-  barcode               String?  @unique
-  isActive              Boolean  @default(true)
-  categoryId            String
-  
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+  price       Float
+  cost        Float?
+  sku         String? @unique
+  barcode     String? @unique
+  isActive    Boolean @default(true)
+  categoryId  String
+
   // Business Information
-  brand                 String?
-  unit                  String?  @default("EA") // EA, KG, L, etc.
-  minPrice              Float?   // Minimum selling price
-  maxDiscount           Float?   @default(0) // Maximum discount %
-  
+  brand       String?
+  unit        String? @default("EA") // EA, KG, L, etc.
+  minPrice    Float? // Minimum selling price
+  maxDiscount Float?  @default(0) // Maximum discount %
+
   // ZRA/VSDC specific fields for 100% compliance
-  zraItemClassification String?  // ZRA item classification code  
-  zraClassificationCode String?  // Alternative field name for classification
-  zraPackageUnit        String?  // Package unit for ZRA (e.g., "EA", "KG")
-  zraQuantityUnit       String?  // Quantity unit for ZRA  
-  taxType               String?  // Tax type (A=Standard, B=Zero, C=Exempt, etc.)
-  taxRate               Float    @default(16.0) // VAT rate
-  vatCategoryCode       String?  @default("STANDARD") // STANDARD, EXEMPT, ZERO_RATED
-  exciseTaxCode         String?  // Excise tax code if applicable
-  
+  zraItemClassification String? // ZRA item classification code  
+  zraClassificationCode String? // Alternative field name for classification
+  zraPackageUnit        String? // Package unit for ZRA (e.g., "EA", "KG")
+  zraQuantityUnit       String? // Quantity unit for ZRA  
+  taxType               String? // Tax type (A=Standard, B=Zero, C=Exempt, etc.)
+  taxRate               Float   @default(16.0) // VAT rate
+  vatCategoryCode       String? @default("STANDARD") // STANDARD, EXEMPT, ZERO_RATED
+  exciseTaxCode         String? // Excise tax code if applicable
+
   // Expiry tracking fields
-  hasExpiry             Boolean  @default(false)
-  shelfLifeDays         Int?     // Shelf life in days
-  
+  hasExpiry     Boolean @default(false)
+  shelfLifeDays Int? // Shelf life in days
+
   // Inventory management
-  minStockLevel         Int      @default(0)
+  minStockLevel Int @default(0)
 
   // VSDC item registration (Section 6.1)
   zraRegistrationStatus ZraRegistrationStatus @default(PENDING)
@@ -118,26 +119,26 @@ model Product {
   // retrieval, this endpoint returns one row per itemCd (an item master
   // list, not an event log), so no separate idempotency key/dedup table is
   // needed — this column is simply overwritten on every sync.
-  zraItemSnapshot       Json?
-  zraSnapshotSyncedAt   DateTime?
+  zraItemSnapshot     Json?
+  zraSnapshotSyncedAt DateTime?
 
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   // Relations
-  category              Category     @relation(fields: [categoryId], references: [id])
-  inventory             Inventory[]
-  saleItems             SaleItem[]
-  refundItems           RefundItem[]
-  debitNoteItems        DebitNoteItem[]
-  stockAdjustments      StockAdjustment[]
-  stockMovements        StockMovement[]
-  InventoryItem         InventoryBatch[] @relation("ProductBatches") // Use InventoryBatch for consistency
-  purchaseOrderItems    PurchaseOrderItem[]
-  goodsReceivedNoteItems GoodsReceivedNoteItem[]
-  supplierReturnItems   SupplierReturnItem[]
-  compositionsAsParent    ProductComposition[] @relation("CompositionParent")
-  compositionsAsComponent ProductComposition[] @relation("CompositionComponent")
+  category                Category                @relation(fields: [categoryId], references: [id])
+  inventory               Inventory[]
+  saleItems               SaleItem[]
+  refundItems             RefundItem[]
+  debitNoteItems          DebitNoteItem[]
+  stockAdjustments        StockAdjustment[]
+  stockMovements          StockMovement[]
+  InventoryItem           InventoryBatch[]        @relation("ProductBatches") // Use InventoryBatch for consistency
+  purchaseOrderItems      PurchaseOrderItem[]
+  goodsReceivedNoteItems  GoodsReceivedNoteItem[]
+  supplierReturnItems     SupplierReturnItem[]
+  compositionsAsParent    ProductComposition[]    @relation("CompositionParent")
+  compositionsAsComponent ProductComposition[]    @relation("CompositionComponent")
   decidedImportItems      RetrievedImportItem[]
   cashierCartLines        CashierCartLine[]
 
@@ -149,17 +150,17 @@ model Product {
 // per unit of `parentProduct`. One row per component; a finished product with
 // several ingredients has several rows sharing the same parentProductId.
 model ProductComposition {
-  id                    String   @id @default(cuid())
-  parentProductId       String
-  componentProductId    String
-  quantity              Float
+  id                 String @id @default(cuid())
+  parentProductId    String
+  componentProductId String
+  quantity           Float
 
   zraRegistrationStatus ZraRegistrationStatus @default(PENDING)
   zraRegisteredAt       DateTime?
   zraRegistrationError  String?
 
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   parentProduct    Product @relation("CompositionParent", fields: [parentProductId], references: [id])
   componentProduct Product @relation("CompositionComponent", fields: [componentProductId], references: [id])
@@ -169,39 +170,46 @@ model ProductComposition {
 }
 
 model Sale {
-  id          String     @id @default(cuid())
-  total       Float
-  tax         Float?
-  discount    Float?
-  subtotal    Float
-  status      SaleStatus @default(PENDING)
+  id            String        @id @default(cuid())
+  total         Float
+  tax           Float?
+  discount      Float?
+  subtotal      Float
+  status        SaleStatus    @default(PENDING)
   paymentMethod PaymentMethod
-  userId      String
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-  
+  userId        String
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
   // ZRA Smart Invoice fields
-  rcptNo         String?    // Receipt number from ZRA
-  rcptSign       String?    // Digital signature (receiptSignature)
-  intrlData      String?    // VSDC internal data — distinct from rcptSign, both required on the printed invoice
-  qrCode         String?    // QR Code URL
-  vsdcTimestamp  DateTime?  // Timestamp ZRA issued invoice
-  vsdcRequest    Json?      // VSDC request payload (retention)
-  vsdcResponse   Json?      // VSDC response payload (retention)
-  fiscalError    String?    // Last fiscal submission error
-  fiscalErrorCode String?   // ZRA resultCd from the failed submission (e.g. "007" = duplicate), distinct from the human message
-  fiscalInvcNo   Int?       // Sequential VSDC invoice number (per device)
+  rcptNo           String? // Receipt number from ZRA
+  rcptSign         String? // Digital signature (receiptSignature)
+  intrlData        String? // VSDC internal data — distinct from rcptSign, both required on the printed invoice
+  qrCode           String? // QR Code URL
+  vsdcTimestamp    DateTime? // Timestamp ZRA issued invoice
+  vsdcRequest      Json? // VSDC request payload (retention)
+  vsdcResponse     Json? // VSDC response payload (retention)
+  fiscalError      String? // Last fiscal submission error
+  fiscalErrorCode  String? // ZRA resultCd from the failed submission (e.g. "007" = duplicate), distinct from the human message
+  fiscalInvcNo     Int? // Sequential VSDC invoice number (per device)
   vsdcRcptPbctDate DateTime? // VSDC-issued confirmation date (distinct from vsdcTimestamp, our local clock)
-  branchId       String     @default("main") // Operational branch code (inventory.branchId)
+  branchId         String    @default("main") // Operational branch code (inventory.branchId)
 
   // Receipt / customer
-  customerName   String?
-  customerTpin   String?
-  amountPaid     Float?
-  changeAmount   Float?
-  
+  customerName String?
+  customerTpin String?
+  amountPaid   Float?
+  changeAmount Float?
+
   // Cash register attribution — the shift open when this sale was created, if any.
-  shiftId        String?
+  shiftId String?
+
+  // V1 register/till model — nullable, populated only for a sale rung up
+  // through a shift opened via the new register/till flow (openShiftForTill).
+  // A sale attached to a legacy (userId, branchId) auto-shift leaves these
+  // null, same as shiftId always could be null before this.
+  registerId String?
+  tillId     String?
 
   // Manager sign-off recorded when a line or order discount exceeded the
   // approval threshold (Product.maxDiscount, or the default policy floor).
@@ -211,31 +219,35 @@ model Sale {
   customerId String?
 
   // Relations
-  user        User       @relation(fields: [userId], references: [id])
-  branch      Branch     @relation(fields: [branchId], references: [code])
-  saleItems   SaleItem[]
-  refunds     Refund[]   @relation("SaleRefunds")
-  debitNotes  DebitNote[]
-  shift       Shift?     @relation(fields: [shiftId], references: [id])
-  discountApprovedBy User? @relation("SaleDiscountApprovals", fields: [discountApprovedByUserId], references: [id])
-  customer    Customer?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  user               User        @relation(fields: [userId], references: [id])
+  branch             Branch      @relation(fields: [branchId], references: [code])
+  saleItems          SaleItem[]
+  refunds            Refund[]    @relation("SaleRefunds")
+  debitNotes         DebitNote[]
+  shift              Shift?      @relation(fields: [shiftId], references: [id])
+  register           Register?   @relation(fields: [registerId], references: [id])
+  till               Till?       @relation(fields: [tillId], references: [id])
+  discountApprovedBy User?       @relation("SaleDiscountApprovals", fields: [discountApprovedByUserId], references: [id])
+  customer           Customer?   @relation(fields: [customerId], references: [id], onDelete: SetNull)
 
-  @@index([shiftId])
-  @@index([discountApprovedByUserId])
-  @@index([customerId])
   // Regression guard on the atomic counter in allocateFiscalInvcNo — does not
   // catch a sale and a refund colliding, since they share one counter across
   // two tables (see fiscalInvoiceNumber.js).
   @@unique([fiscalInvcNo])
+  @@index([shiftId])
+  @@index([registerId])
+  @@index([tillId])
+  @@index([discountApprovedByUserId])
+  @@index([customerId])
   @@map("sales")
 }
 
 model Refund {
-  id             String       @id @default(cuid())
+  id             String        @id @default(cuid())
   originalSaleId String
   userId         String
-  status         RefundStatus @default(PENDING)
-  reasonCode     String       @default("01")
+  status         RefundStatus  @default(PENDING)
+  reasonCode     String        @default("01")
   reason         String?
   subtotal       Float
   tax            Float?
@@ -243,33 +255,33 @@ model Refund {
   total          Float
   paymentMethod  PaymentMethod
 
-  rcptNo         String?
-  rcptSign       String?
-  intrlData      String?
-  qrCode         String?
-  vsdcTimestamp  DateTime?
-  vsdcRequest    Json?
-  vsdcResponse   Json?
-  fiscalError    String?
-  fiscalErrorCode String?
+  rcptNo           String?
+  rcptSign         String?
+  intrlData        String?
+  qrCode           String?
+  vsdcTimestamp    DateTime?
+  vsdcRequest      Json?
+  vsdcResponse     Json?
+  fiscalError      String?
+  fiscalErrorCode  String?
   vsdcRcptPbctDate DateTime? // VSDC-issued confirmation date (distinct from vsdcTimestamp, our local clock)
 
-  fiscalInvcNo   Int?       // Sequential VSDC credit-note invoice number
+  fiscalInvcNo Int? // Sequential VSDC credit-note invoice number
 
   // Cash register attribution — the shift open when this refund was created, if any.
-  shiftId        String?
+  shiftId String?
 
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  originalSale   Sale         @relation("SaleRefunds", fields: [originalSaleId], references: [id])
-  user           User         @relation(fields: [userId], references: [id])
-  refundItems    RefundItem[]
-  shift          Shift?       @relation(fields: [shiftId], references: [id])
+  originalSale Sale         @relation("SaleRefunds", fields: [originalSaleId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
+  refundItems  RefundItem[]
+  shift        Shift?       @relation(fields: [shiftId], references: [id])
 
+  @@unique([fiscalInvcNo])
   @@index([originalSaleId])
   @@index([shiftId])
-  @@unique([fiscalInvcNo])
   @@map("refunds")
 }
 
@@ -292,21 +304,21 @@ model RefundItem {
   // Snapshot of the product's ZRA classification/tax type at refund time —
   // a later edit to Product must not change what a past credit note (re)submits
   // or reprints (see the equivalent SaleItem fields and saleFiscal.js note).
-  itemClsCd  String?
-  taxType    String?
+  itemClsCd String?
+  taxType   String?
 
-  refund     Refund  @relation(fields: [refundId], references: [id], onDelete: Cascade)
-  product    Product @relation(fields: [productId], references: [id])
+  refund  Refund  @relation(fields: [refundId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
 
   @@map("refund_items")
 }
 
 model DebitNote {
-  id             String       @id @default(cuid())
+  id             String        @id @default(cuid())
   originalSaleId String
   userId         String
-  status         RefundStatus @default(PENDING)
-  reasonCode     String       @default("01")
+  status         RefundStatus  @default(PENDING)
+  reasonCode     String        @default("01")
   reason         String?
   subtotal       Float
   tax            Float?
@@ -314,55 +326,55 @@ model DebitNote {
   total          Float
   paymentMethod  PaymentMethod
 
-  rcptNo         String?
-  rcptSign       String?
-  intrlData      String?
-  qrCode         String?
-  vsdcTimestamp  DateTime?
+  rcptNo           String?
+  rcptSign         String?
+  intrlData        String?
+  qrCode           String?
+  vsdcTimestamp    DateTime?
   vsdcRcptPbctDate DateTime?
-  vsdcRequest    Json?
-  vsdcResponse   Json?
-  fiscalError    String?
-  fiscalErrorCode String?
-  fiscalInvcNo   Int?
+  vsdcRequest      Json?
+  vsdcResponse     Json?
+  fiscalError      String?
+  fiscalErrorCode  String?
+  fiscalInvcNo     Int?
 
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  items          DebitNoteItem[]
-  sale           Sale         @relation(fields: [originalSaleId], references: [id], onDelete: Cascade)
-  user           User         @relation(fields: [userId], references: [id])
+  items DebitNoteItem[]
+  sale  Sale            @relation(fields: [originalSaleId], references: [id], onDelete: Cascade)
+  user  User            @relation(fields: [userId], references: [id])
 
   @@map("debit_notes")
 }
 
 model DebitNoteItem {
-  id           String  @id @default(cuid())
-  debitNoteId  String
-  saleItemId   String?
-  productId    String
-  quantity     Int
-  price        Float
-  total        Float
-  pkg          Int?
-  qty          Int
-  prc          Float
-  splyAmt      Float
-  taxblAmt     Float
-  taxAmt       Float
-  totAmt       Float
+  id          String  @id @default(cuid())
+  debitNoteId String
+  saleItemId  String?
+  productId   String
+  quantity    Int
+  price       Float
+  total       Float
+  pkg         Int?
+  qty         Int
+  prc         Float
+  splyAmt     Float
+  taxblAmt    Float
+  taxAmt      Float
+  totAmt      Float
 
-  itemClsCd    String?
-  taxType      String?
+  itemClsCd String?
+  taxType   String?
 
-  debitNote    DebitNote @relation(fields: [debitNoteId], references: [id], onDelete: Cascade)
-  product      Product   @relation(fields: [productId], references: [id])
+  debitNote DebitNote @relation(fields: [debitNoteId], references: [id], onDelete: Cascade)
+  product   Product   @relation(fields: [productId], references: [id])
 
   @@map("debit_note_items")
 }
 
 model SaleItem {
-  id        String  @id @default(cuid())
+  id        String @id @default(cuid())
   quantity  Int
   price     Float
   total     Float
@@ -373,17 +385,16 @@ model SaleItem {
   // order-level Sale.discount for fiscal total math (see lib/saleFiscal.js);
   // does not alter this line's own tax calculation, so it doesn't touch the
   // existing splyAmt/taxblAmt/taxAmt/totAmt contract refunds/VSDC rely on.
-  discount  Float   @default(0)
-
+  discount Float @default(0)
 
   // VSDC Required fields for 100% compliance
-  pkg       Int?     // Package Quantity - ZRA requirement
-  qty       Int      // Quantity (same as quantity but ZRA specific)
-  prc       Float    // Unit Price - ZRA format
-  splyAmt   Float    // Supply Amount
-  taxblAmt  Float    // Taxable Amount
-  taxAmt    Float    // Tax Amount
-  totAmt    Float    // Total Amount per item
+  pkg      Int? // Package Quantity - ZRA requirement
+  qty      Int // Quantity (same as quantity but ZRA specific)
+  prc      Float // Unit Price - ZRA format
+  splyAmt  Float // Supply Amount
+  taxblAmt Float // Taxable Amount
+  taxAmt   Float // Tax Amount
+  totAmt   Float // Total Amount per item
 
   // Snapshot of the product's ZRA item classification and tax type at sale
   // time. Read live from Product at VSDC-submission time until this was added,
@@ -395,8 +406,8 @@ model SaleItem {
   taxType   String?
 
   // Relations
-  sale      Sale    @relation(fields: [saleId], references: [id])
-  product   Product @relation(fields: [productId], references: [id])
+  sale    Sale    @relation(fields: [saleId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
 
   @@map("sale_items")
 }
@@ -416,7 +427,7 @@ model CashierCartSession {
   createdAt DateTime                 @default(now())
   updatedAt DateTime                 @updatedAt
 
-  user       User                @relation(fields: [userId], references: [id])
+  user       User               @relation(fields: [userId], references: [id])
   lines      CashierCartLine[]
   scanEvents CashierScanEvent[]
 
@@ -456,14 +467,14 @@ model CashierScanEvent {
 // was reversed, by whom, and why lives in AuditLog's TILL_LINE_REVERSAL
 // event, not on this row.
 model CashierCartLine {
-  id        String              @id @default(cuid())
+  id        String                @id @default(cuid())
   sessionId String
   productId String
   quantity  Int
   unitPrice Float
   status    CashierCartLineStatus @default(ACTIVE)
-  createdAt DateTime            @default(now())
-  updatedAt DateTime            @updatedAt
+  createdAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
 
   session CashierCartSession @relation(fields: [sessionId], references: [id])
   product Product            @relation(fields: [productId], references: [id])
@@ -482,26 +493,26 @@ enum CashierCartLineStatus {
 // one specific session/target and is consumed atomically inside the same
 // transaction as that action (see lib/approval.js).
 model SupervisorApproval {
-  id               String                @id @default(cuid())
-  approverUserId   String
-  actionType       SupervisorActionType
+  id                   String               @id @default(cuid())
+  approverUserId       String
+  actionType           SupervisorActionType
   // Nullable: real till-lock actions (line reversal, cart-wide discount from
   // the cashier UI) always bind to a real CashierCartSession, but the
   // pre-existing per-line discount-approval path (createPendingSale called
   // directly, e.g. the bare admin-only sale-creation route or discount-math
   // tests) has no till session at all — sessionId: null there, consistently
   // on both the minted ticket and the consuming check.
-  sessionId        String?
-  targetProductId  String?
-  targetQuantity   Int?
+  sessionId            String?
+  targetProductId      String?
+  targetQuantity       Int?
   targetDiscountAmount Float?
   // Bound target for SHIFT_END — parallel to targetProductId/targetQuantity/
   // targetDiscountAmount above, just for a different action type.
-  targetShiftId    String?
-  authMethod       SupervisorAuthMethod
-  expiresAt        DateTime
-  consumedAt       DateTime?
-  createdAt        DateTime              @default(now())
+  targetShiftId        String?
+  authMethod           SupervisorAuthMethod
+  expiresAt            DateTime
+  consumedAt           DateTime?
+  createdAt            DateTime             @default(now())
 
   approver User @relation(fields: [approverUserId], references: [id])
 
@@ -521,88 +532,88 @@ enum SupervisorAuthMethod {
 
 // ZRA Invoice tracking model for full compliance
 model Invoice {
-  id                String    @id @default(cuid())
-  invoiceNumber     String    @unique
-  customerName      String
-  customerTpin      String?
-  totalAmount       Float
-  totalTaxAmount    Float
-  salesDate         DateTime
-  
+  id             String   @id @default(cuid())
+  invoiceNumber  String   @unique
+  customerName   String
+  customerTpin   String?
+  totalAmount    Float
+  totalTaxAmount Float
+  salesDate      DateTime
+
   // ZRA VSDC Response Fields
-  zraInvcSdcId      String?   // ZRA Invoice SDC ID
-  zraRcptNo         String?   // ZRA Receipt Number
-  zraQrCode         String?   // ZRA QR Code
-  zraSdcId          String?   // ZRA SDC ID
-  zraMrcNo          String?   // ZRA MRC Number
-  zraSubmittedAt    DateTime? // When submitted to ZRA
-  
+  zraInvcSdcId   String? // ZRA Invoice SDC ID
+  zraRcptNo      String? // ZRA Receipt Number
+  zraQrCode      String? // ZRA QR Code
+  zraSdcId       String? // ZRA SDC ID
+  zraMrcNo       String? // ZRA MRC Number
+  zraSubmittedAt DateTime? // When submitted to ZRA
+
   // Status tracking
-  submissionStatus  InvoiceStatus @default(PENDING)
-  retryCount        Int       @default(0)
-  lastError         String?
-  
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
-  
+  submissionStatus InvoiceStatus @default(PENDING)
+  retryCount       Int           @default(0)
+  lastError        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@map("invoices")
 }
 
 // Stock Adjustment model for ZRA compliance
 model StockAdjustment {
-  id          String            @id @default(cuid())
-  productId   String
+  id             String              @id @default(cuid())
+  productId      String
   adjustmentType StockAdjustmentType
-  quantity    Int
-  reason      String
-  ocrnDt      DateTime          // Occurrence Date - ZRA requirement
-  userId      String
-  
+  quantity       Int
+  reason         String
+  ocrnDt         DateTime // Occurrence Date - ZRA requirement
+  userId         String
+
   // Relations
-  product     Product @relation(fields: [productId], references: [id])
-  user        User    @relation(fields: [userId], references: [id])
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
+  product Product @relation(fields: [productId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@map("stock_adjustments")
 }
 
 // Inventory model for tracking stock levels per product per location
 model Inventory {
-  id                String    @id @default(cuid())
-  productId         String
-  branchId          String    @default("main") // Support for multiple locations
-  
+  id        String @id @default(cuid())
+  productId String
+  branchId  String @default("main") // Support for multiple locations
+
   // Stock Information
-  currentStock      Int       @default(0)
-  reservedStock     Int       @default(0) // Held during FISCAL_SUBMITTING (pre-deduct)
-  minimumStock      Int       @default(0)
-  maximumStock      Int       @default(1000)
-  reorderPoint      Int       @default(10)
-  reorderQuantity   Int       @default(50)
-  
+  currentStock    Int @default(0)
+  reservedStock   Int @default(0) // Held during FISCAL_SUBMITTING (pre-deduct)
+  minimumStock    Int @default(0)
+  maximumStock    Int @default(1000)
+  reorderPoint    Int @default(10)
+  reorderQuantity Int @default(50)
+
   // Cost Information
-  averageCost       Float     @default(0)
-  lastCost          Float     @default(0)
-  totalValue        Float     @default(0) // currentStock * averageCost
-  
+  averageCost Float @default(0)
+  lastCost    Float @default(0)
+  totalValue  Float @default(0) // currentStock * averageCost
+
   // Tracking Information
-  lastStockedDate   DateTime?
-  lastSoldDate      DateTime?
-  lastCountDate     DateTime? // Last physical count
-  
+  lastStockedDate DateTime?
+  lastSoldDate    DateTime?
+  lastCountDate   DateTime? // Last physical count
+
   // Alerts
-  lowStockAlert     Boolean   @default(false)
-  excessStockAlert  Boolean   @default(false)
-  
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
-  
+  lowStockAlert    Boolean @default(false)
+  excessStockAlert Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   // Relations
-  product           Product   @relation(fields: [productId], references: [id])
-  batches           InventoryBatch[]
-  
+  product Product          @relation(fields: [productId], references: [id])
+  batches InventoryBatch[]
+
   // Ensure one inventory record per product per branch
   @@unique([productId, branchId])
   @@map("inventory")
@@ -610,43 +621,43 @@ model Inventory {
 
 // New model for batch-level tracking with expiry dates
 model InventoryBatch {
-  id                String    @id @default(cuid())
-  inventoryId       String?
-  productId         String    // Direct product relation for easier queries
-  batchNumber       String?
-  quantity          Int
-  unitCost          Float
-  totalCost         Float
-  costPrice         Float    // Alias for unitCost for consistency with frontend
-  sellingPrice      Float    // Current selling price for this batch
-  supplier          String?  // Supplier name/info
-  
+  id           String  @id @default(cuid())
+  inventoryId  String?
+  productId    String // Direct product relation for easier queries
+  batchNumber  String?
+  quantity     Int
+  unitCost     Float
+  totalCost    Float
+  costPrice    Float // Alias for unitCost for consistency with frontend
+  sellingPrice Float // Current selling price for this batch
+  supplier     String? // Supplier name/info
+
   // Expiry tracking
-  receivedDate      DateTime  @default(now())
-  expiryDate        DateTime?
-  daysUntilExpiry   Int?      // Calculated field
-  
+  receivedDate    DateTime  @default(now())
+  expiryDate      DateTime?
+  daysUntilExpiry Int? // Calculated field
+
   // Supplier information
-  supplierInfo      String?
-  supplierBatch     String?
-  
+  supplierInfo  String?
+  supplierBatch String?
+
   // Status tracking
-  status            BatchStatus @default(ACTIVE)
-  
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
-  
+  status BatchStatus @default(ACTIVE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   // Optional link to a real Supplier record — the pre-existing `supplier`/
   // `supplierInfo` free-text fields above stay untouched for the legacy
   // receiving path; this is additive, populated only via GRN receiving.
-  supplierId        String?
+  supplierId String?
 
   // Relations
-  inventory         Inventory? @relation(fields: [inventoryId], references: [id])
-  product           Product    @relation("ProductBatches", fields: [productId], references: [id])
-  movements         StockMovement[]
-  supplierRecord    Supplier?  @relation(fields: [supplierId], references: [id], onDelete: SetNull)
-  grnItems          GoodsReceivedNoteItem[]
+  inventory           Inventory?              @relation(fields: [inventoryId], references: [id])
+  product             Product                 @relation("ProductBatches", fields: [productId], references: [id])
+  movements           StockMovement[]
+  supplierRecord      Supplier?               @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  grnItems            GoodsReceivedNoteItem[]
   supplierReturnItems SupplierReturnItem[]
 
   @@index([supplierId])
@@ -655,49 +666,49 @@ model InventoryBatch {
 
 // Stock Movement model for tracking all inventory changes
 model StockMovement {
-  id                String              @id @default(cuid())
-  productId         String
-  branchId          String              @default("main")
-  batchId           String?             // Link to specific batch
-  
+  id        String  @id @default(cuid())
+  productId String
+  branchId  String  @default("main")
+  batchId   String? // Link to specific batch
+
   // Movement Details
-  movementType      StockMovementType
-  quantity          Int                 // Positive for inbound, negative for outbound
-  previousStock     Int
-  newStock          Int
-  unitCost          Float?
-  totalCost         Float?
-  
+  movementType  StockMovementType
+  quantity      Int // Positive for inbound, negative for outbound
+  previousStock Int
+  newStock      Int
+  unitCost      Float?
+  totalCost     Float?
+
   // Reference Information
-  referenceType     String?             // SALE, PURCHASE, ADJUSTMENT, TRANSFER
-  referenceId       String?             // ID of the related transaction
-  reason            String?
-  notes             String?
-  
+  referenceType String? // SALE, PURCHASE, ADJUSTMENT, TRANSFER
+  referenceId   String? // ID of the related transaction
+  reason        String?
+  notes         String?
+
   // Batch/Lot Information (for advanced inventory)
-  batchNumber       String?
-  expiryDate        DateTime?
-  supplierInfo      String?
-  
+  batchNumber  String?
+  expiryDate   DateTime?
+  supplierInfo String?
+
   // User Information
   // Nullable as of item 28* (2026-08-12) — a record retrieved from ZRA via
   // selectStockItems has no local SmartPOS operator to attribute it to.
   // Every locally-originated movement (sale/adjustment/etc.) still sets
   // this; only RECONCILED rows leave it null.
-  userId            String?
+  userId String?
 
   // VSDC stock sync (Section 6.2)
-  zraSyncedAt       DateTime?
-  zraSyncError      String?
-  zraSyncResponse   Json?
+  zraSyncedAt     DateTime?
+  zraSyncError    String?
+  zraSyncResponse Json?
 
-  createdAt         DateTime            @default(now())
+  createdAt DateTime @default(now())
 
   // Relations
   // Relations
-  product           Product             @relation(fields: [productId], references: [id])
-  user              User?               @relation(fields: [userId], references: [id])
-  batch             InventoryBatch?     @relation(fields: [batchId], references: [id])
+  product Product         @relation(fields: [productId], references: [id])
+  user    User?           @relation(fields: [userId], references: [id])
+  batch   InventoryBatch? @relation(fields: [batchId], references: [id])
 
   @@map("stock_movements")
 }
@@ -709,13 +720,13 @@ model StockMovement {
 // across restarts (an in-memory cursor, like zraCodesService.js's
 // lastSyncDate, would silently reset to a stale default on every deploy).
 model StockRetrievalCursor {
-  id                String   @id @default(cuid())
-  branchId          String   @unique
-  lastReqDt         String   // yyyyMMddHHmmss sent on the most recent successful call
+  id                String    @id @default(cuid())
+  branchId          String    @unique
+  lastReqDt         String // yyyyMMddHHmmss sent on the most recent successful call
   lastSyncedAt      DateTime?
   lastSyncError     String?
-  lastImportedCount Int      @default(0)
-  updatedAt         DateTime @updatedAt
+  lastImportedCount Int       @default(0)
+  updatedAt         DateTime  @updatedAt
 
   @@map("stock_retrieval_cursors")
 }
@@ -728,7 +739,7 @@ model StockRetrievalCursor {
 model ItemRetrievalCursor {
   id                String    @id @default(cuid())
   branchId          String    @unique
-  lastReqDt         String    // yyyyMMddHHmmss sent on the most recent successful call
+  lastReqDt         String // yyyyMMddHHmmss sent on the most recent successful call
   lastSyncedAt      DateTime?
   lastSyncError     String?
   lastImportedCount Int       @default(0)
@@ -745,7 +756,7 @@ model ItemRetrievalCursor {
 model PurchaseRetrievalCursor {
   id                String    @id @default(cuid())
   branchId          String    @unique
-  lastReqDt         String    // yyyyMMddHHmmss sent on the most recent successful call
+  lastReqDt         String // yyyyMMddHHmmss sent on the most recent successful call
   lastSyncedAt      DateTime?
   lastSyncError     String?
   lastImportedCount Int       @default(0)
@@ -801,7 +812,7 @@ model RetrievedPurchase {
 model ImportRetrievalCursor {
   id                String    @id @default(cuid())
   branchId          String    @unique
-  lastReqDt         String    // yyyyMMddHHmmss sent on the most recent successful call
+  lastReqDt         String // yyyyMMddHHmmss sent on the most recent successful call
   lastSyncedAt      DateTime?
   lastSyncError     String?
   lastImportedCount Int       @default(0)
@@ -838,7 +849,7 @@ model RetrievedImportItem {
   dclNo          String?
   hsCd           String?
   itemNm         String?
-  imptItemSttsCd String?  // ZRA's own current status at retrieval time (informational only — not the local decision)
+  imptItemSttsCd String? // ZRA's own current status at retrieval time (informational only — not the local decision)
   orgnNatCd      String?
   exptNatCd      String?
   pkg            Float?
@@ -856,15 +867,15 @@ model RetrievedImportItem {
   retrievedAt    DateTime @default(now())
 
   // Local review decision — see model comment.
-  decision            ImportItemDecision @default(PENDING)
-  decidedAt            DateTime?
-  decidedBy             String?
-  decidedProductId      String?
-  remark                String?
+  decision         ImportItemDecision @default(PENDING)
+  decidedAt        DateTime?
+  decidedBy        String?
+  decidedProductId String?
+  remark           String?
 
   // VSDC decision-sync (POST /imports/updateImportItems) outcome.
-  zraDecisionSyncedAt   DateTime?
-  zraDecisionSyncError  String?
+  zraDecisionSyncedAt     DateTime?
+  zraDecisionSyncError    String?
   zraDecisionSyncResponse Json?
 
   decidedProduct Product? @relation(fields: [decidedProductId], references: [id])
@@ -899,24 +910,73 @@ model Branch {
   // than overwriting them: those fields are foreign-key-critical locally
   // (sales.branchId, shifts, etc.) and ZRA's copy is a reference to compare
   // against, not an authority that should silently mutate live records.
-  zraBranchSnapshot     Json?
-  zraSnapshotSyncedAt   DateTime?
+  zraBranchSnapshot   Json?
+  zraSnapshotSyncedAt DateTime?
 
-  createdBy             String?
-  updatedBy             String?
-  deactivatedAt         DateTime?
-  deactivatedBy         String?
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+  createdBy     String?
+  updatedBy     String?
+  deactivatedAt DateTime?
+  deactivatedBy String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  users                 User[]
-  sales                 Sale[]
-  shifts                Shift[]
-  purchaseOrders        PurchaseOrder[]
-  goodsReceivedNotes    GoodsReceivedNote[]
-  supplierReturns       SupplierReturn[]
+  users              User[]
+  sales              Sale[]
+  shifts             Shift[]
+  purchaseOrders     PurchaseOrder[]
+  goodsReceivedNotes GoodsReceivedNote[]
+  supplierReturns    SupplierReturn[]
+  registers          Register[]
 
   @@map("branches")
+}
+
+// V1 register/till model — a physical/logical POS checkout station at a
+// branch. Deliberately separate from Branch (a location, not a checkout
+// station) and from Till (kept as its own model even though V1 is strictly
+// one active till per register, so a future multi-till-per-register need
+// doesn't force a breaking schema change — see Till below).
+model Register {
+  id        String   @id @default(cuid())
+  code      String   @unique // e.g. "REG-01"
+  name      String
+  branchId  String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  branch Branch @relation(fields: [branchId], references: [code])
+  tills  Till[]
+  sales  Sale[]
+
+  @@index([branchId])
+  @@map("registers")
+}
+
+// The cash drawer for a register. Kept as its own model, not folded into
+// Register, even though V1 deliberately supports only one active till per
+// register (no multi-drawer/till-accountability modes — see the schema
+// comment on Shift below). defaultOpeningFloat is purely a seed/suggestion
+// for the "open a new shift" flow — requirement is no single global opening
+// float for the whole business, and each till can be configured
+// differently. The actual float used for a given shift always lives on
+// Shift.openingFloat (pre-existing field), which can override this default.
+model Till {
+  id                  String   @id @default(cuid())
+  code                String   @unique // e.g. "TILL-01"
+  name                String
+  registerId          String
+  isActive            Boolean  @default(true)
+  defaultOpeningFloat Float    @default(0)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  register Register @relation(fields: [registerId], references: [id])
+  shifts   Shift[]
+  sales    Sale[]
+
+  @@index([registerId])
+  @@map("tills")
 }
 
 // Cash register / till session — the "trust boundary" for a cashier's cash
@@ -933,52 +993,96 @@ model Branch {
 // migration-history baseline reset — if you ever reset migration history,
 // this index must be re-added by hand. A missing index means a cashier can
 // end up with two simultaneous active shifts.
+//
+// Same story for openShiftForTill()'s till-based equivalent: migration
+// 20260824034905_shift_active_till_unique_index creates `UNIQUE INDEX
+// shifts_active_till_key ON shifts (tillId) WHERE status IN
+// ('OPEN','INITIALIZING')`, guaranteeing at most one active shift per till.
+// A NULL tillId (every legacy shift) is never a duplicate of another NULL
+// under Postgres uniqueness rules, so this does not constrain the legacy
+// flow above. Also invisible to `prisma db push` / a migration-history
+// reset — re-add by hand if ever missing.
 model Shift {
-  id             String      @id @default(cuid())
-  shiftNumber    String      @unique // human-readable reference on X/Z reports
-  branchId       String      @default("main")
-  userId         String      // cashier who opened the shift
-  status         ShiftStatus @default(OPEN)
+  id          String      @id @default(cuid())
+  shiftNumber String      @unique // human-readable reference on X/Z reports
+  branchId    String      @default("main")
+  userId      String // cashier who opened the shift — unchanged meaning;
+  // see ShiftCashier for who is *currently* operating it
+  status      ShiftStatus @default(OPEN)
 
-  openingFloat   Float       @default(0)
-  openedAt       DateTime    @default(now())
-  openingNotes   String?
+  // V1 register/till model — nullable so every shift created through the
+  // existing (userId, branchId) auto-shift flow (ensureShiftForLogin) stays
+  // valid, untouched, with no till attached. Only shifts opened through the
+  // new openShiftForTill() path set this.
+  tillId String?
 
-  endedAt        DateTime?   // cashier "end shift" timestamp — locks cash movements, awaits reconciliation
+  openingFloat Float    @default(0)
+  openedAt     DateTime @default(now())
+  openingNotes String?
+
+  endedAt        DateTime? // cashier "end shift" timestamp — locks cash movements, awaits reconciliation
   closedAt       DateTime?
   closedByUserId String?
-  countedCash    Float?      // physical cash counted at close
-  expectedCash   Float?      // computed at close: float + cash sales - cash refunds + cashIn - cashOut - paidOut
-  variance       Float?      // countedCash - expectedCash (negative = short, positive = over)
+  countedCash    Float? // physical cash counted at close
+  expectedCash   Float? // computed at close: float + cash sales - cash refunds + cashIn - cashOut - paidOut
+  variance       Float? // countedCash - expectedCash (negative = short, positive = over)
   closingNotes   String?
 
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  user           User                @relation(fields: [userId], references: [id])
-  branch         Branch              @relation(fields: [branchId], references: [code])
-  cashMovements  ShiftCashMovement[]
-  sales          Sale[]
-  refunds        Refund[]
-  zReport        ZReport?
-  declaration    CashierDeclaration?
-  adjustments    ShiftAdjustment[]
+  user                 User                  @relation(fields: [userId], references: [id])
+  branch               Branch                @relation(fields: [branchId], references: [code])
+  till                 Till?                 @relation(fields: [tillId], references: [id])
+  cashMovements        ShiftCashMovement[]
+  sales                Sale[]
+  refunds              Refund[]
+  zReport              ZReport?
+  declarations         CashierDeclaration[]
+  adjustments          ShiftAdjustment[]
+  shiftCashiers        ShiftCashier[]
 
   @@index([branchId, status])
   @@index([userId, status])
+  @@index([tillId, status])
   @@map("shifts")
+}
+
+// V1 register/till model — participation history for a shift: who was
+// actually operating the register/till, and when. Deliberately separate
+// from Shift.userId (kept as "who opened it," unchanged): a shift opened
+// through openShiftForTill() can outlive the cashier who started it via
+// handoverShift(), which closes the current row here and opens a new one.
+// At most one row per shift may have endedAt: null at a time (the
+// currently-active cashier) — enforced by a partial unique index with no
+// schema.prisma representation, same pattern as shifts_active_user_branch_key
+// on the Shift model; see the migration that adds it.
+model ShiftCashier {
+  id        String    @id @default(cuid())
+  shiftId   String
+  userId    String
+  startedAt DateTime  @default(now())
+  endedAt   DateTime?
+  note      String? // free-text handover reason, e.g. "end of shift", "break" — not a workflow field
+
+  shift Shift @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id])
+
+  @@index([shiftId])
+  @@index([userId])
+  @@map("shift_cashiers")
 }
 
 // Cash in / cash out / paid out / safe-drop entries recorded against an open
 // shift — the audit trail behind a Z-report's expected-cash figure.
 model ShiftCashMovement {
-  id        String            @id @default(cuid())
-  shiftId   String
-  type      CashMovementType
-  amount    Float
-  reason    String?
-  userId    String            // who recorded the movement (may differ from shift owner)
-  createdAt DateTime          @default(now())
+  id            String           @id @default(cuid())
+  shiftId       String
+  type          CashMovementType
+  amount        Float
+  reason        String?
+  userId        String // who recorded the movement (may differ from shift owner)
+  createdAt     DateTime         @default(now())
   // Safe-drop-specific, both optional — null for ordinary CASH_IN/CASH_OUT/
   // PAID_OUT movements. safeId identifies which safe/destination for a
   // multi-safe deployment (a single-safe business just leaves this null);
@@ -989,9 +1093,9 @@ model ShiftCashMovement {
   safeId        String?
   witnessUserId String?
 
-  shift     Shift @relation(fields: [shiftId], references: [id], onDelete: Cascade)
-  user      User  @relation(fields: [userId], references: [id])
-  witness   User? @relation("SafeDropWitness", fields: [witnessUserId], references: [id])
+  shift   Shift @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  user    User  @relation(fields: [userId], references: [id])
+  witness User? @relation("SafeDropWitness", fields: [witnessUserId], references: [id])
 
   @@index([shiftId])
   @@map("shift_cash_movements")
@@ -1007,71 +1111,84 @@ model ShiftCashMovement {
 // counts anything, so a declaration can never influence what it's compared
 // against.
 model ZReport {
-  id                    String   @id @default(cuid())
-  shiftId               String   @unique
-  zNumber               String   @unique // via nextSequentialNumber, same pattern as shiftNumber -> "Z-000184"
-  branchId              String
-  cashierUserId         String   // who worked the shift
-  authorizedByUserId    String   // the Supervisor+/Manager+ whose PIN authorized the close
-                                  // (or, for a backfilled report, whoever triggered the backfill)
-  supervisorApprovalId  String?  @unique // the consumed SHIFT_END ticket — proof of authorization.
-                                          // Null only for a backfilled report (a shift that reached
-                                          // PENDING_RECONCILIATION before this feature existed, and
-                                          // never went through the PIN-gated endShift() flow).
-  backfilled             Boolean  @default(false)
-  generatedAt           DateTime @default(now())
-  shiftOpenedAt          DateTime
-  shiftEndedAt           DateTime
+  id                   String   @id @default(cuid())
+  shiftId              String   @unique
+  zNumber              String   @unique // via nextSequentialNumber, same pattern as shiftNumber -> "Z-000184"
+  branchId             String
+  cashierUserId        String // who worked the shift
+  authorizedByUserId   String // the Supervisor+/Manager+ whose PIN authorized the close
+  // (or, for a backfilled report, whoever triggered the backfill)
+  supervisorApprovalId String?  @unique // the consumed SHIFT_END ticket — proof of authorization.
+  // Null only for a backfilled report (a shift that reached
+  // PENDING_RECONCILIATION before this feature existed, and
+  // never went through the PIN-gated endShift() flow).
+  backfilled           Boolean  @default(false)
+  generatedAt          DateTime @default(now())
+  shiftOpenedAt        DateTime
+  shiftEndedAt         DateTime
 
   // Frozen totals — computed once here from computeExpectedCash/getShiftReport,
   // never recomputed after this row exists.
-  openingFloat          Float
-  grossSales            Float
-  discounts             Float
-  netSales              Float
-  tax                   Float
-  refunds               Float
-  cancelledCount        Int
-  transactionCount      Int
-  salesByMethod         Json     // [{paymentMethod, total, count}, ...]
-  cashSales             Float
-  cashRefunds           Float
-  cashIn                Float
-  cashOut                Float
-  paidOut                Float
-  safeDrops              Json    // [{id, amount, createdAt, safeId, witnessUserId}, ...]
-  safeDropsTotal          Float
-  expectedClosingCash     Float   // THE frozen number reconciliation compares against
+  openingFloat        Float
+  grossSales          Float
+  discounts           Float
+  netSales            Float
+  tax                 Float
+  refunds             Float
+  cancelledCount      Int
+  transactionCount    Int
+  salesByMethod       Json // [{paymentMethod, total, count}, ...]
+  cashSales           Float
+  cashRefunds         Float
+  cashIn              Float
+  cashOut             Float
+  paidOut             Float
+  safeDrops           Json // [{id, amount, createdAt, safeId, witnessUserId}, ...]
+  safeDropsTotal      Float
+  expectedClosingCash Float // THE frozen number reconciliation compares against
 
-  shift        Shift @relation(fields: [shiftId], references: [id])
-  cashier      User  @relation("ZReportCashier", fields: [cashierUserId], references: [id])
-  authorizedBy User  @relation("ZReportAuthorizer", fields: [authorizedByUserId], references: [id])
+  shift        Shift               @relation(fields: [shiftId], references: [id])
+  cashier      User                @relation("ZReportCashier", fields: [cashierUserId], references: [id])
+  authorizedBy User                @relation("ZReportAuthorizer", fields: [authorizedByUserId], references: [id])
   declaration  CashierDeclaration?
   adjustments  ShiftAdjustment[]
 
   @@map("z_reports")
 }
 
-// The cashier's physical cash count, submitted independently of the till/POS
-// session — never enterable at the till itself (see routes/shifts.js:POST
-// /:id/declaration, gated to the shift's own cashier). Deliberately
-// immutable once created: a wrong declaration is corrected via a
-// ShiftAdjustment, never by editing this row.
+// The cashier's physical cash count. V1 register/till model: a shift can now
+// carry more than one of these over its life (an OPENING count when a
+// register/till shift starts, a HANDOVER count each time the operating
+// cashier changes, and exactly one CLOSING count) — see CashDeclarationType.
+// The original single-declaration-per-shift behavior (always effectively
+// "closing," never enterable at the till itself — see routes/shifts.js:POST
+// /:id/declaration) is preserved exactly: at most one CLOSING row per shift,
+// still 1:1 with a ZReport, still immutable once created (a wrong count is
+// corrected via a ShiftAdjustment, never by editing this row). shiftId's
+// plain uniqueness is gone (it now has to allow multiple HANDOVER rows);
+// the "at most one OPENING / at most one CLOSING per shift" invariant is
+// enforced by two partial unique indexes with no schema.prisma
+// representation — see the migration that adds them (same pattern as the
+// pre-existing shifts_active_user_branch_key index on the Shift model).
 model CashierDeclaration {
-  id                String   @id @default(cuid())
-  zReportId         String   @unique
-  shiftId           String   @unique
-  declaredByUserId  String
-  declaredAt        DateTime @default(now())
-  declaredTotal     Float
-  denominations     Json?    // optional [{value, count}, ...] — nullable so a
-                              // deployment isn't forced into denomination-level
-                              // entry, but the shape exists without a future migration
+  id               String              @id @default(cuid())
+  type             CashDeclarationType @default(CLOSING)
+  // Only ever set for a CLOSING declaration — OPENING/HANDOVER happen
+  // before a ZReport exists for this shift.
+  zReportId        String?             @unique
+  shiftId          String
+  declaredByUserId String
+  declaredAt       DateTime            @default(now())
+  declaredTotal    Float
+  denominations    Json? // optional [{value, count}, ...] — nullable so a
+  // deployment isn't forced into denomination-level
+  // entry, but the shape exists without a future migration
 
-  zReport    ZReport @relation(fields: [zReportId], references: [id])
-  shift      Shift   @relation(fields: [shiftId], references: [id])
-  declaredBy User    @relation(fields: [declaredByUserId], references: [id])
+  zReport    ZReport? @relation(fields: [zReportId], references: [id])
+  shift      Shift    @relation(fields: [shiftId], references: [id])
+  declaredBy User     @relation(fields: [declaredByUserId], references: [id])
 
+  @@index([shiftId])
   @@map("cashier_declarations")
 }
 
@@ -1105,7 +1222,7 @@ model VsdcDevice {
   signKey      String?
   cmcKey       String?
   initialized  Boolean  @default(false)
-  lastInvcNo   Int      @default(0)  // Last allocated fiscal invoice number
+  lastInvcNo   Int      @default(0) // Last allocated fiscal invoice number
   initResponse Json?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -1115,39 +1232,45 @@ model VsdcDevice {
 }
 
 model BusinessProfile {
-  id              String   @id @default("default")
-  tradingName     String
-  tpin            String
-  logoUrl         String?
-  footerLines     Json     @default("[]")
-  showPoweredBy   Boolean  @default(true)
-  receiptVersion  String   @default("1.0")
+  id                String   @id @default("default")
+  tradingName       String
+  tpin              String
+  logoUrl           String?
+  footerLines       Json     @default("[]")
+  showPoweredBy     Boolean  @default(true)
+  receiptVersion    String   @default("1.0")
+  // Receipt-display switch only — does NOT gate whether checkout actually
+  // submits to VSDC (lib/saleFiscal.js is untouched by this flag). OFF hides
+  // the fiscal details/QR/verification section on printed receipts; ON
+  // restores the receipt exactly as it already renders today. Defaults OFF
+  // for any newly-created BusinessProfile row.
+  zraEnabled        Boolean  @default(false)
   // NUMZ discount authorization policy (not a ZRA requirement) — see
   // lib/discountPolicy.js for the shape and safe-default merge logic. The
   // DB default here is the strict/safe policy: existing installations that
   // never touch this become strict, not permissive.
-  discountPolicy  Json     @default("{\"cashierCanApply\":false,\"cashierCanRequest\":false,\"supervisorCanApply\":false,\"managerCanApply\":true,\"approvalRequired\":true,\"discountLimits\":{}}")
+  discountPolicy    Json     @default("{\"cashierCanApply\":false,\"cashierCanRequest\":false,\"supervisorCanApply\":false,\"managerCanApply\":true,\"approvalRequired\":true,\"discountLimits\":{}}")
   // Configurable safe-drop threshold — same "stored on the singleton, not
   // hardcoded" precedent as discountPolicy above. Null/unset = the till never
   // warns; a value means the till suggests a safe drop once the live expected
   // drawer balance reaches it. Never forces a drop, never assumes every drop
   // must equal the threshold exactly.
   safeDropThreshold Float?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   @@map("business_profiles")
 }
 
 model ReceiptSnapshot {
-  id            String             @id @default(cuid())
-  sourceType    ReceiptSourceType
-  sourceId      String
-  version       String             @default("1.0")
-  snapshot      Json
-  reprintCount  Int                @default(0)
-  createdAt     DateTime           @default(now())
-  updatedAt     DateTime           @updatedAt
+  id           String            @id @default(cuid())
+  sourceType   ReceiptSourceType
+  sourceId     String
+  version      String            @default("1.0")
+  snapshot     Json
+  reprintCount Int               @default(0)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
 
   @@unique([sourceType, sourceId])
   @@map("receipt_snapshots")
@@ -1204,18 +1327,18 @@ enum PrinterType {
 }
 
 model PrinterProfile {
-  id        String      @id @default(cuid())
-  name      String
-  type      PrinterType @default(BROWSER)
-  format    String      @default("thermal")
-  host      String?
-  port      Int         @default(9100)
-  isDefault Boolean     @default(false)
-  branchId  String?
-  lastTestAt     DateTime?
-  lastTestOk     Boolean?
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
+  id         String      @id @default(cuid())
+  name       String
+  type       PrinterType @default(BROWSER)
+  format     String      @default("thermal")
+  host       String?
+  port       Int         @default(9100)
+  isDefault  Boolean     @default(false)
+  branchId   String?
+  lastTestAt DateTime?
+  lastTestOk Boolean?
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
 
   @@map("printer_profiles")
 }
@@ -1331,9 +1454,9 @@ enum ZraRegistrationStatus {
 }
 
 enum ShiftStatus {
-  INITIALIZING            // shift row exists (shiftNumber allocated) but the
-                          // cashier hasn't confirmed their opening cash yet —
-                          // see ensureShiftForLogin/confirmOpeningCash in lib/shift.js
+  INITIALIZING // shift row exists (shiftNumber allocated) but the
+  // cashier hasn't confirmed their opening cash yet —
+  // see ensureShiftForLogin/confirmOpeningCash in lib/shift.js
   OPEN
   PENDING_RECONCILIATION
   CLOSED
@@ -1349,18 +1472,27 @@ enum CashMovementType {
   SAFE_DROP
 }
 
+// V1 register/till model — CashierDeclaration.type. At most one OPENING and
+// one CLOSING per shift (partial unique indexes, see the migration); any
+// number of HANDOVER declarations, one per cashier changeover.
+enum CashDeclarationType {
+  OPENING
+  HANDOVER
+  CLOSING
+}
+
 enum StockMovementType {
-  PURCHASE_IN       // Stock received from supplier
-  SALE_OUT          // Stock sold to customer
-  ADJUSTMENT_IN     // Manual increase (found stock, correction)
-  ADJUSTMENT_OUT    // Manual decrease (damage, theft, correction)
-  TRANSFER_IN       // Stock received from another branch
-  TRANSFER_OUT      // Stock sent to another branch
-  RETURN_IN         // Customer returns
-  RETURN_OUT        // Returns to supplier
-  RECOUNT           // Physical stock count adjustment
-  PRODUCTION_IN     // Manufactured/assembled items
-  PRODUCTION_OUT    // Raw materials used in production
+  PURCHASE_IN // Stock received from supplier
+  SALE_OUT // Stock sold to customer
+  ADJUSTMENT_IN // Manual increase (found stock, correction)
+  ADJUSTMENT_OUT // Manual decrease (damage, theft, correction)
+  TRANSFER_IN // Stock received from another branch
+  TRANSFER_OUT // Stock sent to another branch
+  RETURN_IN // Customer returns
+  RETURN_OUT // Returns to supplier
+  RECOUNT // Physical stock count adjustment
+  PRODUCTION_IN // Manufactured/assembled items
+  PRODUCTION_OUT // Raw materials used in production
   // Item 28* (POST /stock/selectStockItems, OPTIONAL per spec). A record
   // retrieved FROM ZRA, not created by a local operational event — the
   // response has no direction/sarTyCd equivalent (confirmed against the
@@ -1409,11 +1541,11 @@ model Customer {
   // VSDC branch-customer sync (Section 5.5, POST /branches/saveBrancheCustomers) —
   // only meaningful once `tpin` is set, since custTpin is a required field on
   // that endpoint; a walk-in customer with no tpin is never pushed.
-  zraSyncedAt   DateTime?
-  zraSyncError  String?
+  zraSyncedAt     DateTime?
+  zraSyncError    String?
   zraSyncResponse Json?
 
-  sales         Sale[]
+  sales            Sale[]
 
   @@index([phone])
   @@index([tpin])

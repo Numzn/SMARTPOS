@@ -24,6 +24,48 @@ async function getOpenShiftForUser(userId, branchId = DEFAULT_BRANCH) {
 }
 
 /**
+ * The active (OPEN) shift on a given till, if any — what the Cashier screen
+ * checks on load to decide "open a new shift" vs. "someone (maybe me) is
+ * already operating this till." Requirement: register/till opening a shift
+ * must never silently spawn a second one for the same till.
+ */
+async function getActiveShiftForTill(tillId) {
+  return prisma.shift.findFirst({
+    where: { tillId, status: 'OPEN' },
+    include: shiftInclude,
+  });
+}
+
+/**
+ * The single, unified "what shift is this user currently operating" answer
+ * — requirement: do not maintain two competing current-shift systems.
+ *
+ * The two ownership concepts are NOT interchangeable, and deliberately
+ * scoped so they can never both claim the same shift: a legacy (userId,
+ * branchId) shift has no tillId at all, and Shift.userId is its only
+ * ownership concept, unchanged from before this model existed. A shift
+ * opened via openShiftForTill() always has a tillId, and its current
+ * operator is whoever ShiftCashier says — never Shift.userId, which on a
+ * till-based shift only ever means "who opened it" and does NOT change on a
+ * handover. Checking Shift.userId for a till-based shift would incorrectly
+ * keep matching the original opener forever, even after they've handed off
+ * — exactly the bug this scoping avoids.
+ */
+async function getCurrentOperatingShiftForUser(userId, branchId = DEFAULT_BRANCH) {
+  const legacy = await prisma.shift.findFirst({
+    where: { userId, branchId, status: 'OPEN', tillId: null },
+    include: shiftInclude,
+  });
+  if (legacy) return legacy;
+
+  const currentTurn = await prisma.shiftCashier.findFirst({
+    where: { userId, endedAt: null, shift: { status: 'OPEN' } },
+    include: { shift: { include: shiftInclude } },
+  });
+  return currentTurn?.shift ?? null;
+}
+
+/**
  * OPEN or INITIALIZING — "does this user currently have an active shift at
  * all," used by ensureShiftForLogin to decide resume-vs-create. Deliberately
  * separate from getOpenShiftForUser (OPEN-only), which other callers rely on
@@ -468,6 +510,15 @@ async function endShift(shiftId, { approvalId }) {
       include: shiftInclude,
     });
 
+    // V1 register/till model — a shift opened via openShiftForTill() has an
+    // open-ended ShiftCashier row for whoever is currently on it; the shift
+    // ending means that participation is over too. A no-op for a legacy
+    // (userId, branchId) shift, which never has any ShiftCashier rows.
+    await tx.shiftCashier.updateMany({
+      where: { shiftId, endedAt: null },
+      data: { endedAt: totals.shiftEndedAt },
+    });
+
     return { shift: updatedShift, zReport };
   });
 }
@@ -495,11 +546,14 @@ async function backfillZReport(tx, shiftId, { triggeredByUserId = null } = {}) {
  * Reconcile a shift: compares the frozen ZReport.expectedClosingCash against
  * the cashier's own CashierDeclaration.declaredTotal — neither number is
  * recomputed or re-entered here, both already exist and are read-only by
- * this point. `reconcilerUserId` must differ from the shift's owner — a hard
- * invariant, not permission-gated, mirroring SELF_APPROVAL_DENIED in
- * lib/approval.js: a till can never be balanced by the person who worked
- * it, regardless of what role or permissions that person holds (including
- * ADMIN — segregation of duties is structural, not a privilege check).
+ * this point. `reconcilerUserId` must differ from the shift's owner AND
+ * from everyone who ever operated it via ShiftCashier (see
+ * isShiftParticipant) — a hard invariant, not permission-gated, mirroring
+ * SELF_APPROVAL_DENIED in lib/approval.js: a till can never be balanced by
+ * anyone who worked it, regardless of what role or permissions that person
+ * holds (including ADMIN — segregation of duties is structural, not a
+ * privilege check), and regardless of whether they were the original
+ * opener or someone it was later handed to.
  */
 async function closeShift(shiftId, { reconcilerUserId, notes }) {
   const shift = await prisma.shift.findUnique({ where: { id: shiftId } });
@@ -520,14 +574,17 @@ async function closeShift(shiftId, { reconcilerUserId, notes }) {
     err.status = 400;
     throw err;
   }
-  if (reconcilerUserId === shift.userId) {
-    const err = new Error('A shift cannot be reconciled by the cashier who worked it');
+  if (reconcilerUserId === shift.userId || (await isShiftParticipant(shiftId, reconcilerUserId))) {
+    const err = new Error('A shift cannot be reconciled by anyone who worked it');
     err.status = 403;
     err.code = 'SELF_RECONCILE_DENIED';
     throw err;
   }
 
-  const declaration = await prisma.cashierDeclaration.findUnique({ where: { shiftId } });
+  // shiftId is no longer unique on its own (see the V1 register/till model's
+  // OPENING/HANDOVER declaration types) — closeShift() specifically needs
+  // the CLOSING one.
+  const declaration = await prisma.cashierDeclaration.findFirst({ where: { shiftId, type: 'CLOSING' } });
   if (!declaration) {
     const err = new Error('The cashier has not submitted a physical cash declaration for this shift yet');
     err.status = 409;
@@ -603,6 +660,292 @@ async function reopenShift(shiftId, { notes } = {}) {
       closingNotes: notes || shift.closingNotes,
     },
     include: shiftInclude,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// V1 register/till model — additive. openShift()/ensureShiftForLogin() above
+// are completely untouched and remain the only way the pre-existing
+// (userId, branchId) auto-shift flow works; nothing below changes their
+// behavior. This is a parallel path: a shift opened here has tillId set and
+// carries a ShiftCashier participation history instead of a single fixed
+// owner for its whole life.
+// ---------------------------------------------------------------------------
+
+/**
+ * Opens a shift explicitly against a Till, as opposed to
+ * ensureShiftForLogin's implicit per-(user, branch) auto-shift. Records the
+ * opening cashier in ShiftCashier and an OPENING CashierDeclaration (the
+ * physical count that justified the float) in the same transaction.
+ * declaredOpeningCash defaults to the till's own configured
+ * defaultOpeningFloat when omitted — never a global business-wide default
+ * (requirement: each register/till can have its own).
+ *
+ * Race-safety is enforced by Postgres, not application locking, same
+ * pattern as ensureShiftForLogin above: the partial unique index
+ * `shifts_active_till_key` (see the comment on the Shift model in
+ * schema.prisma) guarantees at most one OPEN-or-INITIALIZING row per
+ * tillId, so two near-simultaneous opens for the same till (double-click,
+ * two devices resolving to the same till) can never both succeed. The
+ * pre-check below (existingForTill) exists only to fail fast with a
+ * friendly error in the common case — it is NOT the concurrency guarantee,
+ * since it runs before the transaction and two callers can both pass it.
+ * The database is the final authority: a loser gets a P2002 unique-
+ * constraint violation, and the catch block re-checks which constraint
+ * fired — same two-constraint ambiguity as ensureShiftForLogin (this
+ * index, or the pre-existing plain uniqueness on shiftNumber) — surfacing
+ * the same business error the pre-check would have given, or retrying on a
+ * freshly allocated shiftNumber.
+ */
+async function openShiftForTill({ tillId, userId, declaredOpeningCash, denominations, notes }, attempt = 1) {
+  if (!tillId) {
+    const err = new Error('tillId is required');
+    err.status = 400;
+    throw err;
+  }
+  if (!userId) {
+    const err = new Error('userId is required');
+    err.status = 400;
+    throw err;
+  }
+
+  const till = await prisma.till.findUnique({ where: { id: tillId }, include: { register: true } });
+  if (!till) {
+    const err = new Error('Till not found');
+    err.status = 404;
+    throw err;
+  }
+  if (!till.isActive) {
+    const err = new Error('This till is not active');
+    err.status = 409;
+    throw err;
+  }
+
+  const existingForTill = await prisma.shift.findFirst({
+    where: { tillId, status: { in: ['OPEN', 'INITIALIZING'] } },
+  });
+  if (existingForTill) {
+    const err = new Error('This till already has an active shift — use handover, not a new open');
+    err.status = 409;
+    err.code = 'TILL_ALREADY_HAS_ACTIVE_SHIFT';
+    throw err;
+  }
+
+  const declared = declaredOpeningCash != null ? Number(declaredOpeningCash) : till.defaultOpeningFloat;
+  if (!Number.isFinite(declared) || declared < 0) {
+    const err = new Error('declaredOpeningCash must be a non-negative number');
+    err.status = 400;
+    throw err;
+  }
+
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const shiftNumber = await nextSequentialNumber(tx, {
+        model: 'shift',
+        field: 'shiftNumber',
+        prefix: 'SHIFT',
+      });
+
+      const shift = await tx.shift.create({
+        data: {
+          shiftNumber,
+          userId,
+          branchId: till.register.branchId,
+          tillId,
+          openingFloat: declared,
+          openingNotes: notes || null,
+        },
+        include: shiftInclude,
+      });
+
+      await tx.shiftCashier.create({ data: { shiftId: shift.id, userId } });
+
+      await tx.cashierDeclaration.create({
+        data: {
+          shiftId: shift.id,
+          type: 'OPENING',
+          declaredByUserId: userId,
+          declaredTotal: declared,
+          denominations: denominations ?? null,
+        },
+      });
+
+      return shift;
+    });
+  } catch (error) {
+    if (error.code === 'P2002') {
+      // Use the plain `prisma` client, never the aborted `tx` — a failed
+      // transaction refuses further queries on the same connection.
+      const stillActive = await prisma.shift.findFirst({
+        where: { tillId, status: { in: ['OPEN', 'INITIALIZING'] } },
+      });
+      if (stillActive) {
+        const err = new Error('This till already has an active shift — use handover, not a new open');
+        err.status = 409;
+        err.code = 'TILL_ALREADY_HAS_ACTIVE_SHIFT';
+        throw err;
+      }
+      // The tillId index didn't fire — the collision was on shiftNumber
+      // instead (two concurrent opens for two different tills independently
+      // landing on the same next number). Retry with a freshly allocated
+      // one (bounded, so a persistent unrelated failure doesn't loop forever).
+      if (attempt < 3) {
+        return openShiftForTill({ tillId, userId, declaredOpeningCash, denominations, notes }, attempt + 1);
+      }
+    }
+    throw error;
+  }
+}
+
+/**
+ * The currently-active cashier for a shift — the ShiftCashier row with no
+ * endedAt yet. Null for a shift opened through the legacy (userId, branchId)
+ * flow, which never creates ShiftCashier rows at all.
+ */
+async function getCurrentShiftCashier(shiftId) {
+  return prisma.shiftCashier.findFirst({
+    where: { shiftId, endedAt: null },
+    include: { user: { select: { id: true, name: true, email: true } } },
+  });
+}
+
+/**
+ * The operator-of-record for authorization purposes — the most recent
+ * ShiftCashier row for this shift, whether or not it has ended yet. While a
+ * shift is OPEN this is always the one active turn (same row
+ * getCurrentShiftCashier above would find), since at most one row may have
+ * endedAt: null at a time. Once the shift ends, endShift() closes out every
+ * open turn — at that point this still correctly names whoever was
+ * operating it right before it ended, which is exactly who's authorized to
+ * submit its closing declaration. Null only for a legacy (userId, branchId)
+ * shift, which never creates ShiftCashier rows at all.
+ */
+async function getOperatingCashier(shiftId) {
+  return prisma.shiftCashier.findFirst({
+    where: { shiftId },
+    orderBy: { startedAt: 'desc' },
+    include: { user: { select: { id: true, name: true, email: true } } },
+  });
+}
+
+/**
+ * The single, centralized "is this user authorized to perform cashier
+ * operations on this shift" check. Cash movements, ending the shift, and
+ * submitting its closing declaration all defer to this rather than each
+ * re-deriving their own notion of ownership — see routes/shifts.js and
+ * lib/cashierDeclaration.js. A till-based shift (opened via
+ * openShiftForTill) is authorized by getOperatingCashier() above, NOT by
+ * Shift.userId: after a handover, the original opener is no longer the one
+ * allowed to touch it. A legacy (userId, branchId) shift has no
+ * ShiftCashier history at all — for that case only, Shift.userId is the
+ * sole authority, same as before this model existed.
+ */
+async function isAuthorizedCashier(shift, userId) {
+  if (!userId) return false;
+  const operating = await getOperatingCashier(shift.id);
+  if (operating) return operating.userId === userId;
+  return shift.userId === userId;
+}
+
+/**
+ * Has this user ever operated this shift at all — every ShiftCashier turn,
+ * active or ended, not just the current one. Backs SELF_RECONCILE_DENIED in
+ * closeShift(): segregation of duties means nobody who worked a shift (the
+ * opener, or anyone it was handed to) may be the one who reconciles it,
+ * regardless of whether they're still the current operator. A till-based
+ * shift's opener always has their own ShiftCashier row (created by
+ * openShiftForTill), so this alone covers them too — the separate
+ * Shift.userId check in closeShift exists only for the legacy shift case,
+ * which never creates ShiftCashier rows at all.
+ */
+async function isShiftParticipant(shiftId, userId) {
+  if (!userId) return false;
+  const turn = await prisma.shiftCashier.findFirst({ where: { shiftId, userId }, select: { id: true } });
+  return Boolean(turn);
+}
+
+/**
+ * One cashier hands the till to another without closing the shift.
+ * Records a HANDOVER CashierDeclaration (declared vs. computeExpectedCash()
+ * at this moment, not the frozen ZReport — that doesn't exist until the
+ * shift actually ends), closes the outgoing ShiftCashier row, opens a new
+ * one for the incoming cashier. Shift.status and Shift.userId are both
+ * untouched — only endShift()/closeShift() ever move status off OPEN, and
+ * userId keeps meaning "who opened it," never reassigned.
+ */
+async function handoverShift(shiftId, { fromUserId, toUserId, declaredTotal, denominations, note }) {
+  if (!toUserId) {
+    const err = new Error('toUserId is required');
+    err.status = 400;
+    throw err;
+  }
+  const total = Number(declaredTotal);
+  if (!Number.isFinite(total) || total < 0) {
+    const err = new Error('declaredTotal must be a non-negative number');
+    err.status = 400;
+    throw err;
+  }
+  if (toUserId === fromUserId) {
+    const err = new Error('Cannot hand over a shift to the same cashier');
+    err.status = 400;
+    throw err;
+  }
+
+  const shift = await prisma.shift.findUnique({ where: { id: shiftId } });
+  if (!shift) {
+    const err = new Error('Shift not found');
+    err.status = 404;
+    throw err;
+  }
+  if (shift.status !== 'OPEN') {
+    const err = new Error(`Cannot hand over a shift with status ${shift.status}`);
+    err.status = 409;
+    throw err;
+  }
+
+  const current = await getCurrentShiftCashier(shiftId);
+  if (!current) {
+    const err = new Error('This shift has no current cashier on record — it was not opened through a till');
+    err.status = 409;
+    err.code = 'NO_ACTIVE_SHIFT_CASHIER';
+    throw err;
+  }
+  if (current.userId !== fromUserId) {
+    const err = new Error('Only the cashier currently on this shift can hand it over');
+    err.status = 403;
+    throw err;
+  }
+
+  // computeExpectedCash returns the full breakdown object, not a bare
+  // number — same shape used everywhere else (getShiftReport, ZReport).
+  const { expectedCash } = await computeExpectedCash(shiftId);
+
+  return prisma.$transaction(async (tx) => {
+    await tx.shiftCashier.update({
+      where: { id: current.id },
+      data: { endedAt: new Date(), note: note || null },
+    });
+
+    const nextTurn = await tx.shiftCashier.create({ data: { shiftId, userId: toUserId } });
+
+    const declaration = await tx.cashierDeclaration.create({
+      data: {
+        shiftId,
+        type: 'HANDOVER',
+        declaredByUserId: fromUserId,
+        declaredTotal: total,
+        denominations: denominations ?? null,
+      },
+    });
+
+    return {
+      declaration: {
+        ...declaration,
+        expectedCash: round2(expectedCash),
+        variance: round2(total - expectedCash),
+      },
+      shiftCashier: nextTurn,
+    };
   });
 }
 
@@ -926,4 +1269,12 @@ module.exports = {
   getShiftReport,
   getShiftTransactions,
   backfillZReport,
+  openShiftForTill,
+  getCurrentShiftCashier,
+  getOperatingCashier,
+  isAuthorizedCashier,
+  isShiftParticipant,
+  handoverShift,
+  getActiveShiftForTill,
+  getCurrentOperatingShiftForUser,
 };

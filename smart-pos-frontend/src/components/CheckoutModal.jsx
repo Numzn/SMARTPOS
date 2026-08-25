@@ -44,6 +44,7 @@ const CheckoutModal = ({
   onClose,
   onSuccess,
   usingMockData = false,
+  awaitCartSync,
 }) => {
   const { user } = useAuth();
 
@@ -228,6 +229,21 @@ const CheckoutModal = ({
     setSubmitting(true);
     setError(null);
     try {
+      // The cashier's cart can legitimately be a few scans ahead of the
+      // till-lock session's server-committed lines (see useScanPipeline's
+      // background sync) — checkout is the one point that must be caught up
+      // before submitting, or the server's tamper check rejects a perfectly
+      // legitimate cart as "stale or tampered." Near-instant in normal
+      // operation; only waits meaningfully if the backend is unreachable.
+      if (awaitCartSync) {
+        const settled = await awaitCartSync();
+        if (!settled) {
+          setError('Still syncing the last few scanned items — please wait a moment and try again.');
+          setSubmitting(false);
+          return;
+        }
+      }
+
       const payload = {
         userId: user.id,
         items: cart.map((item) => ({

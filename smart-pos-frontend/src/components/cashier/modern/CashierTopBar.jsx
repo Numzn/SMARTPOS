@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShoppingCart, Fuel, FileText, Wrench, Menu, Printer, Wifi, WifiOff, Satellite } from 'lucide-react';
+import { ShoppingCart, Fuel, FileText, Wrench, Menu, Printer, Wifi, WifiOff, Satellite, Clock } from 'lucide-react';
 import { useOutletContext } from 'react-router-dom';
 import TopBarStatusIcon from './TopBarStatusIcon';
 
@@ -7,6 +7,7 @@ const TABS = [
   { id: 'quickshop', label: 'Quick shop', icon: ShoppingCart },
   { id: 'forecourt', label: 'Forecourt', icon: Fuel },
   { id: 'drafts', label: 'Drafts', icon: FileText },
+  { id: 'recent', label: 'Recent', icon: Clock },
   { id: 'tools', label: 'Tools', icon: Wrench },
 ];
 

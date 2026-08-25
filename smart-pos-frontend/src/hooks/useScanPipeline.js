@@ -90,8 +90,8 @@ export function useScanPipeline({ products, usingMockData, syncScan, onLocalTxnI
         const marked = await scanJournal.updateScan(scanId, { status: 'SYNCING' });
         replaceEntry(marked);
         try {
-          await syncScanRef.current(entry);
-          const synced = await scanJournal.updateScan(scanId, { status: 'SYNCED' });
+          const serverSessionId = await syncScanRef.current(entry);
+          const synced = await scanJournal.updateScan(scanId, { status: 'SYNCED', serverSessionId });
           replaceEntry(synced);
           syncQueueRef.current.shift();
         } catch (err) {
@@ -127,6 +127,45 @@ export function useScanPipeline({ products, usingMockData, syncScan, onLocalTxnI
       pumpSync();
     },
     [pumpSync]
+  );
+
+  /**
+   * Waits for every ingested-but-not-yet-synced scan to reach a terminal
+   * server state before returning. Checkout MUST call this before submitting
+   * — the optimistic cart the cashier sees can legitimately be ahead of the
+   * till-lock session's committed lines by a few scans' worth of background
+   * sync, and validateAndLockTillSession() on the server compares against
+   * exactly those committed lines. Without this, a fast scan-then-checkout
+   * sequence submits a cart the server hasn't caught up to yet and gets
+   * rejected as "stale or tampered" — a false positive, not real tampering.
+   *
+   * Bounded (8s): a genuinely stuck sync (backend unreachable) must not hang
+   * checkout forever. Returns whether everything actually settled, so the
+   * caller can tell a real "still syncing, try again" state apart from a
+   * clean go-ahead.
+   */
+  const awaitIngestion = useCallback(async () => {
+    // Let whatever's mid-flight in the ingest queue reach the sync queue
+    // first — otherwise a scan still in its durability/lookup step wouldn't
+    // even be counted as "pending" yet.
+    await queueRef.current;
+  }, []);
+
+  const isSyncSettled = useCallback(
+    () => syncQueueRef.current.length === 0 && !pumpingRef.current,
+    []
+  );
+
+  const awaitSync = useCallback(
+    async (timeoutMs = 8000) => {
+      await awaitIngestion();
+      const deadline = Date.now() + timeoutMs;
+      while (!isSyncSettled() && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      return isSyncSettled();
+    },
+    [awaitIngestion, isSyncSettled]
   );
 
   const processOne = useCallback(
@@ -283,5 +322,14 @@ export function useScanPipeline({ products, usingMockData, syncScan, onLocalTxnI
     }
   }, [onLocalTxnIdChange]);
 
-  return { cart, unresolved, ingestProduct, ingestBarcode, recoverTransaction, applyReversal, clearTransaction };
+  return {
+    cart,
+    unresolved,
+    ingestProduct,
+    ingestBarcode,
+    recoverTransaction,
+    applyReversal,
+    clearTransaction,
+    awaitSync,
+  };
 }

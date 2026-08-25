@@ -110,6 +110,7 @@ async function buildSaleReceiptSource(sale, business) {
       change: sale.changeAmount,
     },
     fiscal: {
+      enabled: Boolean(business.zraEnabled),
       mode: 'ONLINE',
       submissionStatus: mapSubmissionStatus(sale.status),
       submissionTime: sale.vsdcTimestamp,
@@ -177,6 +178,7 @@ async function buildRefundReceiptSource(refund, business) {
       change: null,
     },
     fiscal: {
+      enabled: Boolean(business.zraEnabled),
       mode: 'ONLINE',
       submissionStatus: mapSubmissionStatus(refund.status),
       submissionTime: refund.vsdcTimestamp,
@@ -244,6 +246,7 @@ async function buildDebitNoteReceiptSource(debitNote, business) {
       change: null,
     },
     fiscal: {
+      enabled: Boolean(business.zraEnabled),
       mode: 'ONLINE',
       submissionStatus: mapSubmissionStatus(debitNote.status),
       submissionTime: debitNote.vsdcTimestamp,

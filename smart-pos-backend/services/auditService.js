@@ -66,6 +66,10 @@ class AuditService {
       SHIFT_RECONCILED: 'SHIFT_RECONCILED',
       SHIFT_VARIANCE_FLAGGED: 'SHIFT_VARIANCE_FLAGGED',
       SHIFT_ADJUSTMENT_CREATED: 'SHIFT_ADJUSTMENT_CREATED',
+      // V1 register/till model
+      SHIFT_HANDOVER: 'SHIFT_HANDOVER',
+      REGISTER_CREATED: 'REGISTER_CREATED',
+      TILL_CREATED: 'TILL_CREATED',
 
       // Business management events (customers, suppliers, purchasing)
       CUSTOMER_CREATE: 'CUSTOMER_CREATE',

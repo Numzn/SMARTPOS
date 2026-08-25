@@ -32,7 +32,8 @@ router.patch('/business', authenticateToken, requirePermission('settings:write')
   try {
     await ensureDefaultBusinessProfile();
 
-    const { tradingName, tpin, logoUrl, footerLines, showPoweredBy, receiptVersion, discountPolicy } = req.body;
+    const { tradingName, tpin, logoUrl, footerLines, showPoweredBy, receiptVersion, zraEnabled, discountPolicy } =
+      req.body;
 
     const data = {};
     if (tradingName != null) data.tradingName = String(tradingName);
@@ -48,6 +49,10 @@ router.patch('/business', authenticateToken, requirePermission('settings:write')
     }
     if (showPoweredBy != null) data.showPoweredBy = Boolean(showPoweredBy);
     if (receiptVersion != null) data.receiptVersion = String(receiptVersion);
+    // Receipt-display switch only (see prisma/schema.prisma's BusinessProfile
+    // comment) — does not touch VSDC submission, which lib/saleFiscal.js
+    // always performs regardless of this flag.
+    if (zraEnabled != null) data.zraEnabled = Boolean(zraEnabled);
 
     // NUMZ discount authorization policy (not a ZRA requirement — see
     // lib/discountPolicy.js). Server-side validated: only the known boolean

@@ -5,6 +5,7 @@ import VarianceBadge from '../components/shifts/VarianceBadge';
 import ShiftReportPanel from '../components/shifts/ShiftReportPanel';
 import ShiftsTable from '../components/shifts/ShiftsTable';
 import ShiftTransactionJournal from '../components/shifts/ShiftTransactionJournal';
+import SupervisorApprovalModal from '../components/cashier/modern/SupervisorApprovalModal';
 import { shiftApi } from '../services/shiftService';
 import { usePermissions } from '../hooks/usePermissions';
 
@@ -37,6 +38,17 @@ const CashRegisterPage = () => {
   const [closedReport, setClosedReport] = useState(null);
   // Shift whose transaction journal is open, if any.
   const [journalShiftId, setJournalShiftId] = useState(null);
+
+  // Force-ending an OPEN shift on someone else's behalf (a supervisor
+  // stepping in for a cashier who's gone, or bulk end-of-day cleanup) — the
+  // endShift() route already allows a shifts:reconcile holder to end ANY
+  // shift, not just their own; this is just the first UI wired to it. Each
+  // SHIFT_END approval ticket is minted for one specific shiftId (see
+  // lib/approval.js), so ending several shifts always means a fresh
+  // supervisor PIN entry per shift — "End All" queues them one at a time
+  // rather than silently bulk-ending everything off a single PIN.
+  const [endTarget, setEndTarget] = useState(null); // shift currently in the approval modal
+  const [endQueue, setEndQueue] = useState([]); // remaining shifts queued behind it
 
   const loadPendingQueue = useCallback(async () => {
     if (!canReconcile) return;
@@ -79,6 +91,40 @@ const CashRegisterPage = () => {
     } finally {
       setSaving(false);
     }
+  };
+
+  // Advances the queue once the modal has closed (endTarget -> null) — done
+  // as its own effect, not inline in handleEndApproved, so the modal always
+  // sees a real false->true transition between shifts and resets its PIN
+  // field instead of silently carrying over from the previous approval.
+  useEffect(() => {
+    if (endTarget || endQueue.length === 0) return;
+    setEndTarget(endQueue[0]);
+    setEndQueue(endQueue.slice(1));
+  }, [endTarget, endQueue]);
+
+  const requestEndShift = (shift) => {
+    setEndQueue([]);
+    setEndTarget(shift);
+  };
+
+  const requestEndAllOpenTills = () => {
+    const openShifts = activeTills.filter((s) => s.status === 'OPEN');
+    if (openShifts.length === 0) return;
+    setEndTarget(openShifts[0]);
+    setEndQueue(openShifts.slice(1));
+  };
+
+  const cancelEndQueue = () => {
+    setEndTarget(null);
+    setEndQueue([]);
+  };
+
+  const handleEndApproved = ({ approvalId }) => {
+    if (!endTarget) return;
+    const shiftId = endTarget.id;
+    setEndTarget(null); // closes the modal now; the queue effect advances to the next one
+    runAction(() => shiftApi.endShift(shiftId, { approvalId }), 'Error ending shift');
   };
 
   const openReconcileModal = async (shift) => {
@@ -181,7 +227,18 @@ const CashRegisterPage = () => {
 
       {canViewAll && (
         <section className="space-y-3">
-          <h2 className="text-lg font-semibold text-gray-900">Active Tills</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold text-gray-900">Active Tills</h2>
+            {canReconcile && activeTills.some((s) => s.status === 'OPEN') && (
+              <button
+                onClick={requestEndAllOpenTills}
+                disabled={saving}
+                className="px-3 py-1.5 border border-red-300 rounded-md text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+              >
+                End All Open Tills
+              </button>
+            )}
+          </div>
           {activeTills.length === 0 ? (
             <div className="bg-white rounded-lg shadow p-6 text-center text-gray-500 text-sm">
               No tills currently open.
@@ -218,6 +275,15 @@ const CashRegisterPage = () => {
                           className="px-2 py-1 border border-red-300 rounded text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
                         >
                           Cancel
+                        </button>
+                      )}
+                      {!isInitializing && canReconcile && (
+                        <button
+                          onClick={() => requestEndShift(s)}
+                          disabled={saving}
+                          className="px-2 py-1 border border-red-300 rounded text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+                        >
+                          End Shift
                         </button>
                       )}
                     </div>
@@ -304,6 +370,21 @@ const CashRegisterPage = () => {
           You don&apos;t have permission to use the cash register.
         </div>
       )}
+
+      <SupervisorApprovalModal
+        open={!!endTarget}
+        onClose={cancelEndQueue}
+        actionType="SHIFT_END"
+        target={endTarget ? { shiftId: endTarget.id } : undefined}
+        itemLabel={
+          endTarget
+            ? `Shift ${endTarget.shiftNumber || endTarget.id} · ${endTarget.user?.name || 'Unknown cashier'}${
+                endQueue.length > 0 ? ` — ${endQueue.length} more queued after this` : ''
+              }`
+            : undefined
+        }
+        onApproved={handleEndApproved}
+      />
 
       <ReconcileModal
         show={!!reconcileTarget}

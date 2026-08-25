@@ -11,6 +11,10 @@ export interface A4RendererProps {
 
 export function A4Renderer({ viewModel: vm, className = '' }: A4RendererProps) {
   const copy = copyLabel(vm);
+  // !== false, not === true: a snapshot frozen before this flag existed has
+  // no `enabled` key at all and must keep showing fiscal content exactly as
+  // it always did.
+  const showFiscal = vm.fiscal.enabled !== false;
   const showCashTender =
     vm.payment.method.toUpperCase() === 'CASH' &&
     vm.payment.amountPaid != null &&
@@ -95,15 +99,21 @@ export function A4Renderer({ viewModel: vm, className = '' }: A4RendererProps) {
       </table>
 
       <div className="receipt-a4-bottom">
+        {/* Grid cell kept present even when hidden (empty), so the fixed
+            two-column layout below doesn't reflow — see a4.css .receipt-a4-bottom. */}
         <section className="receipt-a4-fiscal">
-          <h2>ZRA Smart Invoice</h2>
-          {vm.fiscal.sdcId && <div>SDC ID: {vm.fiscal.sdcId}</div>}
-          {vm.fiscal.fiscalReceiptNo && <div>Fiscal receipt: {vm.fiscal.fiscalReceiptNo}</div>}
-          {vm.fiscal.receiptSignature && <div>Signature: {vm.fiscal.receiptSignature}</div>}
-          {vm.fiscal.internalData && <div>Internal Data: {vm.fiscal.internalData}</div>}
-          {vm.fiscal.verificationCode && <div>Verification: {vm.fiscal.verificationCode}</div>}
-          {vm.receiptMeta.originalReceiptNo && (
-            <div>Original receipt: {vm.receiptMeta.originalReceiptNo}</div>
+          {showFiscal && (
+            <>
+              <h2>ZRA Smart Invoice</h2>
+              {vm.fiscal.sdcId && <div>SDC ID: {vm.fiscal.sdcId}</div>}
+              {vm.fiscal.fiscalReceiptNo && <div>Fiscal receipt: {vm.fiscal.fiscalReceiptNo}</div>}
+              {vm.fiscal.receiptSignature && <div>Signature: {vm.fiscal.receiptSignature}</div>}
+              {vm.fiscal.internalData && <div>Internal Data: {vm.fiscal.internalData}</div>}
+              {vm.fiscal.verificationCode && <div>Verification: {vm.fiscal.verificationCode}</div>}
+              {vm.receiptMeta.originalReceiptNo && (
+                <div>Original receipt: {vm.receiptMeta.originalReceiptNo}</div>
+              )}
+            </>
           )}
         </section>
 
@@ -142,7 +152,7 @@ export function A4Renderer({ viewModel: vm, className = '' }: A4RendererProps) {
               </>
             )}
           </div>
-          {vm.fiscal.qrPayload && (
+          {showFiscal && vm.fiscal.qrPayload && (
             <div className="receipt-a4-qr">
               <QRCodeSVG value={vm.fiscal.qrPayload} size={120} level="M" includeMargin />
               <div>Scan to verify on ZRA Smart Invoice</div>
@@ -157,7 +167,8 @@ export function A4Renderer({ viewModel: vm, className = '' }: A4RendererProps) {
         ))}
         {vm.footer.showPoweredBy && (
           <div className="receipt-a4-powered">
-            {vm.footer.poweredByLine} · {vm.footer.fiscalizedLine}
+            {vm.footer.poweredByLine}
+            {showFiscal && ` · ${vm.footer.fiscalizedLine}`}
           </div>
         )}
       </footer>

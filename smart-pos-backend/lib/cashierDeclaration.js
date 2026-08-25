@@ -8,7 +8,7 @@
  */
 
 const prisma = require('./prisma');
-const { backfillZReport } = require('./shift');
+const { backfillZReport, isAuthorizedCashier } = require('./shift');
 
 async function submitDeclaration(shiftId, { declaredByUserId, declaredTotal, denominations }) {
   if (!declaredByUserId) {
@@ -50,7 +50,12 @@ async function submitDeclaration(shiftId, { declaredByUserId, declaredTotal, den
     err.status = 409;
     throw err;
   }
-  if (shift.userId !== declaredByUserId) {
+  // The current operator, not necessarily the original opener — see
+  // isAuthorizedCashier. A CLOSING declaration is submitted after endShift()
+  // has already closed out every ShiftCashier turn (see the doc comment on
+  // getOperatingCashier), so this still correctly resolves to whoever was
+  // operating the shift right before it ended.
+  if (!(await isAuthorizedCashier(shift, declaredByUserId))) {
     const err = new Error('Only the cashier who worked this shift can submit its declaration');
     err.status = 403;
     throw err;
@@ -70,7 +75,12 @@ async function submitDeclaration(shiftId, { declaredByUserId, declaredTotal, den
     zReport = await prisma.$transaction((tx) => backfillZReport(tx, shiftId, { triggeredByUserId: declaredByUserId }));
   }
 
-  const existing = await prisma.cashierDeclaration.findUnique({ where: { shiftId } });
+  // shiftId is no longer a unique column on its own (a shift can also carry
+  // OPENING/HANDOVER declarations) — this function is specifically "submit
+  // the CLOSING count," so it only ever checks/creates that type. See the
+  // partial unique index cashier_declarations_one_closing_per_shift, which
+  // enforces the same "only ever one" invariant at the DB level.
+  const existing = await prisma.cashierDeclaration.findFirst({ where: { shiftId, type: 'CLOSING' } });
   if (existing) {
     const err = new Error('A declaration has already been submitted for this shift');
     err.status = 409;
@@ -81,6 +91,7 @@ async function submitDeclaration(shiftId, { declaredByUserId, declaredTotal, den
   return prisma.cashierDeclaration.create({
     data: {
       shiftId,
+      type: 'CLOSING',
       zReportId: zReport.id,
       declaredByUserId,
       declaredTotal: total,
@@ -90,7 +101,7 @@ async function submitDeclaration(shiftId, { declaredByUserId, declaredTotal, den
 }
 
 async function getDeclaration(shiftId) {
-  return prisma.cashierDeclaration.findUnique({ where: { shiftId } });
+  return prisma.cashierDeclaration.findFirst({ where: { shiftId, type: 'CLOSING' } });
 }
 
 module.exports = { submitDeclaration, getDeclaration };

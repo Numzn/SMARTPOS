@@ -16,12 +16,25 @@ const {
   reopenShift,
   getShiftReport,
   getShiftTransactions,
+  openShiftForTill,
+  getCurrentShiftCashier,
+  isAuthorizedCashier,
+  handoverShift,
+  getActiveShiftForTill,
+  getCurrentOperatingShiftForUser,
 } = require('../lib/shift');
 const { submitDeclaration } = require('../lib/cashierDeclaration');
 const { createAdjustment, listAdjustments } = require('../lib/shiftAdjustment');
+const { listRegisters } = require('../lib/register');
 const { authenticateToken, requirePermission, requireAnyPermission } = require('../middleware/auth');
 const { DEFAULT_BRANCH } = require('../lib/inventoryStock');
 const auditService = require('../services/auditService');
+
+// Any role that could plausibly be the one operating a till — the audience
+// for "who can I hand this over to," same spirit as tillApprovals.js's own
+// APPROVER_ROLES list (a small, scoped-down user directory, not the full
+// users:read surface a plain Cashier doesn't have).
+const HANDOVER_ELIGIBLE_ROLES = ['CASHIER', 'SUPERVISOR', 'MANAGER', 'ADMIN'];
 
 const round2 = (n) => parseFloat((n || 0).toFixed(2));
 
@@ -64,14 +77,20 @@ function stripShiftFigures(shift, permissions) {
 // (OPEN or PENDING_RECONCILIATION), never arbitrary history.
 const CAN_VIEW_ANY = ['shifts:viewAll', 'shifts:reconcile'];
 
-function canViewShift(shift, req) {
+// V1 register/till model: shift.userId only ever means "who opened it" (see
+// the schema comment on Shift) — after a handover, the cashier actually
+// operating the shift is whoever getCurrentShiftCashier() names, which can
+// differ from userId. Without also checking that, a cashier who's just been
+// handed a shift couldn't view or operate the very shift they're now
+// running. A shift with no ShiftCashier history (the legacy (userId,
+// branchId) flow) has no current cashier to check, so this is purely
+// additive for shifts opened via openShiftForTill().
+async function canViewShift(shift, req) {
   if (CAN_VIEW_ANY.some((p) => req.user.permissions.includes(p))) return true;
-  if (
-    req.user.permissions.includes('shifts:operate') &&
-    shift.userId === req.user.userId &&
-    ['OPEN', 'PENDING_RECONCILIATION'].includes(shift.status)
-  ) {
-    return true;
+  if (req.user.permissions.includes('shifts:operate') && ['OPEN', 'PENDING_RECONCILIATION'].includes(shift.status)) {
+    if (shift.userId === req.user.userId) return true;
+    const current = await getCurrentShiftCashier(shift.id);
+    if (current?.userId === req.user.userId) return true;
   }
   if (
     req.user.permissions.includes('shifts:recordMovement') &&
@@ -85,9 +104,12 @@ function canViewShift(shift, req) {
 
 /**
  * GET /api/shifts/current — the requesting user's currently open shift
- * (shifts:operate holders open their own), or the branch's currently active
- * shift (shifts:recordMovement only — a role that acts on a till without
- * ever opening one itself).
+ * (shifts:operate holders — checked via getCurrentOperatingShiftForUser,
+ * the one unified "is this user operating a shift" answer, whether that's a
+ * legacy (userId, branchId) shift or one they're the current ShiftCashier on
+ * after a handover), or the branch's currently active shift
+ * (shifts:recordMovement only — a role that acts on a till without ever
+ * opening one itself).
  */
 router.get(
   '/current',
@@ -97,7 +119,7 @@ router.get(
     try {
       const branchId = req.query.branchId || req.user.branchId || DEFAULT_BRANCH;
       const shift = req.user.permissions.includes('shifts:operate')
-        ? await getOpenShiftForUser(req.user.userId, branchId)
+        ? await getCurrentOperatingShiftForUser(req.user.userId, branchId)
         : await getOpenShiftForBranch(branchId);
       if (!shift) {
         return res.status(404).json({ error: 'No open shift for this user' });
@@ -172,8 +194,11 @@ router.get(
 
       const shiftIds = shifts.map((s) => s.id);
       const [declarations, zReports] = await Promise.all([
+        // Explicitly CLOSING — a shift can now also carry OPENING/HANDOVER
+        // declarations (V1 register/till model), and this list's variance
+        // math below is specifically "declared vs. frozen expectedClosingCash."
         shiftIds.length
-          ? prisma.cashierDeclaration.findMany({ where: { shiftId: { in: shiftIds } } })
+          ? prisma.cashierDeclaration.findMany({ where: { shiftId: { in: shiftIds }, type: 'CLOSING' } })
           : Promise.resolve([]),
         shiftIds.length
           ? prisma.zReport.findMany({
@@ -265,6 +290,151 @@ router.post('/ensure', authenticateToken, requirePermission('shifts:operate'), a
 });
 
 /**
+ * GET /api/shifts/registers — V1 register/till model. A cashier-facing,
+ * read-only list of registers (with their tills) so the Cashier screen can
+ * resolve which one this device is using. Deliberately separate from
+ * routes/registers.js's own GET / (settings:read/write — the admin CRUD
+ * surface for creating/deactivating them): reading the list to pick one is
+ * a completely different, much lower-privilege need than managing them,
+ * same shifts:operate gate as everything else a cashier does.
+ */
+router.get('/registers', authenticateToken, requirePermission('shifts:operate'), async (req, res) => {
+  try {
+    const branchId = req.query.branchId || req.user.branchId || DEFAULT_BRANCH;
+    const registers = await listRegisters({ branchId });
+    res.json(registers);
+  } catch (error) {
+    console.error('Error listing registers:', error);
+    res.status(error.status || 500).json({ error: error.message || 'Failed to list registers' });
+  }
+});
+
+/**
+ * GET /api/shifts/by-till/:tillId — the active (OPEN) shift for a till, if
+ * any. What the Cashier screen checks after resolving a till: no shift ->
+ * offer to open one; a shift exists -> check current-cashier to decide
+ * "resume" vs. "blocked, someone else is on it."
+ */
+router.get('/by-till/:tillId', authenticateToken, requirePermission('shifts:operate'), async (req, res) => {
+  try {
+    const shift = await getActiveShiftForTill(req.params.tillId);
+    if (!shift) {
+      return res.status(404).json({ error: 'No active shift for this till' });
+    }
+    res.json(stripShiftFigures(shift, req.user.permissions));
+  } catch (error) {
+    console.error('Error fetching shift for till:', error);
+    res.status(500).json({ error: 'Failed to fetch shift for till' });
+  }
+});
+
+/**
+ * GET /api/shifts/handover-candidates — who a cashier can name as the
+ * incoming operator on a handover. Same "small, scoped user directory"
+ * pattern as GET /api/till/approvers — id/name/role only, not full
+ * users:read. Excludes the requester (can't hand over to yourself, same
+ * invariant handoverShift() enforces server-side).
+ */
+router.get('/handover-candidates', authenticateToken, requirePermission('shifts:operate'), async (req, res) => {
+  try {
+    const candidates = await prisma.user.findMany({
+      where: { role: { in: HANDOVER_ELIGIBLE_ROLES }, isActive: true, id: { not: req.user.userId } },
+      select: { id: true, name: true, email: true, role: true },
+      orderBy: { name: 'asc' },
+    });
+    res.json({ candidates });
+  } catch (error) {
+    console.error('Error listing handover candidates:', error);
+    res.status(500).json({ error: 'Failed to list handover candidates' });
+  }
+});
+
+/**
+ * POST /api/shifts/open-for-till — V1 register/till model. Explicit shift
+ * open against a specific Till, independent of login — the new parallel
+ * path alongside /open and /ensure above (both untouched, still the only
+ * way the pre-existing (userId, branchId) flow works).
+ */
+router.post('/open-for-till', authenticateToken, requirePermission('shifts:operate'), async (req, res) => {
+  try {
+    const shift = await openShiftForTill({
+      tillId: req.body?.tillId,
+      userId: req.user.userId,
+      declaredOpeningCash: req.body?.declaredOpeningCash,
+      denominations: req.body?.denominations,
+      notes: req.body?.notes,
+    });
+
+    auditService.safeLog(auditService.eventTypes.SHIFT_OPEN, {
+      ...auditService.contextFromReq(req),
+      entityType: 'SHIFT',
+      entityId: shift.id,
+      action: 'OPEN',
+      newValues: { openingFloat: shift.openingFloat, tillId: shift.tillId },
+      description: `Shift opened by ${req.user.email || req.user.userId} on till ${shift.tillId}`,
+    });
+
+    res.status(201).json(shift);
+  } catch (error) {
+    console.error('Error opening shift for till:', error);
+    res.status(error.status || 500).json({ error: error.message || 'Failed to open shift' });
+  }
+});
+
+/**
+ * POST /api/shifts/:id/handover — V1 register/till model. The cashier
+ * currently on this shift hands it to another cashier without closing it.
+ * Requires the caller to be the shift's current cashier (getCurrentShiftCashier)
+ * — a shift with no ShiftCashier history (opened through the legacy flow)
+ * has nothing to hand over and rejects with NO_ACTIVE_SHIFT_CASHIER.
+ */
+router.post('/:id/handover', authenticateToken, requirePermission('shifts:operate'), async (req, res) => {
+  try {
+    const result = await handoverShift(req.params.id, {
+      fromUserId: req.user.userId,
+      toUserId: req.body?.toUserId,
+      declaredTotal: req.body?.declaredTotal,
+      denominations: req.body?.denominations,
+      note: req.body?.note,
+    });
+
+    auditService.safeLog(auditService.eventTypes.SHIFT_HANDOVER, {
+      ...auditService.contextFromReq(req),
+      entityType: 'SHIFT',
+      entityId: req.params.id,
+      action: 'HANDOVER',
+      newValues: { toUserId: req.body?.toUserId, declaredTotal: result.declaration.declaredTotal },
+      description: `Shift ${req.params.id} handed over by ${req.user.email || req.user.userId}`,
+    });
+
+    res.status(201).json(result);
+  } catch (error) {
+    console.error('Error handing over shift:', error);
+    res.status(error.status || 500).json({ error: error.message || 'Failed to hand over shift' });
+  }
+});
+
+/**
+ * GET /api/shifts/:id/current-cashier — who's currently operating this
+ * shift (V1 register/till model). Null for a shift opened through the
+ * legacy (userId, branchId) flow, which has no ShiftCashier history.
+ */
+router.get(
+  '/:id/current-cashier',
+  authenticateToken,
+  requireAnyPermission('shifts:operate', 'shifts:viewAll', 'shifts:reconcile'),
+  async (req, res) => {
+    try {
+      const current = await getCurrentShiftCashier(req.params.id);
+      res.json(current);
+    } catch (error) {
+      console.error('Error fetching current shift cashier:', error);
+      res.status(error.status || 500).json({ error: error.message || 'Failed to fetch current cashier' });
+    }
+  }
+);
+
+/**
  * POST /api/shifts/:id/confirm-opening — completes INITIALIZING -> OPEN with
  * the cashier's physically-counted opening cash. Ownership-enforced inside
  * confirmOpeningCash (only the shift's own cashier). Logged as SHIFT_OPEN —
@@ -335,7 +505,7 @@ router.get(
       if (!shift) {
         return res.status(404).json({ error: 'Shift not found' });
       }
-      if (!canViewShift(shift, req)) {
+      if (!(await canViewShift(shift, req))) {
         return res.status(403).json({ error: 'Access denied' });
       }
       res.json(stripShiftFigures(shift, req.user.permissions));
@@ -362,7 +532,7 @@ router.get(
       if (!shift) {
         return res.status(404).json({ error: 'Shift not found' });
       }
-      if (!canViewShift(shift, req)) {
+      if (!(await canViewShift(shift, req))) {
         return res.status(403).json({ error: 'Access denied' });
       }
       const report = await getShiftReport(req.params.id);
@@ -389,7 +559,7 @@ router.get('/:id/z-report', authenticateToken, requirePermission('shifts:viewExp
     if (!shift) {
       return res.status(404).json({ error: 'Shift not found' });
     }
-    if (!canViewShift(shift, req)) {
+    if (!(await canViewShift(shift, req))) {
       return res.status(403).json({ error: 'Access denied' });
     }
     const zReport = await prisma.zReport.findUnique({
@@ -426,7 +596,7 @@ router.get(
       if (!shift) {
         return res.status(404).json({ error: 'Shift not found' });
       }
-      if (!canViewShift(shift, req)) {
+      if (!(await canViewShift(shift, req))) {
         return res.status(403).json({ error: 'Access denied' });
       }
 
@@ -445,12 +615,15 @@ router.get(
   }
 );
 
-// A cash movement may be recorded by: the shift's owner (shifts:operate
-// working their own till), a holder of shifts:recordMovement acting on the
-// branch's OPEN shift regardless of who opened it, or shifts:viewAll as a
-// store-wide override.
-function canRecordMovement(shift, req) {
-  if (shift.userId === req.user.userId) return true;
+// A cash movement may be recorded by: the shift's current operator
+// (shifts:operate working the till they're actually on — see
+// isAuthorizedCashier, which resolves this via ShiftCashier for a
+// till-based shift, not Shift.userId, so a handover recipient is
+// authorized and the original opener no longer is), a holder of
+// shifts:recordMovement acting on the branch's OPEN shift regardless of who
+// opened it, or shifts:viewAll as a store-wide override.
+async function canRecordMovement(shift, req) {
+  if (await isAuthorizedCashier(shift, req.user.userId)) return true;
   if (req.user.permissions.includes('shifts:viewAll')) return true;
   if (req.user.permissions.includes('shifts:recordMovement') && shift.branchId === req.user.branchId) return true;
   return false;
@@ -463,7 +636,7 @@ function handleCashMovement(type) {
       if (!shift) {
         return res.status(404).json({ error: 'Shift not found' });
       }
-      if (!canRecordMovement(shift, req)) {
+      if (!(await canRecordMovement(shift, req))) {
         return res.status(403).json({ error: 'Access denied' });
       }
 
@@ -522,9 +695,11 @@ router.post('/:id/end', authenticateToken, canOperateOrRecordMovement, async (re
     if (!shift) {
       return res.status(404).json({ error: 'Shift not found' });
     }
-    // Ownership only, with a shifts:reconcile override for a supervisor
-    // force-ending a shift its cashier forgot to end.
-    if (shift.userId !== req.user.userId && !req.user.permissions.includes('shifts:reconcile')) {
+    // Current operator only (see isAuthorizedCashier — a handover recipient
+    // is authorized, the original opener no longer is once they've handed
+    // off), with a shifts:reconcile override for a supervisor force-ending
+    // a shift its cashier forgot to end.
+    if (!(await isAuthorizedCashier(shift, req.user.userId)) && !req.user.permissions.includes('shifts:reconcile')) {
       return res.status(403).json({ error: 'Access denied' });
     }
 

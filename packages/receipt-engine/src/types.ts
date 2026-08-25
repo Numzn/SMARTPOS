@@ -65,6 +65,11 @@ export interface PaymentBlock {
 }
 
 export interface FiscalBlock {
+  /** Receipt-display switch (BusinessProfile.zraEnabled) — whether renderers
+   * show the fiscal details/QR/verification section at all. Independent of
+   * submissionStatus: a sale can be fully fiscalized and still render with
+   * this off, if the business has chosen not to display ZRA content. */
+  enabled: boolean;
   mode: FiscalMode;
   submissionStatus: FiscalSubmissionStatus;
   submissionTime: string | null;
@@ -138,6 +143,11 @@ export interface ReceiptSourceData {
     change?: number | null;
   };
   fiscal: {
+    /** Defaults true when omitted — see FiscalBlock.enabled. A snapshot built
+     * before this field existed has no key here at all, and must keep
+     * rendering exactly as it always did (see buildReceiptViewModel.ts and
+     * each renderer's own `!== false` check, not an `=== true` one). */
+    enabled?: boolean;
     mode?: FiscalMode;
     submissionStatus: FiscalSubmissionStatus;
     submissionTime?: string | Date | null;

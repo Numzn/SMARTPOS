@@ -1,0 +1,18 @@
+-- The actual concurrency guarantee behind openShiftForTill(): at most one
+-- OPEN or INITIALIZING shift per till at a time, enforced by Postgres
+-- itself rather than application-level locking — the pre-existing check in
+-- openShiftForTill() that looks for an active shift before opening a new
+-- one runs outside the transaction and cannot by itself prevent two
+-- near-simultaneous opens for the same till from both succeeding. This is a
+-- partial (filtered) unique index, which has no schema.prisma
+-- representation — see the comment on the Shift model. It is therefore
+-- invisible to `prisma db push` and to any future migration-history
+-- baseline reset; if this index is ever missing, two cashiers (or two
+-- devices/tabs) can end up with two simultaneously-active shifts on one
+-- till. Same pattern as the pre-existing shifts_active_user_branch_key
+-- index (added in 20260817065200_shift_active_user_branch_unique_index) for
+-- the legacy per-(user, branch) auto-shift flow — this is the till-based
+-- V1 model's equivalent. A NULL tillId (every legacy shift) is never
+-- considered a duplicate of another NULL by Postgres's uniqueness rules, so
+-- this index does not constrain the legacy flow at all.
+CREATE UNIQUE INDEX "shifts_active_till_key" ON "shifts" ("tillId") WHERE "status" IN ('OPEN', 'INITIALIZING');

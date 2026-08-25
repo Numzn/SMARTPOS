@@ -84,6 +84,27 @@ describe('REGRESSION: discount rate is surfaced alongside the discount amount', 
   });
 });
 
+describe('ZRA receipt toggle: fiscal.enabled', () => {
+  it('defaults true when the source omits it — old callers/snapshots keep showing fiscal content', () => {
+    const vm = buildReceiptViewModel(baseSource());
+    expect(vm.fiscal.enabled).toBe(true);
+  });
+
+  it('passes through an explicit false (BusinessProfile.zraEnabled off)', () => {
+    const vm = buildReceiptViewModel(
+      baseSource({ fiscal: { submissionStatus: 'SUBMITTED', enabled: false } })
+    );
+    expect(vm.fiscal.enabled).toBe(false);
+  });
+
+  it('passes through an explicit true (BusinessProfile.zraEnabled on)', () => {
+    const vm = buildReceiptViewModel(
+      baseSource({ fiscal: { submissionStatus: 'SUBMITTED', enabled: true } })
+    );
+    expect(vm.fiscal.enabled).toBe(true);
+  });
+});
+
 describe('REGRESSION: customer address is surfaced on the view model', () => {
   it('passes through a supplied customer address', () => {
     const vm = buildReceiptViewModel(

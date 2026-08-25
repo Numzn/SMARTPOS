@@ -1,15 +1,17 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import { useOutletContext, useNavigate } from 'react-router-dom';
 import CashierTopBar from './CashierTopBar';
 import ProductGrid from './ProductGrid';
 import CartSection from './CartSection';
 import CheckoutModal from '../../CheckoutModal';
 import SupervisorApprovalModal from './SupervisorApprovalModal';
+import HandoverModal from './HandoverModal';
 import CashMovementModal from '../../shifts/CashMovementModal';
 import SubmitDeclarationModal from '../../shifts/SubmitDeclarationModal';
 import OpeningCashPrompt from '../../shifts/OpeningCashPrompt';
+import RegisterSelectPrompt from '../../shifts/RegisterSelectPrompt';
 import { useEndShiftFlow } from '../../../hooks/useEndShiftFlow';
-import { useShiftInitialization } from '../../../hooks/useShiftInitialization';
+import { useRegisterShiftInit } from '../../../hooks/useRegisterShiftInit';
 import { usePermissions } from '../../../hooks/usePermissions';
 import { useAuth } from '../../../contexts/AuthContext';
 import { shiftApi } from '../../../services/shiftService';
@@ -32,6 +34,7 @@ import { useOnlineStatus } from '../../../hooks/useOnlineStatus';
 import { useScanPipeline } from '../../../hooks/useScanPipeline';
 import { useBarcodeScanner } from '../../../hooks/useBarcodeScanner';
 import { buildBarcodeIndex, normalizeBarcode } from '../../../lib/barcodeIndex';
+import * as scanJournal from '../../../lib/scanJournal';
 
 const tillSessionStorageKey = (userId) => `smartpos:tillSession:${userId}`;
 const localTxnStorageKey = (userId) => `smartpos:localTxn:${userId}`;
@@ -42,16 +45,21 @@ const CashierDashboard = () => {
   // and hands it down via Outlet context — this used to be a local poller
   // here, which reset to 'checking' every time /cashier unmounted/remounted.
   const { zraStatus = 'checking' } = useOutletContext() || {};
-  // Auto-creates/resumes the caller's shift on load (INITIALIZING or OPEN) —
-  // the canonical implementation of how a shift starts, replacing a manual
-  // "Open Shift" button. useEndShiftFlow (unchanged, still the canonical
-  // implementation of how a shift ends) needs refreshKey wired to this
-  // hook's status: it fetches the current shift once on its own mount, so
-  // without this it stays stuck showing "no open shift" for a few seconds
-  // after shiftInit flips INITIALIZING -> OPEN, until something unrelated
-  // happens to re-render.
-  const shiftInit = useShiftInitialization({ enabled: canAccess.operateShift });
-  const endShiftFlow = useEndShiftFlow({ enabled: canAccess.operateShift, refreshKey: shiftInit.shift?.status });
+  const navigate = useNavigate();
+  // V1 register/till model — the real source of truth for "does this
+  // cashier have a shift to operate," replacing useShiftInitialization's
+  // login-triggered auto-shift (that hook and OpeningCashPrompt's old call
+  // site are left completely intact on disk, just no longer used here — see
+  // docs on useRegisterShiftInit). Login/logout never opens or closes a
+  // shift by themselves; this only ever reads what's already true, plus
+  // reacts to the cashier's own explicit "open"/"hand over" actions.
+  // useEndShiftFlow (unchanged, still the canonical implementation of how a
+  // shift ends) needs refreshKey wired to this hook's state: it fetches the
+  // current shift once on its own mount, so without this it stays stuck
+  // showing "no open shift" until something unrelated happens to re-render.
+  const registerInit = useRegisterShiftInit({ enabled: canAccess.operateShift });
+  const endShiftFlow = useEndShiftFlow({ enabled: canAccess.operateShift, refreshKey: registerInit.state });
+  const [handoverModalOpen, setHandoverModalOpen] = useState(false);
   // Shift & Cash tools — Cash In/Out, Paid Out, Safe Drop on the currently
   // open shift. Separate from endShiftFlow's own saving state since these
   // are independent actions with their own modal.
@@ -60,11 +68,19 @@ const CashierDashboard = () => {
   const [movementError, setMovementError] = useState('');
   const [declarationSaving, setDeclarationSaving] = useState(false);
   const [declarationError, setDeclarationError] = useState('');
+  // Recent tab — a bounded, current-shift-only window (last 20), distinct
+  // from both the full Global Sales ledger (unscoped, see SalesPage) and
+  // the complete Shift Transaction Journal (unbounded, back-office-only,
+  // see CashRegisterPage). Never carries expectedCash/variance — the
+  // underlying endpoint doesn't return those fields at all.
+  const [recentTransactions, setRecentTransactions] = useState(null);
+  const [recentLoading, setRecentLoading] = useState(false);
+  const [recentError, setRecentError] = useState('');
   const [activeTab, setActiveTab] = useState('quickshop');
   const [showCheckout, setShowCheckout] = useState(false);
   const [usingMockData, setUsingMockData] = useState(false);
 
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -263,6 +279,11 @@ const CashierDashboard = () => {
       unitPrice: entry.unitPrice,
       clientScanId: entry.scanId,
     });
+    // Returned so the pipeline can stamp the journal entry with which server
+    // session it actually landed in — the authoritative signal recovery
+    // uses (see the recovery effect below), not the separately-persisted
+    // tillSessionId, which goes stale the moment a session is consumed.
+    return sessionId;
   };
 
   const pipeline = useScanPipeline({
@@ -282,34 +303,71 @@ const CashierDashboard = () => {
 
   // Recovery — runs once per (user, mount). A crash/reload before this tab's
   // in-flight scans ever synced must not lose them: reload the durable
-  // journal and, if the persisted till-lock session is still valid, resume
-  // background sync against it. Safe even if some entries had actually
-  // already reached the server before the crash — clientScanId idempotency
-  // (lib/tillLock.js) makes replaying them a no-op, not a double count.
+  // journal and, if the till-lock session it was synced against is still
+  // valid, resume background sync against it. Safe even if some entries had
+  // actually already reached the server before the crash — clientScanId
+  // idempotency (lib/tillLock.js) makes replaying them a no-op.
+  //
+  // The authoritative "was this ever committed, and is that still open"
+  // signal is read from the journal itself (each SYNCED entry's own
+  // serverSessionId, stamped by syncScan below) — not from the separately-
+  // persisted tillSessionId in localStorage. That key is correctly cleared
+  // the moment a consumed/abandoned session is detected, which means on any
+  // *later* reload there is nothing left to compare against and a naive
+  // "no stored session = nothing to contradict" check would wrongly treat
+  // an already-resolved sale as fresh again — exactly the bug this replaced
+  // (a phantom cart, restored against a brand-new empty till-lock session,
+  // that trips validateAndLockTillSession()'s "stale or tampered" rejection
+  // on checkout — a false positive, not a real tamper attempt). The journal
+  // has no such blind spot: it still says which session an entry landed in
+  // no matter how many reloads have happened since.
+  //
+  // A failed/unreachable status check is treated as inconclusive, not proof
+  // of staleness — recover optimistically and let checkout-time validation
+  // (plus awaitCartSync) be the final backstop, the same posture as a
+  // genuine crash-before-first-sync (no serverSessionId recorded at all).
+  // Only a *confirmed* non-OPEN status discards the local transaction.
   useEffect(() => {
     if (!user?.id) return;
     let cancelled = false;
 
     (async () => {
-      const storedSessionId = localStorage.getItem(tillSessionStorageKey(user.id));
       const storedLocalTxnId = localStorage.getItem(localTxnStorageKey(user.id));
-      if (!storedSessionId && !storedLocalTxnId) return;
+      if (!storedLocalTxnId) return;
 
-      if (storedSessionId) {
-        try {
-          const { session } = await fetchTillSession(storedSessionId);
-          if (!cancelled && session?.status === 'OPEN') {
-            setTillSessionId(storedSessionId);
-          } else if (!cancelled) {
-            localStorage.removeItem(tillSessionStorageKey(user.id));
-          }
-        } catch {
-          if (!cancelled) localStorage.removeItem(tillSessionStorageKey(user.id));
-        }
+      const entries = await scanJournal.getEntriesForSession(storedLocalTxnId);
+      if (cancelled) return;
+      if (entries.length === 0) {
+        localStorage.removeItem(localTxnStorageKey(user.id));
+        return;
       }
 
-      if (storedLocalTxnId && !cancelled) {
+      const lastSynced = entries
+        .filter((e) => e.serverSessionId)
+        .sort((a, b) => b.sequence - a.sequence)[0];
+
+      const discard = async () => {
+        localStorage.removeItem(localTxnStorageKey(user.id));
+        localStorage.removeItem(tillSessionStorageKey(user.id));
+        await scanJournal.clearSession(storedLocalTxnId).catch(() => {});
+      };
+
+      if (!lastSynced) {
         await pipeline.recoverTransaction(storedLocalTxnId);
+        return;
+      }
+
+      try {
+        const { session } = await fetchTillSession(lastSynced.serverSessionId);
+        if (cancelled) return;
+        if (session?.status === 'OPEN') {
+          setTillSessionId(lastSynced.serverSessionId);
+          await pipeline.recoverTransaction(storedLocalTxnId);
+        } else {
+          await discard();
+        }
+      } catch {
+        if (!cancelled) await pipeline.recoverTransaction(storedLocalTxnId);
       }
     })();
 
@@ -350,6 +408,29 @@ const CashierDashboard = () => {
       }
     }
   }, [unresolved]);
+
+  const currentShiftId = endShiftFlow.shift?.id;
+
+  useEffect(() => {
+    if (activeTab !== 'recent' || !currentShiftId) return;
+    let cancelled = false;
+    setRecentLoading(true);
+    setRecentError('');
+    shiftApi
+      .fetchShiftTransactions(currentShiftId, { limit: 20, sort: 'time_desc' })
+      .then((journal) => {
+        if (!cancelled) setRecentTransactions(journal.transactions || []);
+      })
+      .catch((err) => {
+        if (!cancelled) setRecentError(err?.data?.error || err.message || 'Failed to load recent transactions');
+      })
+      .finally(() => {
+        if (!cancelled) setRecentLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, currentShiftId]);
 
   const addToCart = (product) => {
     if (product.stock <= 0) {
@@ -397,8 +478,16 @@ const CashierDashboard = () => {
     [barcodeIndex, cart, pipeline]
   );
 
+  // V1 register/till model — the till is operable once registerInit resolves
+  // to 'ready' (a shift exists and this cashier is the one operating it,
+  // whether via the legacy flow or as the current ShiftCashier). Any other
+  // state (still resolving, needs a register picked, needs opening, or
+  // blocked because someone else is on this till) blocks scanning the same
+  // way the old INITIALIZING check did.
+  const canOperateTill = !canAccess.operateShift || registerInit.state === 'ready';
+
   useBarcodeScanner(handleBarcodeScanned, {
-    enabled: !(canAccess.operateShift && shiftInit.shift?.status === 'INITIALIZING') && !showCheckout,
+    enabled: canOperateTill && !showCheckout,
   });
 
   /**
@@ -593,6 +682,64 @@ const CashierDashboard = () => {
           </div>
         );
 
+      case 'recent': {
+        const money = (n) => `K${Number(n || 0).toFixed(2)}`;
+        const TYPE_LABEL = {
+          SALE: 'Sale',
+          REFUND: 'Refund',
+          CANCELLED: 'Cancelled',
+          CASH_IN: 'Cash In',
+          CASH_OUT: 'Cash Out',
+          PAID_OUT: 'Paid Out',
+          SAFE_DROP: 'Safe Drop',
+        };
+        return (
+          <div className="bg-white rounded-xl border shadow-sm p-6">
+            <h3 className="text-lg font-medium text-gray-900 mb-1">Recent Transactions</h3>
+            <p className="text-sm text-gray-500 mb-5">
+              Your last 20 transactions on this shift — for the full history, see Sales.
+            </p>
+
+            {!currentShiftId ? (
+              <div className="text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-lg p-4">
+                No open shift right now.
+              </div>
+            ) : recentLoading ? (
+              <div className="text-sm text-gray-500">Loading…</div>
+            ) : recentError ? (
+              <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-3">{recentError}</div>
+            ) : !recentTransactions || recentTransactions.length === 0 ? (
+              <div className="text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-lg p-4">
+                No transactions on this shift yet.
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-100 -mx-6">
+                {recentTransactions.map((t) => (
+                  <div key={t.id} className="px-6 py-3 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-gray-900">
+                        {TYPE_LABEL[t.type] || t.type}
+                        {t.receiptNumber ? ` · ${t.receiptNumber}` : ''}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {new Date(t.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {t.cashier ? ` · ${t.cashier}` : ''}
+                        {t.note ? ` · ${t.note}` : ''}
+                      </div>
+                    </div>
+                    <div
+                      className={`text-sm font-medium shrink-0 ${t.total < 0 ? 'text-red-600' : 'text-gray-900'}`}
+                    >
+                      {money(t.total)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      }
+
       case 'tools':
         return (
           <div className="bg-white rounded-xl border shadow-sm p-6">
@@ -609,7 +756,7 @@ const CashierDashboard = () => {
               <div className="text-sm text-gray-500">Loading shift…</div>
             ) : !endShiftFlow.shift ? (
               <div className="text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-lg p-4">
-                No open shift right now — reload this page and it will start one automatically.
+                No open shift right now.
               </div>
             ) : (
               <>
@@ -618,6 +765,16 @@ const CashierDashboard = () => {
                   <span className="text-sm text-gray-600">
                     {endShiftFlow.shift.shiftNumber || endShiftFlow.shift.id}
                   </span>
+                  {registerInit.till && (
+                    <span className="text-sm text-gray-400">
+                      · {registerInit.till.registerName || registerInit.till.name}
+                    </span>
+                  )}
+                  {registerInit.currentCashier?.user && (
+                    <span className="text-sm text-gray-400">
+                      · operated by {registerInit.currentCashier.user.name || registerInit.currentCashier.user.email}
+                    </span>
+                  )}
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <button
@@ -644,6 +801,17 @@ const CashierDashboard = () => {
                   >
                     Safe Drop
                   </button>
+                  {/* Only meaningful for a till-based shift — a legacy
+                      (userId, branchId) shift has no ShiftCashier turns to
+                      hand between. Leaves the shift OPEN; doesn't end it. */}
+                  {registerInit.till && (
+                    <button
+                      onClick={() => setHandoverModalOpen(true)}
+                      className="px-4 py-2 border border-blue-300 rounded-md text-sm font-medium text-blue-700 hover:bg-blue-50"
+                    >
+                      Hand Over
+                    </button>
+                  )}
                   {/* Ending a shift is PIN-gated (useEndShiftFlow ->
                       SupervisorApprovalModal), not permission-gated — this
                       is the canonical, only place to initiate it. */}
@@ -670,10 +838,24 @@ const CashierDashboard = () => {
     }
   };
 
-  // Blocks normal till operation until opening cash is confirmed — the
-  // opening-cash prompt replaces the tabs/product-grid/status-bar entirely,
-  // there's nothing to operate yet.
-  const isInitializing = canAccess.operateShift && shiftInit.shift?.status === 'INITIALIZING';
+  // Blocks normal till operation until the register/till model resolves to
+  // 'ready' — one of these blocking views replaces the tabs/product-grid/
+  // status-bar entirely, there's nothing to operate yet in any other state.
+  const isInitializing = canAccess.operateShift && registerInit.state !== 'ready';
+
+  const handleOpeningConfirm = ({ openingFloat, notes }) =>
+    registerInit.openShift({ declaredOpeningCash: openingFloat, notes });
+
+  const handleHandedOver = async (payload) => {
+    const result = await registerInit.handOver(payload);
+    if (result) {
+      setHandoverModalOpen(false);
+      // The outgoing cashier's session ends here — the incoming cashier
+      // authenticates themselves on this same device next.
+      logout();
+      navigate('/login');
+    }
+  };
 
   return (
     <div className="h-full flex flex-col bg-surface">
@@ -687,12 +869,50 @@ const CashierDashboard = () => {
       />
 
       {isInitializing ? (
-        <OpeningCashPrompt
-          shiftNumber={shiftInit.shift?.shiftNumber}
-          confirming={shiftInit.confirming}
-          error={shiftInit.error}
-          onConfirm={shiftInit.confirmOpening}
-        />
+        <>
+          {registerInit.state === 'loading' && (
+            <div className="h-full flex items-center justify-center text-sm text-gray-500">Loading till…</div>
+          )}
+
+          {registerInit.state === 'needsRegisterSelection' && (
+            <RegisterSelectPrompt
+              registers={registerInit.registers}
+              onSelect={registerInit.selectTill}
+              error={registerInit.error}
+            />
+          )}
+
+          {registerInit.state === 'needsOpen' && (
+            <OpeningCashPrompt
+              shiftNumber={registerInit.till?.name}
+              confirming={registerInit.opening}
+              error={registerInit.error}
+              onConfirm={handleOpeningConfirm}
+            />
+          )}
+
+          {registerInit.state === 'blockedOtherCashier' && (
+            <div className="h-full flex items-center justify-center p-6">
+              <div className="w-full max-w-sm bg-white rounded-xl border shadow-sm p-6 space-y-2 text-center">
+                <h2 className="text-lg font-semibold text-gray-900">Till In Use</h2>
+                <p className="text-sm text-gray-500">
+                  {registerInit.currentCashier?.user?.name ||
+                    registerInit.currentCashier?.user?.email ||
+                    'Another cashier'}{' '}
+                  is currently operating this till. Ask them to hand it over to you.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {registerInit.state === 'error' && (
+            <div className="h-full flex items-center justify-center p-6">
+              <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-3">
+                {registerInit.error}
+              </div>
+            </div>
+          )}
+        </>
       ) : (
         <>
           {stockNotice && (
@@ -709,6 +929,14 @@ const CashierDashboard = () => {
         </>
       )}
 
+      <HandoverModal
+        open={handoverModalOpen}
+        onClose={() => setHandoverModalOpen(false)}
+        onHandedOver={handleHandedOver}
+        submitting={registerInit.handingOver}
+        error={registerInit.error}
+      />
+
       {showCheckout && (
         <CheckoutModal
           cart={cart}
@@ -717,6 +945,7 @@ const CashierDashboard = () => {
           onSuccess={handleCheckoutSuccess}
           onClose={handleCheckoutClose}
           usingMockData={usingMockData}
+          awaitCartSync={pipeline.awaitSync}
         />
       )}
 

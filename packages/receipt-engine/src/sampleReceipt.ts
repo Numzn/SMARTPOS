@@ -8,6 +8,7 @@ export interface SampleReceiptProfile {
   footerLines?: string[];
   showPoweredBy?: boolean;
   receiptVersion?: string;
+  zraEnabled?: boolean;
 }
 
 /** Sample VM for settings preview and layout testing. */
@@ -49,6 +50,7 @@ export function buildSampleReceiptViewModel(
       change: 42,
     },
     fiscal: {
+      enabled: profile.zraEnabled ?? false,
       mode: 'ONLINE',
       submissionStatus: 'SUBMITTED',
       submissionTime: new Date(),

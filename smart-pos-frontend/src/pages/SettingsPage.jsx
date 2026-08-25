@@ -19,6 +19,7 @@ export default function SettingsPage() {
     footerLines: '',
     showPoweredBy: true,
     receiptVersion: '1.0',
+    zraEnabled: false,
   });
 
   useEffect(() => {
@@ -36,6 +37,7 @@ export default function SettingsPage() {
               : '',
             showPoweredBy: data.showPoweredBy !== false,
             receiptVersion: data.receiptVersion || '1.0',
+            zraEnabled: Boolean(data.zraEnabled),
           });
         }
       } catch (e) {
@@ -61,6 +63,7 @@ export default function SettingsPage() {
           .filter(Boolean),
         showPoweredBy: form.showPoweredBy,
         receiptVersion: form.receiptVersion,
+        zraEnabled: form.zraEnabled,
       }),
     [form]
   );
@@ -91,6 +94,7 @@ export default function SettingsPage() {
         footerLines: form.footerLines.split('\n').map((l) => l.trim()).filter(Boolean),
         showPoweredBy: form.showPoweredBy,
         receiptVersion: form.receiptVersion,
+        zraEnabled: form.zraEnabled,
       });
       setSuccess(true);
     } catch (err) {
@@ -184,6 +188,23 @@ export default function SettingsPage() {
               disabled={!manageSettings}
             />
             <span className="text-sm text-gray-700">Show &quot;Powered by NUMZPAY&quot; on receipts</span>
+          </label>
+
+          <label className="flex items-center gap-2 border border-gray-200 rounded-md p-3 bg-gray-50">
+            <input
+              type="checkbox"
+              checked={form.zraEnabled}
+              onChange={(e) => setForm({ ...form, zraEnabled: e.target.checked })}
+              disabled={!manageSettings}
+            />
+            <span>
+              <span className="text-sm font-medium text-gray-700 block">ZRA Integration</span>
+              <span className="text-xs text-gray-500">
+                When off, printed receipts hide fiscal details, the QR code, and ZRA verification
+                text — the normal receipt layout is used instead. Does not affect ZRA/VSDC
+                submission itself.
+              </span>
+            </span>
           </label>
 
           {error && (

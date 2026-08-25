@@ -12,6 +12,8 @@ const {
   createTestBranch,
   createTestUser,
   createTestShift,
+  createTestRegister,
+  createTestTill,
   createSellableProduct,
   createTestSale,
   cleanupTestData,
@@ -19,6 +21,7 @@ const {
 } = testData;
 const {
   openShift,
+  openShiftForTill,
   recordCashMovement,
   endShift,
   closeShift,
@@ -340,7 +343,7 @@ describe('Cash register / shift lifecycle', () => {
     // The original ZReport/declaration are untouched — re-reconciling needs
     // no fresh declaration, just closeShift() again.
     const zReport = await prisma.zReport.findUnique({ where: { shiftId: shift.id } });
-    const declaration = await prisma.cashierDeclaration.findUnique({ where: { shiftId: shift.id } });
+    const declaration = await prisma.cashierDeclaration.findFirst({ where: { shiftId: shift.id, type: 'CLOSING' } });
     expect(zReport.expectedClosingCash).toBe(50);
     expect(declaration.declaredTotal).toBe(50);
 
@@ -406,6 +409,38 @@ describe('Cash register / shift lifecycle', () => {
       items: [{ productId: product.id, quantity: 1, price: 100 }],
     });
     expect(saleWithNoBranchShift.shiftId).toBeNull();
+  });
+
+  it('V1 register/till model: createPendingSale attributes registerId/tillId from a till-based shift, and leaves them null for a legacy (userId, branchId) one', async () => {
+    const { createPendingSale } = saleFiscal;
+    const product = await createSellableProduct({ stock: 10 });
+
+    const register = await createTestRegister({ branchId: DEFAULT_BRANCH_CODE });
+    const till = await createTestTill({ registerId: register.id });
+    const tillUser = await createTestUser();
+    const tillShift = await openShiftForTill({ tillId: till.id, userId: tillUser.id });
+
+    const saleFromTill = await createPendingSale({
+      userId: tillUser.id,
+      branchId: DEFAULT_BRANCH_CODE,
+      items: [{ productId: product.id, quantity: 1, price: 100 }],
+    });
+    expect(saleFromTill.shiftId).toBe(tillShift.id);
+    expect(saleFromTill.tillId).toBe(till.id);
+    expect(saleFromTill.registerId).toBe(register.id);
+
+    // A legacy (userId, branchId) shift has no till at all — both stay null,
+    // same as shiftId always could be null before this.
+    const legacyUser = await createTestUser();
+    const legacyShift = await openShift({ userId: legacyUser.id, branchId: DEFAULT_BRANCH_CODE, openingFloat: 0 });
+    const saleFromLegacy = await createPendingSale({
+      userId: legacyUser.id,
+      branchId: DEFAULT_BRANCH_CODE,
+      items: [{ productId: product.id, quantity: 1, price: 100 }],
+    });
+    expect(saleFromLegacy.shiftId).toBe(legacyShift.id);
+    expect(saleFromLegacy.tillId).toBeNull();
+    expect(saleFromLegacy.registerId).toBeNull();
   });
 
   it('checkout attribution falls back to the branch\'s active shift for a Cashier who never opens their own (shifts:recordMovement, not shifts:operate)', async () => {

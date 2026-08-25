@@ -220,6 +220,13 @@ async function createPendingSale(body) {
         orderBy: { openedAt: 'desc' },
       }));
 
+    // V1 register/till model — only set when the attributed shift was
+    // itself opened via openShiftForTill(); a legacy (userId, branchId)
+    // shift has no tillId, and this (like shiftId always could) stays null.
+    const attributedRegisterId = openShift?.tillId
+      ? (await tx.till.findUnique({ where: { id: openShift.tillId } }))?.registerId ?? null
+      : null;
+
     // A registered customer is optional and explicitly selected — walk-in
     // sales (no customerId) are completely unaffected. When present, its
     // name/tpin only fill in what customerInfo didn't already override, and
@@ -318,6 +325,8 @@ async function createPendingSale(body) {
         paymentMethod: parsed.paymentMethod,
         status: 'PENDING',
         shiftId: openShift?.id,
+        tillId: openShift?.tillId ?? null,
+        registerId: attributedRegisterId,
         branchId,
         customerName: resolvedCustomerName,
         customerTpin: resolvedCustomerTpin,
