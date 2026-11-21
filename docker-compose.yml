@@ -108,6 +108,11 @@ services:
     depends_on:
       backend:
         condition: service_started
+    volumes:
+      # Desktop installer + its download page (installer is git-ignored; copy it here).
+      - ./downloads:/srv/downloads:ro
+      # nginx variant only: lets nginx.conf changes apply without an image rebuild.
+      - ./smart-pos-frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
       - "127.0.0.1:${FRONTEND_PORT:-8080}:80"
       - "172.17.0.1:${FRONTEND_PORT:-8080}:80"

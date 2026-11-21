@@ -42,3 +42,7 @@ smart-pos-backend/node_modules/.prisma/
 # Claude Code worktrees / scratch extraction dumps
 .claude/
 vsdc-extracted.txt
+
+# Desktop installer served from ./downloads (built artefact, not source)
+downloads/*.exe
+downloads/*.blockmap

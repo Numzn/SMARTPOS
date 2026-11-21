@@ -11,6 +11,20 @@
 		file_server
 	}
 
+	# Desktop installer page and file, from the ./downloads bind mount.
+	handle /download {
+		root * /srv/downloads
+		rewrite * /download.html
+		header Cache-Control "no-cache"
+		file_server
+	}
+
+	handle_path /downloads/* {
+		root * /srv/downloads
+		header Cache-Control "no-cache"
+		file_server
+	}
+
 	# index.html must always be revalidated. The hashed asset filenames change
 	# every build, so a cached index.html would keep pointing browsers at the
 	# previous bundle — which /assets/* has told them to keep for 30 days —
