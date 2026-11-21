@@ -101,9 +101,12 @@ describe('packaging does not ship secrets or dev material', () => {
     }
   });
 
-  it('ships no default server address (customers or ops must set one)', () => {
+  it('ships a valid, credential-free default server address and no update feed', () => {
     const d = JSON.parse(read('config/defaults.json'));
-    expect(d.backendUrl).toBe('');
+    const u = new URL(d.backendUrl);
+    expect(u.protocol).toBe('https:');
+    expect(u.username + u.password).toBe('');
+    expect(u.pathname).toBe('/');
     expect(d.updateUrl).toBe('');
   });
 });

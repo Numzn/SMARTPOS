@@ -63,7 +63,7 @@ function startFakeBackend() {
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ server, seen, port: server.address().port })));
 }
 
-async function launch(userData) {
+async function launch(userData, extraEnv = {}) {
   // Chromium switches must precede the app path to be honoured.
   const args = [];
   if (process.env.SMOKE_NO_SANDBOX === '1') args.push('--no-sandbox', '--disable-dev-shm-usage');
@@ -71,7 +71,7 @@ async function launch(userData) {
   const app = await electron.launch({
     executablePath: require('electron'),
     args,
-    env: { ...process.env, NUMZ_DESKTOP_DEV: '', NODE_ENV: 'production' },
+    env: { ...process.env, NUMZ_DESKTOP_DEV: '', NODE_ENV: 'production', ...extraEnv },
     timeout: 60_000,
   });
   const page = await app.firstWindow();
@@ -82,13 +82,26 @@ async function launch(userData) {
   const fake = await startFakeBackend();
   const backend = `http://127.0.0.1:${fake.port}`;
 
-  // ---------- A. First run: no server configured -> setup page ----------
+  // ---------- A. First run: built-in default server, no setup step; settings still reachable ----------
   const dirA = fs.mkdtempSync(path.join(os.tmpdir(), 'numz-smoke-a-'));
   {
-    const { app, page } = await launch(dirA);
-    await check('first run shows the server-setup page', async () => {
+    // NUMZ_BACKEND_URL stands in for the packaged default (config/defaults.json) so
+    // the test never talks to a real server.
+    const { app, page } = await launch(dirA, { NUMZ_BACKEND_URL: backend });
+    await check('first run skips the setup page and goes straight to the login screen', async () => {
+      await page.waitForURL('numzpos://app/**', { timeout: 30_000 });
+      await page.waitForSelector('#email', { timeout: 30_000 });
+      assert(!page.url().includes('__desktop'), page.url());
+    });
+    await check('the built-in default server is used without anything being saved', async () => {
+      assert(!fs.existsSync(path.join(dirA, 'config.json')), 'config.json should not exist yet');
+      const cfg = await page.evaluate(() => window.numzDesktop.config.get());
+      assert(cfg.configured === true && cfg.backendUrl === backend, JSON.stringify(cfg));
+    });
+    await check('Server settings page is still reachable and shows the current server', async () => {
+      await page.evaluate(() => window.numzDesktop.app.openSetup());
       await page.waitForURL('**/__desktop/setup.html', { timeout: 30_000 });
-      assert((await page.textContent('h1')).includes('Connect NUMZ POS'), 'heading missing');
+      await page.waitForFunction((b) => document.getElementById('url').value === b, backend);
     });
     await check('setup page: testing a bad address is refused with a message', async () => {
       await page.fill('#url', 'http://example.com');
@@ -100,12 +113,12 @@ async function launch(userData) {
       await page.click('#test');
       await page.waitForFunction(() => document.getElementById('message').textContent.startsWith('Connected'));
     });
-    await check('setup page: saving loads the real React app (unauthenticated -> /login)', async () => {
+    await check('setup page: saving returns to the real React app (/login)', async () => {
       await page.click('#save');
       await page.waitForURL('**/login', { timeout: 30_000 });
       await page.waitForSelector('#email', { timeout: 30_000 });
     });
-    await check('server address was persisted to the per-user config', async () => {
+    await check('a user-chosen server address is persisted to the per-user config', async () => {
       const cfg = JSON.parse(fs.readFileSync(path.join(dirA, 'config.json'), 'utf8'));
       assert(cfg.backendUrl === backend, `got ${cfg.backendUrl}`);
     });

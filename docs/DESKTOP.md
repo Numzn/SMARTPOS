@@ -41,8 +41,8 @@ Key decisions:
 | `desktop/preload.js` | The only bridge (`window.numzDesktop`) |
 | `desktop/ipc/` | `channels.js` (closed allowlist), `senderValidation.js`, `register.js` (handlers) |
 | `desktop/services/` | `appProtocol`, `backendProxy`, `staticResolver`, `csp`, `navigationGuard`, `configStore`, `secureStore`, `backendUrl`, `printing`, `escposPrinter`, `updater`, `diagnostics`, `logger`, `menu` |
-| `desktop/renderer/` | Bundled server-setup page (shown until a server address is saved) |
-| `desktop/config/` | `constants.js`, `defaults.json` (ships **empty**) |
+| `desktop/renderer/` | Bundled server-settings page (File → Server settings…; shown automatically only if no server address exists at all) |
+| `desktop/config/` | `constants.js`, `defaults.json` (default server address) |
 | `desktop/scripts/` | `dev.js`, `build-renderer.js`, `prepare-vendor.js`, `generate-icon.js` |
 | `desktop/electron-builder.yml` | NSIS installer configuration |
 | `desktop/tests/` | Vitest suites for everything above |
@@ -125,8 +125,8 @@ commit them.
 
 | Setting | Where | Notes |
 |---|---|---|
-| Backend address | First-run **Server settings** page, or *File → Server settings…* | Stored per user as an origin, e.g. `https://pos.example.com`. `https` required except for localhost/private-network addresses. |
-| Pre-seed for a fleet | env `NUMZ_BACKEND_URL` or `desktop/config/defaults.json` `backendUrl` | Applies only until the user chooses one. Ships empty. |
+| Backend address | Built-in default `https://pos.lab.numz.site` (`desktop/config/defaults.json`), so first launch goes straight to sign-in. Change it any time via *File → Server settings…* or **Devices → This computer → Change server**. | Stored per user as an origin once changed. `https` required except for localhost/private-network addresses. A user-saved address always wins over the default. |
+| Override the default (build or fleet) | env `NUMZ_BACKEND_URL`, or edit `defaults.json` `backendUrl` before building | Applies only until the user chooses one. To build an installer for a different server, change `defaults.json` and rebuild. |
 | Printer / drawer | **Devices → This computer** | Stored per user. |
 | Update feed | env `NUMZ_UPDATE_URL` (https) or `defaults.json` `updateUrl`; channel `NUMZ_UPDATE_CHANNEL` | Off unless set. |
 | User data | `%APPDATA%\NUMZ POS\` | `config.json`, `secure.json` (encrypted), `logs\main.log` |
