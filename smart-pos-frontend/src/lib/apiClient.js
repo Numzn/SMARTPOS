@@ -1,4 +1,4 @@
-import Cookies from 'js-cookie';
+import { getRequestToken, clearToken } from './tokenStore';
 
 const configured = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 
@@ -18,7 +18,7 @@ export const API_ROOT = configured.startsWith('/')
 export const API_BASE = resolveApiBase();
 
 export function getAuthToken() {
-  return Cookies.get('token') || localStorage.getItem('token');
+  return getRequestToken() || null;
 }
 
 export function getAuthHeaders(extra = {}) {
@@ -43,8 +43,7 @@ export class ApiError extends Error {
 
 function handleUnauthorized(status, path) {
   if (status === 401 && !String(path).includes('/login')) {
-    Cookies.remove('token');
-    localStorage.removeItem('token');
+    clearToken();
     if (!window.location.pathname.includes('/login')) {
       window.location.href = '/login';
     }

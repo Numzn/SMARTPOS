@@ -1,0 +1,56 @@
+# electron-builder configuration for the NUMZ POS Windows installer.
+# Build with:  npm run dist   (from desktop/)   -> release/NUMZ-POS-Setup.exe
+appId: com.numztech.numzpos
+productName: NUMZ POS
+copyright: Copyright © 2026 NUMZ TECHNOLOGIES LIMITED
+artifactName: NUMZ-POS-Setup.${ext}
+
+directories:
+  output: release
+  buildResources: build
+
+# Only runtime code is packaged. Explicitly NOT included: tests, scripts,
+# .env files, source maps, anything from the repository outside desktop/.
+files:
+  - main.js
+  - preload.js
+  - config/**
+  - ipc/**
+  - services/**
+  - renderer/**
+  - vendor/**
+  - app-dist/**
+  - build/icon.png
+  - "!**/*.map"
+  - "!**/.env*"
+  - "!**/*.test.js"
+
+electronLanguages:
+  - en-US
+
+asar: true
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.png
+  # NOTE: unsigned until a code-signing certificate is supplied
+  # (CSC_LINK / CSC_KEY_PASSWORD in the build environment, never in this repo).
+  # Unsigned installers trigger Windows SmartScreen warnings.
+
+nsis:
+  oneClick: false
+  perMachine: false            # per-user install: no admin rights, simple upgrades
+  allowToChangeInstallationDirectory: true
+  allowElevation: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: NUMZ POS
+  runAfterFinish: true
+  deleteAppDataOnUninstall: false   # keep server address, printer config and logs across uninstall/upgrade
+  uninstallDisplayName: NUMZ POS
+
+# Never auto-publish from a build. Releases are uploaded manually, with approval.
+publish: null

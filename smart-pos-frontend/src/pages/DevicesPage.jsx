@@ -20,6 +20,7 @@ import {
   updatePrinter,
 } from '../api/printersApi';
 import { usePermissions } from '../hooks/usePermissions';
+import DesktopPanel from '../components/desktop/DesktopPanel';
 
 const PRINTER_TYPES = [
   { value: 'BROWSER', label: 'Browser (window.print)' },
@@ -411,6 +412,8 @@ export default function DevicesPage() {
           </button>
         </form>
       )}
+
+      <DesktopPanel />
     </div>
   );
 }

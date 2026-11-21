@@ -1,0 +1,9 @@
+node_modules/
+release/
+app-dist/
+vendor/
+*.log
+.env
+.env.*
+!build/
+!build/icon.png

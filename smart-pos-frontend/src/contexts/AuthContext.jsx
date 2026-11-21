@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import Cookies from 'js-cookie';
 import api from '../services/api';
+import { getInitialToken, saveToken, clearToken } from '../lib/tokenStore';
 
 const AuthContext = createContext();
 
@@ -16,7 +16,7 @@ export const useAuth = () => {
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [token, setToken] = useState(Cookies.get('token'));
+  const [token, setToken] = useState(getInitialToken());
 
   // Check if user is authenticated on app start
   useEffect(() => {
@@ -45,14 +45,9 @@ export const AuthProvider = ({ children }) => {
 
       const { token: newToken, user: userData } = response.data;
       
-      // Store token in cookie (7 days)
-      // secure only on HTTPS — localhost dev uses http
-      Cookies.set('token', newToken, {
-        expires: 7,
-        secure: window.location.protocol === 'https:',
-        sameSite: 'lax',
-      });
-      localStorage.setItem('token', newToken);
+      // Web: cookie (7 days) + localStorage. Desktop: OS-backed secure store.
+      // See lib/tokenStore.js.
+      saveToken(newToken);
       setToken(newToken);
       setUser(userData);
 
@@ -80,8 +75,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = () => {
-    Cookies.remove('token');
-    localStorage.removeItem('token');
+    clearToken();
     setToken(null);
     setUser(null);
   };

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NUMZ POS: Server settings</title>
+    <link rel="stylesheet" href="/__desktop/setup.css" />
+  </head>
+  <body>
+    <main class="card" aria-labelledby="title">
+      <h1 id="title">Connect NUMZ POS to your server</h1>
+      <p class="hint">
+        Enter the address of your NUMZ POS server. Your administrator can give you this,
+        for example <code>https://pos.yourshop.com</code>.
+      </p>
+
+      <form id="form" novalidate>
+        <label for="url">Server address</label>
+        <input id="url" name="url" type="url" inputmode="url" autocomplete="off" spellcheck="false"
+               placeholder="https://pos.yourshop.com" required />
+        <p id="message" role="status" aria-live="polite"></p>
+        <div class="row">
+          <button type="button" id="test" class="secondary">Test connection</button>
+          <button type="submit" id="save">Save and continue</button>
+        </div>
+      </form>
+
+      <p class="foot" id="version"></p>
+    </main>
+    <script src="/__desktop/setup.js"></script>
+  </body>
+</html>

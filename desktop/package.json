@@ -1,0 +1,35 @@
+{
+  "name": "numz-pos-desktop",
+  "productName": "NUMZ POS",
+  "version": "1.0.0",
+  "description": "NUMZ POS desktop application (Electron shell around the existing NUMZ POS web client)",
+  "private": true,
+  "author": {
+    "name": "NUMZ TECHNOLOGIES LIMITED"
+  },
+  "license": "UNLICENSED",
+  "main": "main.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "start": "electron .",
+    "build:renderer": "node scripts/build-renderer.js",
+    "prepare:vendor": "node scripts/prepare-vendor.js",
+    "icon": "node scripts/generate-icon.js",
+    "pack": "npm run build:renderer && electron-builder --dir --win --x64 --publish never",
+    "dist": "npm run build:renderer && electron-builder --win --x64 --publish never",
+    "test": "vitest run",
+    "test:smoke": "node tests/smoke/launch.smoke.js"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
+  },
+  "devDependencies": {
+    "electron": "^45.4.1",
+    "electron-builder": "^26.18.0",
+    "playwright-core": "^1.50.0",
+    "vitest": "^2.1.9"
+  }
+}

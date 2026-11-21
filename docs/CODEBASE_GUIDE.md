@@ -81,6 +81,9 @@ Beyond the till, it covers the operations a small-to-mid retail business needs d
 │       └── lib/, utils/            apiClient, roleHome, printReceipt, shiftPdf, cartTotals, productUtils
 ├── packages/receipt-engine/     Shared TS package: ReceiptViewModel, Thermal/A4 React renderers,
 │                                  ESC/POS byte builder — imported by both backend and frontend
+├── desktop/                     Electron Windows desktop shell (standalone npm package, NOT a workspace) —
+│                                  see docs/DESKTOP.md. Serves the unchanged React build from numzpos://app/,
+│                                  proxies /api/* to a configured backend, local printing, installer.
 ├── scripts/                     Root-level deploy scripts (deploy-numzlab.sh, etc.)
 ├── docker-compose.yml            Base 4-service stack (postgres, mock-vsdc, backend, frontend)
 ├── docker-compose.numzlab.yml    Override for the home-lab deploy target (not a separate stack)
