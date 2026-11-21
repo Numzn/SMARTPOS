@@ -6,6 +6,7 @@ import { usePermissions } from '../../hooks/usePermissions';
 import { useZraStatus } from '../../hooks/useZraStatus';
 import { DASHBOARD_ITEM, NAV_SECTIONS } from './navItems';
 import Sidebar from './Sidebar';
+import ConnectionBanner from './ConnectionBanner';
 
 // Scoped to just the routed page content — the previous boundary wrapped the
 // whole MainLayout at the router level, so a lazy chunk that hadn't loaded
@@ -80,6 +81,7 @@ const MainLayout = () => {
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0">
+        <ConnectionBanner />
         {!isCashierRoute && (
         <header className="h-12 flex-shrink-0 bg-surface-raised border-b border-surface-border flex items-center justify-between px-4">
           <div className="flex items-center gap-3 flex-1 min-w-0">

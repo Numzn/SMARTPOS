@@ -1,4 +1,5 @@
 import { getRequestToken, clearToken } from './tokenStore';
+import { reportReachable, reportNetworkFailure } from './connectivity';
 
 const configured = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 
@@ -38,6 +39,28 @@ export class ApiError extends Error {
     this.status = status;
     this.data = data;
     this.response = { status, data };
+    // 'auth'     — the session is invalid (401): the only kind that may sign a user out.
+    // 'network'  — a gateway between us and the server failed (502/504); the server
+    //              itself did not answer. NOT 503: our own routes use it for
+    //              business conditions such as "VSDC device not initialized".
+    // 'business' — the server answered and said no (validation, permission, ...).
+    this.kind = status === 401 ? 'auth' : status === 502 || status === 504 ? 'network' : 'business';
+  }
+}
+
+/**
+ * The request never got an answer (offline, DNS, refused, timed out). Has NO
+ * `.response`, exactly like the raw TypeError it replaces, so existing
+ * `!error.response` checks keep working; `kind === 'network'` is the explicit test.
+ * Note: the request may or may not have reached the server before the link
+ * dropped; callers that create something must not assume either way.
+ */
+export class NetworkError extends Error {
+  constructor(message = 'Cannot reach the server. Check the connection and try again.', cause) {
+    super(message);
+    this.name = 'NetworkError';
+    this.kind = 'network';
+    if (cause) this.cause = cause;
   }
 }
 
@@ -61,10 +84,21 @@ function resolveUrl(path) {
  */
 export async function apiFetch(path, options = {}) {
   const url = resolveUrl(path);
-  const res = await fetch(url, {
-    ...options,
-    headers: { ...getAuthHeaders(), ...options.headers },
-  });
+  // `timeoutMs` is ours, not fetch's: strip it and turn it into an abort signal.
+  const { timeoutMs, ...fetchOptions } = options;
+  let res;
+  try {
+    res = await fetch(url, {
+      ...fetchOptions,
+      ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
+      headers: { ...getAuthHeaders(), ...fetchOptions.headers },
+    });
+  } catch (e) {
+    reportNetworkFailure();
+    throw new NetworkError(undefined, e);
+  }
+  if (res.status === 502 || res.status === 504) reportNetworkFailure();
+  else reportReachable();
 
   let data = null;
   try {

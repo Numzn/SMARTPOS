@@ -12,7 +12,10 @@ import { getDesktopBridge } from './desktop';
  */
 
 const SECURE_KEY = 'auth.token';
+const SESSION_KEY = 'auth.session';
+const MAX_SESSION_CHARS = 7000; // keep below the desktop secure store's 8 KB value cap
 let memoryToken = null;
+let memorySession = null;
 
 /** Call once before first render. A no-op in the browser. */
 export async function hydrateTokenStore() {
@@ -23,6 +26,12 @@ export async function hydrateTokenStore() {
     memoryToken = typeof saved === 'string' && saved ? saved : null;
   } catch {
     memoryToken = null;
+  }
+  try {
+    const rawSession = await bridge.secureStore.get(SESSION_KEY);
+    memorySession = typeof rawSession === 'string' && rawSession ? JSON.parse(rawSession) : null;
+  } catch {
+    memorySession = null;
   }
 }
 
@@ -55,11 +64,37 @@ export function saveToken(token) {
   localStorage.setItem('token', token);
 }
 
+/**
+ * Last known signed-in user (id, role, permissions...), kept so the app can
+ * show the cashier's session while the server is unreachable. Desktop: also
+ * persisted through the OS secure store. Browser: memory only (the web build
+ * stays online-first). It is a convenience snapshot, never an authority: the
+ * server re-validates it as soon as it can be reached.
+ */
+export function saveSession(user) {
+  memorySession = user && typeof user === 'object' ? user : null;
+  const bridge = getDesktopBridge();
+  if (!bridge || !memorySession) return;
+  try {
+    const text = JSON.stringify(memorySession);
+    if (text.length > MAX_SESSION_CHARS) return;
+    bridge.secureStore.set(SESSION_KEY, text).catch(() => {});
+  } catch {
+    /* unserialisable: keep the in-memory copy only */
+  }
+}
+
+export function getCachedSession() {
+  return memorySession;
+}
+
 export function clearToken() {
   const bridge = getDesktopBridge();
+  memorySession = null;
   if (bridge) {
     memoryToken = null;
     bridge.secureStore.delete(SECURE_KEY).catch(() => {});
+    bridge.secureStore.delete(SESSION_KEY).catch(() => {});
     return;
   }
   Cookies.remove('token');
@@ -69,4 +104,5 @@ export function clearToken() {
 /** Test helper: reset module state. */
 export function __resetTokenStoreForTests() {
   memoryToken = null;
+  memorySession = null;
 }

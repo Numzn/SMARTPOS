@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import api from '../../services/api';
+import { useConnectivity } from '../../hooks/useConnectivity';
 import { API_ROOT } from '../../lib/apiClient';
 import { getHomeRoute } from '../../lib/roleHome';
 import { Server, AlertCircle, Loader2 } from 'lucide-react';
@@ -17,14 +17,11 @@ const LoginForm = () => {
   });
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [apiStatus, setApiStatus] = useState('checking');
-
-  useEffect(() => {
-    api
-      .get('/health')
-      .then(() => setApiStatus('online'))
-      .catch(() => setApiStatus('offline'));
-  }, []);
+  // Live server reachability (lib/connectivity.js). The previous one-shot health
+  // check left the form disabled until a page reload if the server was down at
+  // load time; this re-enables it by itself the moment the server answers.
+  const { status: connectivity } = useConnectivity();
+  const apiStatus = connectivity === 'ONLINE' ? 'online' : connectivity === 'OFFLINE' ? 'offline' : 'checking';
 
   if (isAuthenticated) {
     return <Navigate to={getHomeRoute(user?.role)} replace />;

@@ -188,7 +188,9 @@ the installed version in place.
 1. **Offline sales are NOT implemented.** The backend currently has no idempotency keys and `Sale.status`
    mixes commercial and fiscal state; a local queue on top would risk duplicates or mislabelled fiscal
    state. The design and prerequisites are in [REARCHITECTURE_CASE_STUDY.md](./REARCHITECTURE_CASE_STUDY.md).
-   Today the desktop needs the backend to be reachable to sell, exactly like the web app.
+   Today the desktop needs the backend to be reachable to sell, exactly like the web app. Since offline Phase 1 the app
+   at least **stays signed in** through an outage and says so (banner), instead of logging the user out; see
+   [OFFLINE_DESIGN_PROPOSAL.md](./OFFLINE_DESIGN_PROPOSAL.md).
 2. **No code signing** and **placeholder icon**.
 3. **Windows x64 only.** The code has no Windows-specific logic outside the installer config, so macOS/Linux
    targets are a configuration addition, but they have not been built or tested.

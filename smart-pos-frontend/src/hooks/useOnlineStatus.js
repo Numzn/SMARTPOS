@@ -1,22 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useConnectivity } from './useConnectivity';
 
-// Real connectivity signal (navigator.onLine + the browser's online/offline
-// events) — replaces what used to be a hardcoded 'connected' constant on
-// the Cashier screen that could never actually change. A status icon that's
-// permanently green regardless of reality defeats the point of having one.
+// "Online" here means OUR SERVER is reachable, not merely that the PC has a
+// network connection (navigator.onLine can say "online" while the server is
+// down, which is exactly the case a till cares about). Only a confirmed
+// OFFLINE is reported as offline; a single missed beat (DEGRADED) is not.
+// See lib/connectivity.js.
 export function useOnlineStatus() {
-  const [online, setOnline] = useState(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
-
-  useEffect(() => {
-    const handleOnline = () => setOnline(true);
-    const handleOffline = () => setOnline(false);
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
-
-  return online;
+  return useConnectivity().status !== 'OFFLINE';
 }

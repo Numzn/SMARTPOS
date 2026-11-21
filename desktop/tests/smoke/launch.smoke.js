@@ -36,7 +36,7 @@ function assert(cond, msg) {
   if (!cond) throw new Error(msg || 'assertion failed');
 }
 
-function startFakeBackend() {
+function startFakeBackend(port = 0) {
   const seen = [];
   const server = http.createServer((req, res) => {
     let body = '';
@@ -60,7 +60,7 @@ function startFakeBackend() {
       return json(200, req.method === 'GET' ? [] : {});
     });
   });
-  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ server, seen, port: server.address().port })));
+  return new Promise((resolve) => server.listen(port, '127.0.0.1', () => resolve({ server, seen, port: server.address().port })));
 }
 
 async function launch(userData, extraEnv = {}) {
@@ -236,11 +236,49 @@ async function launch(userData, extraEnv = {}) {
       });
     }
 
+    await check('before the outage: no connection banner is shown', async () => {
+      assert((await page.locator('[data-testid=connection-banner]').count()) === 0, 'banner visible while online');
+    });
+
+    // ---- outage: the server disappears while the user is signed in ----
+    fake.server.closeAllConnections && fake.server.closeAllConnections();
+    await new Promise((r) => fake.server.close(r));
     await check('backend outage surfaces as a failed fetch, like a browser (no hang)', async () => {
-      await new Promise((r) => fake.server.close(r));
       const outcome = await page.evaluate(() => fetch('/api/health').then(() => 'ok', () => 'network-error'));
       assert(outcome === 'network-error', outcome);
     });
+    await check('outage: the "can\'t reach the server" banner appears by itself', async () => {
+      // First a milder "unstable" notice (one missed check), then the real one
+      // after the second miss; wait for the final state.
+      await page.waitForSelector('[data-testid=connection-banner]', { timeout: 30_000 });
+      await page.waitForFunction(
+        () => /reach the server/i.test((document.querySelector('[data-testid=connection-banner]') || {}).textContent || ''),
+        null,
+        { timeout: 30_000 }
+      );
+      const t = await page.textContent('[data-testid=connection-banner]');
+      assert(/reach the server/i.test(t) && /cart is kept/i.test(t), t);
+    });
+    await check('outage: the user is NOT signed out (still on an authenticated page)', async () => {
+      assert(!page.url().includes('/login'), page.url());
+    });
+    await check('outage: "Retry now" does not crash and the banner stays while the server is down', async () => {
+      await page.click('[aria-label="Check the connection now"]');
+      await page.waitForTimeout(1500);
+      assert((await page.locator('[data-testid=connection-banner]').count()) === 1, 'banner vanished');
+    });
+
+    // ---- recovery: the server comes back on the same address ----
+    const fake2 = await startFakeBackend(fake.port);
+    await check('recovery: the banner clears by itself once the server answers again', async () => {
+      await page.waitForSelector('[data-testid=connection-banner]', { state: 'detached', timeout: 30_000 });
+    });
+    await check('recovery: API calls work again through the proxy and the user is still signed in', async () => {
+      const r = await page.evaluate(() => fetch('/api/health').then((x) => x.json()));
+      assert(r.fake === true, JSON.stringify(r));
+      assert(!page.url().includes('/login'), page.url());
+    });
+    await new Promise((r) => { fake2.server.closeAllConnections && fake2.server.closeAllConnections(); fake2.server.close(r); });
     await app.close();
   }
 

@@ -105,6 +105,12 @@ describe('secure store', () => {
     s.delete('auth.token');
     expect(s.get('auth.token')).toBeNull();
   });
+  it('accepts exactly the two session keys', () => {
+    const s = createSecureStore({ safeStorage: fakeSafe(), fs, dir: tmp });
+    s.set('auth.session', '{"id":1}');
+    expect(s.get('auth.session')).toBe('{"id":1}');
+    expect(() => s.set('auth.other', 'x')).toThrow('Unknown secure storage key.');
+  });
   it('refuses unknown keys (not a general file store)', () => {
     const s = createSecureStore({ safeStorage: fakeSafe(), fs, dir: tmp });
     expect(() => s.set('anything', 'x')).toThrow('Unknown secure storage key.');

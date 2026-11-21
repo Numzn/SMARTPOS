@@ -17,6 +17,7 @@ import { fetchReceipt } from '../api/receiptsApi';
 import { routeReceiptPrint } from '../lib/printReceipt';
 import { ReceiptRenderer } from '@smartpos/receipt-engine/react';
 import { useAuth } from '../contexts/AuthContext';
+import { getConnectivity } from '../lib/connectivity';
 import { calculateCartTotals, formatZmw } from '../utils/cartTotals';
 import { customerApi } from '../services/customerService';
 import SupervisorApprovalModal from './cashier/modern/SupervisorApprovalModal';
@@ -226,6 +227,13 @@ const CheckoutModal = ({
       setError('You must be logged in to complete a sale.');
       return;
     }
+    // Server already known to be unreachable: nothing has been sent, so this is
+    // safe to retry. (Completing a sale still needs the server; see
+    // docs/OFFLINE_DESIGN_PROPOSAL.md for the offline roadmap.)
+    if (getConnectivity().status === 'OFFLINE') {
+      setError("Can't reach the server, so this sale was not sent. Check the connection, then try again. Your cart is kept.");
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -298,6 +306,17 @@ const CheckoutModal = ({
         // The cart discount is over the threshold — collect a supervisor
         // approval ticket, then retry with discountApprovalId attached.
         setDiscountApprovalNeeded(true);
+        return;
+      }
+      if (err.kind === 'network') {
+        // The link dropped while the sale was in flight. The server may or may not
+        // have recorded it, and there is no sale-level idempotency key yet, so a
+        // blind retry could charge the customer twice.
+        setZraState('failed');
+        setError(
+          'The connection dropped while this sale was being sent, so we cannot tell whether it went through. ' +
+            'Do NOT charge the customer again yet: open Sales and check whether this sale is listed first.'
+        );
         return;
       }
       if (err.data?.sale?.id) {

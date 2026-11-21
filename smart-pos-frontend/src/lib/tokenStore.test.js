@@ -6,6 +6,8 @@ import {
   getRequestToken,
   saveToken,
   clearToken,
+  saveSession,
+  getCachedSession,
   __resetTokenStoreForTests,
 } from './tokenStore';
 
@@ -91,5 +93,45 @@ describe('tokenStore in the desktop app', () => {
     clearToken();
     expect(getRequestToken()).toBeUndefined();
     expect(secure.delete).toHaveBeenCalledWith('auth.token');
+  });
+});
+
+describe('saved session snapshot (offline sign-in)', () => {
+  const user = { id: 3, role: 'CASHIER', permissions: ['sales:write'] };
+
+  it('browser: kept in memory only, never in cookies or localStorage', () => {
+    saveSession(user);
+    expect(getCachedSession()).toEqual(user);
+    expect(JSON.stringify(localStorage)).not.toContain('CASHIER');
+    expect(document.cookie).not.toContain('CASHIER');
+  });
+
+  it('desktop: persisted through the secure store under its own key and restored on startup', async () => {
+    const secure = installBridge({ get: vi.fn(async (k) => (k === 'auth.session' ? JSON.stringify(user) : null)) });
+    await hydrateTokenStore();
+    expect(getCachedSession()).toEqual(user);
+    saveSession({ ...user, id: 4 });
+    expect(secure.set).toHaveBeenCalledWith('auth.session', JSON.stringify({ ...user, id: 4 }));
+  });
+
+  it('desktop: an oversized snapshot is kept in memory but not persisted', () => {
+    const secure = installBridge();
+    saveSession({ id: 1, blob: 'x'.repeat(9000) });
+    expect(secure.set).not.toHaveBeenCalled();
+    expect(getCachedSession().id).toBe(1);
+  });
+
+  it('desktop: a corrupt saved snapshot is ignored, not fatal', async () => {
+    installBridge({ get: vi.fn(async (k) => (k === 'auth.session' ? '{not json' : null)) });
+    await hydrateTokenStore();
+    expect(getCachedSession()).toBeNull();
+  });
+
+  it('clearToken wipes the snapshot everywhere', () => {
+    const secure = installBridge();
+    saveSession(user);
+    clearToken();
+    expect(getCachedSession()).toBeNull();
+    expect(secure.delete).toHaveBeenCalledWith('auth.session');
   });
 });

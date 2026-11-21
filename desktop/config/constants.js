@@ -20,7 +20,7 @@ const SETUP_PAGE_URL = `${APP_ORIGIN}${DESKTOP_PAGES_PREFIX}setup.html`;
 const DEFAULT_DEV_URL = 'http://localhost:5173';
 
 /** Only these keys may ever be written to / read from the OS-backed secure store. */
-const SECURE_STORE_KEYS = Object.freeze(['auth.token']);
+const SECURE_STORE_KEYS = Object.freeze(['auth.token', 'auth.session']);
 const MAX_SECURE_VALUE_BYTES = 8 * 1024;
 
 /** Mirrors nginx `proxy_read_timeout 60s` in smart-pos-frontend/nginx.conf. */

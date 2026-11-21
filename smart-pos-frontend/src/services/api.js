@@ -7,6 +7,7 @@ export {
   api,
   apiFetch,
   ApiError,
+  NetworkError,
   API_BASE,
   API_ROOT,
   getAuthToken,
