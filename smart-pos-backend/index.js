@@ -27,6 +27,7 @@ const supplierReturnRoutes = require('./routes/supplierReturns');
 const tillLockRoutes = require('./routes/tillLock');
 const tillApprovalRoutes = require('./routes/tillApprovals');
 const registerRoutes = require('./routes/registers'); // V1 register/till model
+const forecourtRoutes = require('./routes/forecourt'); // Forecourt module (fuel-station attendant clearing)
 const auditService = require('./services/auditService');
 
 dotenv.config();
@@ -65,6 +66,7 @@ app.use('/api/supplier-returns', supplierReturnRoutes);
 app.use('/api/till', tillLockRoutes);
 app.use('/api/till', tillApprovalRoutes);
 app.use('/api/registers', registerRoutes);
+app.use('/api/forecourt', forecourtRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

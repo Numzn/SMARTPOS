@@ -93,7 +93,13 @@ export const usePermissions = () => {
     manageRoles: hasPermission('roles:manage'),
 
     // Audit trail
-    viewAuditLog: hasPermission('audit:read')
+    viewAuditLog: hasPermission('audit:read'),
+
+    // Forecourt (fuel-station attendant clearing) — settleForecourt is a
+    // supervisor-level trust action, same tier as reconcileShift; a
+    // Cashier holds viewForecourt only (see lib/permissions.js backend).
+    viewForecourt: hasPermission('forecourt:read'),
+    settleForecourt: hasPermission('forecourt:settle')
   };
 
   return {

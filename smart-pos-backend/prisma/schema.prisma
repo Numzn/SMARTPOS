@@ -49,6 +49,14 @@ model User {
   branchId            String?
   branch              Branch?              @relation(fields: [branchId], references: [code])
 
+  // Forecourt module — optional, only set for the rare attendant who is
+  // also a system-login User (see Attendant below for why these are
+  // deliberately separate identities).
+  attendant                   Attendant?
+  forecourtSettlementsSettled AttendantSettlement[]
+  forecourtBatchesInitiated   SettlementBatch[]     @relation("SettlementBatchInitiator")
+  forecourtBatchesConfirmed   SettlementBatch[]     @relation("SettlementBatchConfirmer")
+
   // VSDC branch-user sync (Section 5.5, POST /branches/saveBrancheUser)
   zraSyncedAt     DateTime?
   zraSyncError    String?
@@ -141,6 +149,7 @@ model Product {
   compositionsAsComponent ProductComposition[]    @relation("CompositionComponent")
   decidedImportItems      RetrievedImportItem[]
   cashierCartLines        CashierCartLine[]
+  fuelTransactions        FuelTransaction[]
 
   @@map("products")
 }
@@ -927,6 +936,11 @@ model Branch {
   goodsReceivedNotes GoodsReceivedNote[]
   supplierReturns    SupplierReturn[]
   registers          Register[]
+  pumps              Pump[]
+  attendants         Attendant[]
+  fuelTransactions   FuelTransaction[]
+  settlementBatches  SettlementBatch[]
+  b2cSummaryPools    B2CSummaryPool[]
 
   @@map("branches")
 }
@@ -1041,6 +1055,10 @@ model Shift {
   declarations         CashierDeclaration[]
   adjustments          ShiftAdjustment[]
   shiftCashiers        ShiftCashier[]
+  fuelTransactions     FuelTransaction[]
+  attendantSettlements AttendantSettlement[]
+  settlementBatches    SettlementBatch[]
+  b2cSummaryPools      B2CSummaryPool[]
 
   @@index([branchId, status])
   @@index([userId, status])
@@ -1209,6 +1227,314 @@ model ShiftAdjustment {
   adjustedBy User    @relation(fields: [adjustedByUserId], references: [id])
 
   @@map("shift_adjustments")
+}
+
+// ============================================================================
+// Forecourt module (fuel-station attendant clearing) — Phase 1: domain
+// boundaries only. See docs/CODEBASE_GUIDE.md and the Forecourt plan for the
+// full picture. Nothing here is wired to real pump hardware or a live VSDC
+// submission yet (see FiscalRecord.provider) — this establishes the shape,
+// not the integration.
+//
+// Core rule: a FuelTransaction is created at the physical dispensing event,
+// never at attendant-clearing time. Clearing (AttendantSettlement /
+// SettlementBatch) is a downstream accounting process over rows that already
+// exist — it must never create, delete, or merge FuelTransaction rows.
+// Mirrors the Shift -> ZReport -> CashierDeclaration split: the operational
+// fact and the reconciliation process over it are different tables.
+//
+// A FuelTransaction tracks three independent status dimensions that must
+// never collapse into one enum: operationalStatus (the physical event),
+// fiscalStatus (its relationship to ZRA/VSDC), and settlementStatus (has a
+// cashier cleared it yet). A row can be DISPENSED + SETTLED while still
+// fiscalStatus=PENDING.
+// ============================================================================
+
+enum FuelOperationalStatus {
+  // Deliberately the only value in Phase 1 — a placeholder, not an
+  // oversight. Real pump telemetry (later phases) will likely add
+  // DISPENSING (in-flight) / VOIDED (meter correction, never a delete).
+  DISPENSED
+}
+
+enum FiscalStatus {
+  NOT_REQUIRED // e.g. a non-taxable adjustment — not expected to reach ZRA at all
+  PENDING // fiscal path not yet determined/executed
+  FISCALIZED // individually submitted to ZRA/VSDC (B2B, or B2C with an invoice requested)
+  FAILED // an individual submission attempt failed
+  SUMMARY_PENDING // ordinary B2C, no invoice requested — waiting to be claimed by a B2CSummaryPool
+  SUMMARY_FISCALIZED // claimed by a B2CSummaryPool that has itself been fiscalized
+}
+
+enum SettlementStatus {
+  UNSETTLED
+  PARTIALLY_SETTLED
+  SETTLED
+  EXCEPTION
+}
+
+enum CustomerType {
+  B2B
+  B2C
+}
+
+enum AttendantStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum PumpStatus {
+  ACTIVE
+  INACTIVE
+  MAINTENANCE
+}
+
+// TRANSACTION = this record fiscalizes exactly one FuelTransaction.
+// SUMMARY = this record fiscalizes a whole B2CSummaryPool; every
+// FuelTransaction the pool claimed shares this one FiscalRecord.
+enum FiscalRecordScope {
+  TRANSACTION
+  SUMMARY
+}
+
+enum SettlementBatchStatus {
+  OPEN
+  CONFIRMED
+  EXCEPTION
+}
+
+// A physical dispensing point. Deliberately independent of Register/Till —
+// a pump has no cash-drawer concept, and forcing a relation would conflate
+// exactly the boundary this module is meant to keep separate. Pre-pay (where
+// a pump might eventually need a payment/authorization relation) is out of
+// scope for this phase; adding one later is an additive column, not a
+// redesign.
+model Pump {
+  id        String     @id @default(cuid())
+  branchId  String     @default("main")
+  code      String     @unique // e.g. "PUMP-01"
+  name      String?
+  status    PumpStatus @default(ACTIVE)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  branch           Branch            @relation(fields: [branchId], references: [code])
+  fuelTransactions FuelTransaction[]
+
+  @@index([branchId, status])
+  @@map("pumps")
+}
+
+// A forecourt attendant. Deliberately NOT a User role — an attendant is an
+// operational actor (dispenses fuel, gets cleared by a cashier), not
+// necessarily a system-login identity. userId is an optional escape hatch
+// for the rare attendant who is also a POS User; attendant/cashier identity
+// otherwise stays fully separate, which is exactly what the clearing
+// workflow needs (a cashier clears an attendant, never themselves).
+model Attendant {
+  id            String          @id @default(cuid())
+  branchId      String          @default("main")
+  name          String
+  attendantCode String          @unique // badge/tag id, e.g. "ATT-014"
+  status        AttendantStatus @default(ACTIVE)
+  userId        String?         @unique
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  branch               Branch                @relation(fields: [branchId], references: [code])
+  user                 User?                 @relation(fields: [userId], references: [id])
+  fuelTransactions     FuelTransaction[]
+  attendantSettlements AttendantSettlement[]
+
+  @@index([branchId, status])
+  @@map("attendants")
+}
+
+// One fiscalization event. scope: TRANSACTION = one row's fiscalRecordId
+// points here; scope: SUMMARY = every FuelTransaction a B2CSummaryPool
+// claimed shares this one row. Field names mirror Sale's own VSDC fields for
+// consistency, but this is deliberately not Sale — a fuel dispensing event
+// is not a checkout sale.
+//
+// provider distinguishes a real ZRA/VSDC submission from this phase's
+// mock/sandbox adapter output. Mock records must stay unmistakably
+// synthetic (see lib/forecourt/fiscalAdapter.js) — this module makes no
+// claim of ZRA/VSDC certification or compliance.
+model FiscalRecord {
+  id       String            @id @default(cuid())
+  scope    FiscalRecordScope
+  branchId String            @default("main")
+  provider String            @default("mock") // "mock" | "vsdc"
+
+  amount    Float
+  taxAmount Float?
+
+  rcptNo          String?
+  rcptSign        String?
+  qrCode          String?
+  vsdcRequest     Json?
+  vsdcResponse    Json?
+  fiscalInvcNo    Int?
+  fiscalError     String?
+  fiscalErrorCode String?
+  submittedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  fuelTransactions FuelTransaction[]
+  b2cSummaryPool   B2CSummaryPool?
+
+  @@index([branchId])
+  @@map("fiscal_records")
+}
+
+// A frozen batch-run record for pooled B2C fiscalization, mirroring
+// ZReport's "compute once, freeze" shape. Deliberately inert in Phase 1 — no
+// lib code operates on this table until the B2C summary phase — but created
+// now so FuelTransaction.summaryPoolId doesn't require a later migration.
+model B2CSummaryPool {
+  id               String    @id @default(cuid())
+  branchId         String    @default("main")
+  shiftId          String?
+  periodStart      DateTime
+  periodEnd        DateTime?
+  status           String    @default("OPEN") // OPEN | CLOSED | FISCALIZED | FAILED
+  transactionCount Int?
+  totalAmount      Float?
+  fiscalRecordId   String?   @unique
+  openedAt         DateTime  @default(now())
+  closedAt         DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  branch       Branch            @relation(fields: [branchId], references: [code])
+  shift        Shift?            @relation(fields: [shiftId], references: [id])
+  fiscalRecord FiscalRecord?     @relation(fields: [fiscalRecordId], references: [id])
+  transactions FuelTransaction[]
+
+  @@index([branchId, status])
+  @@map("b2c_summary_pools")
+}
+
+// The core record. Created at the physical dispensing event — see the
+// module-level comment above for why clearing never creates or merges
+// these rows.
+model FuelTransaction {
+  id       String @id @default(cuid())
+  branchId String @default("main")
+
+  pumpId      String
+  attendantId String
+  productId   String // fuel grades are Product rows (unit: "L") in a "Fuel" Category — reuses the existing tax-classification surface
+  shiftId     String?
+
+  volume    Float // liters dispensed
+  unitPrice Float // snapshot of Product.price at dispensing time
+  amount    Float // volume * unitPrice, stored (same redundancy tradeoff Sale.total makes)
+
+  // Tax fields snapshotted from Product at dispensing time — never re-read
+  // live later, same rationale as SaleItem's own snapshot fields.
+  taxRate         Float?
+  vatCategoryCode String?
+
+  transactionTime   DateTime              @default(now())
+  operationalStatus FuelOperationalStatus @default(DISPENSED)
+
+  customerId       String?
+  customerType     CustomerType @default(B2C)
+  invoiceRequested Boolean      @default(false)
+
+  fiscalStatus   FiscalStatus @default(PENDING)
+  fiscalRecordId String?
+  summaryPoolId  String? // set once claimed by a B2CSummaryPool run — a real FK, not an implicit query filter, so pool membership stays auditable
+
+  settlementStatus SettlementStatus @default(UNSETTLED)
+  settlementId     String? // FK to AttendantSettlement once cleared
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  branch       Branch               @relation(fields: [branchId], references: [code])
+  pump         Pump                 @relation(fields: [pumpId], references: [id])
+  attendant    Attendant            @relation(fields: [attendantId], references: [id])
+  product      Product              @relation(fields: [productId], references: [id])
+  shift        Shift?               @relation(fields: [shiftId], references: [id])
+  customer     Customer?            @relation(fields: [customerId], references: [id])
+  fiscalRecord FiscalRecord?        @relation(fields: [fiscalRecordId], references: [id])
+  summaryPool  B2CSummaryPool?      @relation(fields: [summaryPoolId], references: [id])
+  settlement   AttendantSettlement? @relation(fields: [settlementId], references: [id])
+
+  @@index([branchId, transactionTime])
+  @@index([pumpId, transactionTime])
+  @@index([attendantId, settlementStatus])
+  @@index([attendantId, transactionTime])
+  @@index([shiftId])
+  @@index([fiscalStatus])
+  @@index([settlementStatus])
+  @@map("fuel_transactions")
+}
+
+// One attendant's slice of a SettlementBatch. Always a child of exactly one
+// batch — even a solo "clear this one attendant" action is a batch of one,
+// so there is only ever one shape for "a clearing event," never a special
+// case for single- vs multi-attendant clearing.
+model AttendantSettlement {
+  id          String  @id @default(cuid())
+  batchId     String
+  attendantId String
+  shiftId     String?
+
+  expectedAmount Float? // frozen sum of linked FuelTransaction.amount at settlement time — mirrors ZReport.expectedClosingCash
+  declaredAmount Float? // what the cashier actually collected — set at clearing time (Phase 4-6)
+  variance       Float? // declaredAmount - expectedAmount, same sign convention as Shift.variance
+
+  // AttendantSettlement.status and its child FuelTransaction rows'
+  // settlementStatus are deliberately two separate facts, never inferred
+  // from one another automatically — a settlement can read EXCEPTION while
+  // some of its lines already read SETTLED.
+  status SettlementStatus @default(UNSETTLED)
+
+  settledByUserId String?
+  settledAt       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  batch            SettlementBatch   @relation(fields: [batchId], references: [id])
+  attendant        Attendant         @relation(fields: [attendantId], references: [id])
+  shift            Shift?            @relation(fields: [shiftId], references: [id])
+  settledBy        User?             @relation(fields: [settledByUserId], references: [id])
+  fuelTransactions FuelTransaction[]
+
+  @@index([batchId])
+  @@index([attendantId, status])
+  @@map("attendant_settlements")
+}
+
+// A clearing event — one or more attendants settled together while keeping
+// each attendant's own FuelTransactions fully attributable (never merged
+// into one sale). See AttendantSettlement above.
+model SettlementBatch {
+  id                String                @id @default(cuid())
+  branchId          String                @default("main")
+  shiftId           String?
+  status            SettlementBatchStatus @default(OPEN)
+  initiatedByUserId String
+  confirmedByUserId String?
+  confirmedAt       DateTime?
+  notes             String?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  branch               Branch                @relation(fields: [branchId], references: [code])
+  shift                Shift?                @relation(fields: [shiftId], references: [id])
+  initiatedBy          User                  @relation("SettlementBatchInitiator", fields: [initiatedByUserId], references: [id])
+  confirmedBy          User?                 @relation("SettlementBatchConfirmer", fields: [confirmedByUserId], references: [id])
+  attendantSettlements AttendantSettlement[]
+
+  @@index([branchId, status])
+  @@index([shiftId])
+  @@map("settlement_batches")
 }
 
 model VsdcDevice {
@@ -1421,6 +1747,14 @@ enum PaymentMethod {
   CARD
   DIGITAL_WALLET
   BANK_TRANSFER
+  // Added for the Forecourt module (attendant settlement tender types) —
+  // additive values only, existing Sale/Refund/DebitNote rows are
+  // unaffected. MIXED means the tender was split across more than one of
+  // the above at settlement time; the actual per-method breakdown for a
+  // MIXED settlement lives on AttendantSettlement, not here.
+  MOBILE_MONEY
+  ACCOUNT_CREDIT
+  MIXED
 }
 
 enum BatchStatus {
@@ -1546,6 +1880,7 @@ model Customer {
   zraSyncResponse Json?
 
   sales            Sale[]
+  fuelTransactions FuelTransaction[]
 
   @@index([phone])
   @@index([tpin])

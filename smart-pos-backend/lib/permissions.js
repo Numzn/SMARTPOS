@@ -52,6 +52,7 @@ const DEFAULT_PERMISSIONS = {
     'shifts:reconcile', 'shifts:viewAll', 'shifts:reopen', 'shifts:adjust',
     'zra:status', 'zra:read', 'zra:sync', 'zra:submit', 'zra:admin',
     'roles:manage',
+    'forecourt:read', 'forecourt:write', 'forecourt:settle',
   ],
   MANAGER: [
     'users:read',
@@ -68,6 +69,7 @@ const DEFAULT_PERMISSIONS = {
     'shifts:operate', 'shifts:viewExpected', 'shifts:countCash', 'shifts:viewVariance',
     'shifts:reconcile', 'shifts:viewAll', 'shifts:reopen', 'shifts:adjust',
     'zra:status', 'zra:read', 'zra:sync', 'zra:submit',
+    'forecourt:read', 'forecourt:write', 'forecourt:settle',
   ],
   // Same operational baseline as CASHIER, plus reconciliation authority.
   // Supervisor's extra power comes from these granular shift permissions,
@@ -80,6 +82,9 @@ const DEFAULT_PERMISSIONS = {
     'shifts:operate', 'shifts:viewExpected', 'shifts:countCash', 'shifts:viewVariance',
     'shifts:reconcile',
     'zra:status',
+    // forecourt:write withheld — attendant/pump roster configuration is
+    // administrative (same tier as settings:write), not a supervisor task.
+    'forecourt:read', 'forecourt:settle',
   ],
   CASHIER: [
     'sales:read', 'sales:write',
@@ -96,6 +101,10 @@ const DEFAULT_PERMISSIONS = {
     // holds: it does not grant access to the ZRA Sync page or any
     // operational/admin ZRA data (see zra:read/zra:sync/zra:admin below).
     'zra:status',
+    // View attendants/pumps/transactions from the till. Not forecourt:settle
+    // — clearing/settling is a supervisor-level trust action in this
+    // domain, same as till reconciliation.
+    'forecourt:read',
   ],
   VIEWER: [
     'products:read',
@@ -106,6 +115,7 @@ const DEFAULT_PERMISSIONS = {
     'purchasing:read',
     'reports:read',
     'shifts:viewAll',
+    'forecourt:read',
   ],
 };
 

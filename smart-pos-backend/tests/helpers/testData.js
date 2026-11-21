@@ -235,6 +235,26 @@ async function createTestTill({ registerId, code, name = 'Test Till', defaultOpe
   });
 }
 
+async function createTestAttendant({ branchId = DEFAULT_BRANCH_CODE, attendantCode, name = 'Test Attendant' } = {}) {
+  return prisma.attendant.create({
+    data: {
+      name,
+      attendantCode: attendantCode || `TEST-ATT-${uniqueSuffix()}`,
+      branchId,
+    },
+  });
+}
+
+async function createTestPump({ branchId = DEFAULT_BRANCH_CODE, code, name = 'Test Pump' } = {}) {
+  return prisma.pump.create({
+    data: {
+      code: code || `TEST-PUMP-${uniqueSuffix()}`,
+      name,
+      branchId,
+    },
+  });
+}
+
 async function createTestSale({
   userId,
   productId,
@@ -335,6 +355,30 @@ async function cleanupTestData() {
   });
   await prisma.purchaseOrder.deleteMany({ where: { supplier: { name: { startsWith: 'TEST-Supplier-' } } } });
 
+  // Forecourt module — FuelTransaction.productId is Restrict (default),
+  // so it must go before the product deletes below, same reasoning as
+  // StockAdjustment above. FiscalRecord isn't itself marked with a TEST-
+  // prefix, so we resolve which ones are test data via the FuelTransaction
+  // rows that reference them, before those rows are gone.
+  {
+    const testFuelTransactions = await prisma.fuelTransaction.findMany({
+      where: {
+        OR: [
+          { pump: { code: { startsWith: 'TEST-PUMP-' } } },
+          { attendant: { attendantCode: { startsWith: 'TEST-ATT-' } } },
+          { product: { sku: { startsWith: 'TEST-SKU-' } } },
+        ],
+      },
+      select: { id: true, fiscalRecordId: true },
+    });
+    await prisma.fuelTransaction.deleteMany({ where: { id: { in: testFuelTransactions.map((t) => t.id) } } });
+    await prisma.fiscalRecord.deleteMany({
+      where: { id: { in: testFuelTransactions.map((t) => t.fiscalRecordId).filter(Boolean) } },
+    });
+  }
+  await prisma.attendant.deleteMany({ where: { attendantCode: { startsWith: 'TEST-ATT-' } } });
+  await prisma.pump.deleteMany({ where: { code: { startsWith: 'TEST-PUMP-' } } });
+
   // Matched by product, not just batchNumber prefix — restoreStockForRefund
   // creates its own "RFD-..." batches on refund, not "TEST-BATCH-" ones.
   await prisma.inventoryBatch.deleteMany({ where: { product: { sku: { startsWith: 'TEST-SKU-' } } } });
@@ -403,6 +447,8 @@ module.exports = {
   createTestShift,
   createTestRegister,
   createTestTill,
+  createTestAttendant,
+  createTestPump,
   createTestCustomer,
   createTestSupplier,
   createTestPurchaseOrder,

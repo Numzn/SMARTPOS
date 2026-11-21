@@ -70,6 +70,10 @@ class AuditService {
       SHIFT_HANDOVER: 'SHIFT_HANDOVER',
       REGISTER_CREATED: 'REGISTER_CREATED',
       TILL_CREATED: 'TILL_CREATED',
+      // Forecourt module
+      ATTENDANT_CREATED: 'ATTENDANT_CREATED',
+      PUMP_CREATED: 'PUMP_CREATED',
+      FUEL_TRANSACTION_CREATED: 'FUEL_TRANSACTION_CREATED',
 
       // Business management events (customers, suppliers, purchasing)
       CUSTOMER_CREATE: 'CUSTOMER_CREATE',
